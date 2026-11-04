@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "Microsoft.AspNetCore.OpenApi": {
+        "type": "Direct",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "3M6yO4nv8fmvM/1X7DqQcMxw/ptNLBcUzZt19SBEyfZF32gqZuwoPNnYd1xlDnFvQOGOkZDncf7p9E24blcTkQ==",
+        "dependencies": {
+          "Microsoft.OpenApi": "[2.12.2, 3.0.0)"
+        }
+      },
+      "DnsClient": {
+        "type": "Transitive",
+        "resolved": "1.6.1",
+        "contentHash": "4H/f2uYJOZ+YObZjpY9ABrKZI+JNw3uizp6oMzTXwDw6F+2qIPhpRl/1t68O/6e98+vqNiYGu+lswmwdYUy3gg=="
+      },
+      "Microsoft.OpenApi": {
+        "type": "Transitive",
+        "resolved": "2.12.2",
+        "contentHash": "ZkT7qiJe0Kj0+DTZOZo+xrDy1kNmdsWFQVPIQLNx9ZJ0T9cB2LG7r+Bi60so8/+yg1nkS7QCPadrzsTG4VPKrA=="
+      },
+      "MongoDB.Bson": {
+        "type": "Transitive",
+        "resolved": "3.13.0",
+        "contentHash": "jb4fGQIS1bTFSK2336FP3rBHDQ+UiVKdTAZcoWHeed1xlxvmclnHA8Y4CAQa+Y2KWw3Fz9OIAkXH/KXJL9yRGg=="
+      },
+      "MongoDB.Driver": {
+        "type": "Transitive",
+        "resolved": "3.13.0",
+        "contentHash": "1Ae+OaZRKVsb4KI39tV9rkV48Bth+3pGaEpXVNCu9ueWUF7zVe00GQzK9jjyNDsScIUZJQleHr5ceNaRnWKJqw==",
+        "dependencies": {
+          "DnsClient": "1.6.1",
+          "MongoDB.Bson": "3.13.0",
+          "SharpCompress": "0.48.1",
+          "Snappier": "1.3.1",
+          "ZstdSharp.Port": "0.7.3"
+        }
+      },
+      "SharpCompress": {
+        "type": "Transitive",
+        "resolved": "0.48.1",
+        "contentHash": "SqGaVniGG943Gph/gHhUQUiZPyC7y0tXZyMf0/B2oGsMav9dqs7JJOuUA+xOkwKYaWM2TM7aZQjNK91f4bX71A=="
+      },
+      "Snappier": {
+        "type": "Transitive",
+        "resolved": "1.3.1",
+        "contentHash": "DOdDQiO8YZ5rBtVLY+6CmR1yp9WYoJRgEEktPBrR0tEj9QO2djA/zv0O3DX0OZpEAfosbY8pytQ9tQUogwQsEA=="
+      },
+      "ZstdSharp.Port": {
+        "type": "Transitive",
+        "resolved": "0.7.3",
+        "contentHash": "U9Ix4l4cl58Kzz1rJzj5hoVTjmbx1qGMwzAcbv1j/d3NzrFaESIurQyg+ow4mivCgkE3S413y+U9k4WdnEIkRA=="
+      },
+      "unihome.application": {
+        "type": "Project",
+        "dependencies": {
+          "UniHome.Domain": "[1.0.0, )"
+        }
+      },
+      "unihome.domain": {
+        "type": "Project"
+      },
+      "unihome.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "MongoDB.Driver": "[3.13.0, )",
+          "UniHome.Application": "[1.0.0, )",
+          "UniHome.Domain": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}

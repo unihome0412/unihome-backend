@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/UniHome.Api/UniHome.Api.csproj" />
+    <Project Path="src/UniHome.Application/UniHome.Application.csproj" />
+    <Project Path="src/UniHome.Domain/UniHome.Domain.csproj" />
+    <Project Path="src/UniHome.Infrastructure/UniHome.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj" />
+    <Project Path="tests/UniHome.UnitTests/UniHome.UnitTests.csproj" />
+  </Folder>
+</Solution>
