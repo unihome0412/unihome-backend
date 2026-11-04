@@ -1,11 +1,29 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json.Serialization;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OpenApi;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi;
+using UniHome.Api.Configuration;
 using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
+using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Identity.Login;
+using UniHome.Application.Identity.Logout;
+using UniHome.Application.Identity.RefreshSessions;
 using UniHome.Application.Identity.RegisterAccount;
+using UniHome.Domain.Accounts;
 using UniHome.Infrastructure;
 using UniHome.Infrastructure.Configuration;
 
@@ -28,6 +46,43 @@ if (!builder.Environment.IsDevelopment() &&
 // se registran detrás de sus puertos.
 builder.Services.AddInfrastructure(builder.Configuration);
 
+// La clave JWT se valida después de que todas las fuentes de configuración
+// (incluidas las de pruebas) hayan sido aplicadas. En Development se genera una
+// clave efímera para no guardar secretos en appsettings.
+builder.Services
+    .AddOptions<JwtOptions>()
+    .Configure<IHostEnvironment>((options, environment) =>
+    {
+        if (string.IsNullOrWhiteSpace(options.SigningKey))
+        {
+            if (!environment.IsDevelopment())
+            {
+                throw new InvalidOperationException(
+                    $"Configure {JwtOptions.SectionName}:SigningKey con al menos " +
+                    $"{JwtOptions.MinSigningKeyLength} caracteres fuera de Development.");
+            }
+
+            options.SigningKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+            options.EphemeralSigningKey = true;
+        }
+        else if (options.SigningKey.Length < JwtOptions.MinSigningKeyLength)
+        {
+            throw new InvalidOperationException(
+                $"La clave {JwtOptions.SectionName}:SigningKey debe tener al menos " +
+                $"{JwtOptions.MinSigningKeyLength} caracteres.");
+        }
+
+        if (options.AccessTokenMinutes <= 0 || options.RefreshTokenDays <= 0)
+        {
+            throw new InvalidOperationException(
+                "Las vigencias JWT deben ser mayores que cero.");
+        }
+    })
+    .Validate(
+        options => options.HasSecureSigningKey,
+        $"La clave {JwtOptions.SectionName}:SigningKey no es segura.")
+    .ValidateOnStart();
+
 builder.Services
     .AddControllers()
     .AddJsonOptions(options =>
@@ -38,7 +93,141 @@ builder.Services
     });
 
 builder.Services.AddScoped<RegisterAccountService>();
+builder.Services.AddScoped<LoginService>();
+builder.Services.AddScoped<RefreshSessionService>();
+builder.Services.AddScoped<LogoutService>();
+
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer();
+
+builder.Services
+    .AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptions<JwtOptions>>((options, jwtOptionsAccessor) =>
+    {
+        var jwtOptions = jwtOptionsAccessor.Value;
+
+        options.MapInboundClaims = false;
+        options.SaveToken = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwtOptions.Audience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(jwtOptions.SigningKey!)),
+            ValidateLifetime = true,
+            RequireExpirationTime = true,
+            RequireSignedTokens = true,
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+            ValidTypes = ["JWT"],
+            ClockSkew = TimeSpan.Zero,
+            NameClaimType = "sub"
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var subject = context.Principal?.FindFirst("sub")?.Value;
+                var session = context.Principal?.FindFirst("sid")?.Value;
+
+                if (!Guid.TryParseExact(subject, "N", out var accountId) ||
+                    !Guid.TryParseExact(session, "N", out _))
+                {
+                    context.Fail("El token no contiene un sujeto o una sesión válida.");
+                    return;
+                }
+
+                // BE-SEC-008: una cuenta suspendida o eliminada no puede seguir
+                // usando un access token emitido antes del cambio de estado.
+                var accounts = context.HttpContext.RequestServices
+                    .GetRequiredService<IAccountRepository>();
+
+                var account = await accounts
+                    .FindByIdAsync(accountId, context.HttpContext.RequestAborted)
+                    .ConfigureAwait(false);
+
+                if (account is null ||
+                    account.Status != AccountStatus.Active ||
+                    !account.IsEmailConfirmed)
+                {
+                    context.Fail("La cuenta no está habilitada.");
+                }
+            }
+        };
+    });
+
 builder.Services.AddAuthorization();
+
+builder.Services.Configure<AuthRateLimitOptions>(
+    builder.Configuration.GetSection(AuthRateLimitOptions.SectionName));
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            context.HttpContext.Response.Headers.RetryAfter = Math
+                .Ceiling(retryAfter.TotalSeconds)
+                .ToString(CultureInfo.InvariantCulture);
+        }
+
+        // No se registra la IP ni el correo intentado.
+        var problem = ApiProblemDetails.Create(
+            context.HttpContext,
+            StatusCodes.Status429TooManyRequests,
+            detail: "Demasiados intentos. Intenta de nuevo más tarde.");
+
+        await ApiProblemDetailsWriter
+            .WriteAsync(context.HttpContext, problem, cancellationToken)
+            .ConfigureAwait(false);
+    };
+
+    options.AddPolicy(
+        AuthRateLimitPolicies.Login,
+        httpContext =>
+        {
+            var limits = httpContext.RequestServices
+                .GetRequiredService<IOptions<AuthRateLimitOptions>>()
+                .Value;
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                GetClientPartitionKey(httpContext),
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = Math.Max(1, limits.LoginPermitLimit),
+                    Window = TimeSpan.FromSeconds(Math.Max(1, limits.LoginWindowSeconds)),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        });
+
+    options.AddPolicy(
+        AuthRateLimitPolicies.Refresh,
+        httpContext =>
+        {
+            var limits = httpContext.RequestServices
+                .GetRequiredService<IOptions<AuthRateLimitOptions>>()
+                .Value;
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                GetClientPartitionKey(httpContext),
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = Math.Max(1, limits.RefreshPermitLimit),
+                    Window = TimeSpan.FromSeconds(Math.Max(1, limits.RefreshWindowSeconds)),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        });
+});
+
 builder.Services.AddProblemDetails(options =>
 {
     options.CustomizeProblemDetails = context =>
@@ -72,9 +261,57 @@ builder.Services
         "storage",
         tags: [HealthCheckTags.Ready]);
 
-builder.Services.AddOpenApi("v1");
+builder.Services.AddOpenApi("v1", options =>
+{
+    // Esquema nativo para que el contrato documente el Bearer de logout sin
+    // instalar Scalar ni Swagger UI.
+    options.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes ??=
+            new Dictionary<string, IOpenApiSecurityScheme>(StringComparer.Ordinal);
+        document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            Description = "Token de acceso JWT emitido por POST /api/v1/auth/login."
+        };
+
+        return Task.CompletedTask;
+    });
+
+    options.AddOperationTransformer((operation, context, _) =>
+    {
+        var metadata = context.Description.ActionDescriptor.EndpointMetadata;
+        var requiresAuthentication = metadata.OfType<IAuthorizeData>().Any() &&
+            !metadata.OfType<IAllowAnonymous>().Any();
+
+        if (!requiresAuthentication)
+        {
+            return Task.CompletedTask;
+        }
+
+        operation.Security ??= [];
+        operation.Security.Add(new OpenApiSecurityRequirement
+        {
+            [new OpenApiSecuritySchemeReference("Bearer", context.Document)] = []
+        });
+
+        return Task.CompletedTask;
+    });
+});
 
 var app = builder.Build();
+
+var jwtSettings = app.Services.GetRequiredService<IOptions<JwtOptions>>().Value;
+
+if (jwtSettings.EphemeralSigningKey)
+{
+    app.Logger.LogWarning(
+        "JWT:SigningKey no está configurada. Se usa una clave efímera de Development; " +
+        "los tokens emitidos dejarán de ser válidos al reiniciar el proceso.");
+}
 
 // Errores homogéneos: excepciones no controladas y códigos sin cuerpo.
 app.UseExceptionHandler();
@@ -99,6 +336,8 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
+app.UseRateLimiter();
+app.UseAuthentication();
 app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
@@ -121,5 +360,8 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 app.MapControllers();
 
 app.Run();
+
+static string GetClientPartitionKey(HttpContext context) =>
+    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
 public partial class Program;

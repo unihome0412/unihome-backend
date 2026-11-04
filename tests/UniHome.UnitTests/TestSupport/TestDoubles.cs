@@ -17,14 +17,19 @@ internal sealed class RecordingPasswordHasher : IPasswordHasher
 {
     public int HashCalls { get; private set; }
 
+    public List<(string PasswordHash, string Password)> VerifyCalls { get; } = [];
+
     public string HashPassword(string password)
     {
         HashCalls++;
         return $"hash:{password}";
     }
 
-    public bool VerifyPassword(string passwordHash, string password) =>
-        string.Equals(passwordHash, $"hash:{password}", StringComparison.Ordinal);
+    public bool VerifyPassword(string passwordHash, string password)
+    {
+        VerifyCalls.Add((passwordHash, password));
+        return string.Equals(passwordHash, $"hash:{password}", StringComparison.Ordinal);
+    }
 }
 
 internal sealed class FixedVerificationCodeGenerator : IVerificationCodeGenerator

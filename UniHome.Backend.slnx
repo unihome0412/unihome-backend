@@ -9,4 +9,7 @@
     <Project Path="tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj" />
     <Project Path="tests/UniHome.UnitTests/UniHome.UnitTests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/UniHome.SmtpProbe/UniHome.SmtpProbe.csproj" />
+  </Folder>
 </Solution>

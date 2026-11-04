@@ -1,0 +1,27 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.Configuration;
+
+namespace UniHome.IntegrationTests;
+
+/// <summary>
+/// Fábrica con límites bajos para verificar el 429 sin agotar el límite de las
+/// demás pruebas. La configuración se agrega después de la base para prevalecer.
+/// </summary>
+public sealed class RateLimitedApiFactory : UniHomeApiFactory
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+
+        builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+        {
+            configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Auth:RateLimit:LoginPermitLimit"] = "2",
+                ["Auth:RateLimit:LoginWindowSeconds"] = "60",
+                ["Auth:RateLimit:RefreshPermitLimit"] = "2",
+                ["Auth:RateLimit:RefreshWindowSeconds"] = "60"
+            });
+        });
+    }
+}
