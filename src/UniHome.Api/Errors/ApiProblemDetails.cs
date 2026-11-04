@@ -71,6 +71,7 @@ internal static class ApiProblemDetails
         StatusCodes.Status422UnprocessableEntity => "Regla de negocio no satisfecha.",
         StatusCodes.Status429TooManyRequests => "Demasiadas solicitudes.",
         StatusCodes.Status500InternalServerError => "Error interno del servidor.",
+        StatusCodes.Status503ServiceUnavailable => "Servicio no disponible.",
         _ => "Error en la solicitud."
     };
 }

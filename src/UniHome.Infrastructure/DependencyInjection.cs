@@ -1,8 +1,11 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using UniHome.Application.Abstractions.Storage;
+using UniHome.Application.Identity.Abstractions;
 using UniHome.Infrastructure.Configuration;
+using UniHome.Infrastructure.Identity;
 using UniHome.Infrastructure.Persistence.Mongo;
+using UniHome.Infrastructure.Persistence.Mongo.Accounts;
 
 namespace UniHome.Infrastructure;
 
@@ -23,8 +26,20 @@ public static class DependencyInjection
             .AddOptions<MongoDbOptions>()
             .Bind(configuration.GetSection(MongoDbOptions.SectionName));
 
+        services
+            .AddOptions<VerificationCodeOptions>()
+            .Bind(configuration.GetSection(VerificationCodeOptions.SectionName));
+
         services.AddSingleton<MongoDbClientProvider>();
         services.AddSingleton<IStorageReadinessProbe, MongoStorageReadinessProbe>();
+
+        // M01: puertos de identidad y sus adaptadores.
+        services.AddSingleton<IAccountRepository, MongoAccountRepository>();
+        services.AddSingleton<IPasswordHasher, AspNetCorePasswordHasher>();
+        services.AddSingleton<ISystemClock, SystemClock>();
+        services.AddSingleton<IVerificationCodeGenerator, RandomVerificationCodeGenerator>();
+        services.AddSingleton<IVerificationCodeProtector, HmacVerificationCodeProtector>();
+        services.AddSingleton<IVerificationEmailSender, UnconfiguredVerificationEmailSender>();
 
         return services;
     }

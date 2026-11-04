@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics;
+using UniHome.Application.Identity.Exceptions;
 
 namespace UniHome.Api.Errors;
 
@@ -27,9 +28,12 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         }
 
         var traceId = ApiProblemDetails.GetTraceId(httpContext);
-        var statusCode = exception is BadHttpRequestException badRequest
-            ? badRequest.StatusCode
-            : StatusCodes.Status500InternalServerError;
+        var statusCode = exception switch
+        {
+            BadHttpRequestException badRequest => badRequest.StatusCode,
+            StorageUnavailableException => StatusCodes.Status503ServiceUnavailable,
+            _ => StatusCodes.Status500InternalServerError
+        };
 
         if (statusCode >= StatusCodes.Status500InternalServerError)
         {
