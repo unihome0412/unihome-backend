@@ -174,6 +174,9 @@ builder.Services.Configure<AuthRateLimitOptions>(
 builder.Services.Configure<ProxyOptions>(
     builder.Configuration.GetSection(ProxyOptions.SectionName));
 
+builder.Services.Configure<ApiOptions>(
+    builder.Configuration.GetSection(ApiOptions.SectionName));
+
 // Azure Container Apps termina TLS en su ingress y reenvía HTTP; estos
 // encabezados solo se aplican si Proxy:TrustForwardedHeaders=true. ForwardLimit
 // en 1: no se confía en una cadena de varios valores enviada por el cliente.
@@ -413,9 +416,22 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-if (app.Environment.IsDevelopment())
+var apiOptions = app.Services.GetRequiredService<IOptions<ApiOptions>>().Value;
+
+if (apiOptions.EnableSwagger)
 {
+    // Documento OpenAPI nativo de .NET 10; Swagger UI solo lo renderiza, no lo
+    // genera (sin Swashbuckle.AspNetCore completo). El esquema Bearer y los
+    // requisitos de seguridad por operación ya están en el documento (ver
+    // AddOpenApi arriba), así que el botón "Authorize" de Swagger UI los toma
+    // de ahí sin configuración adicional.
     app.MapOpenApi();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/openapi/v1.json", "UniHome API v1");
+        options.RoutePrefix = "swagger";
+    });
+    app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
 }
 
 app.MapHealthChecks("/health/live", new HealthCheckOptions

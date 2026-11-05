@@ -3,11 +3,11 @@ using System.Text.Json;
 
 namespace UniHome.IntegrationTests;
 
-public sealed class OpenApiDocumentTests : IClassFixture<UniHomeApiFactory>
+public sealed class OpenApiDocumentTests : IClassFixture<SwaggerEnabledApiFactory>
 {
     private readonly HttpClient _client;
 
-    public OpenApiDocumentTests(UniHomeApiFactory factory)
+    public OpenApiDocumentTests(SwaggerEnabledApiFactory factory)
     {
         _client = factory.CreateClient();
     }

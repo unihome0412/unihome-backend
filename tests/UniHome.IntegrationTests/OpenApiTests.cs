@@ -3,17 +3,17 @@ using System.Text.Json;
 
 namespace UniHome.IntegrationTests;
 
-public sealed class OpenApiTests : IClassFixture<UniHomeApiFactory>
+public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
 {
     private readonly HttpClient _client;
 
-    public OpenApiTests(UniHomeApiFactory factory)
+    public OpenApiTests(SwaggerEnabledApiFactory factory)
     {
         _client = factory.CreateClient();
     }
 
     [Fact]
-    public async Task OpenApi_DebeEstarDisponibleEnDesarrollo()
+    public async Task OpenApi_DebeEstarDisponibleConSwaggerActivado()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");
 
