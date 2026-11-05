@@ -2,7 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, develop]
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,8 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  restore-build-test:
-    name: restore / build / test (.NET 10)
+  build-test:
+    name: Build, formato y pruebas (.NET 10)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -34,6 +36,9 @@ jobs:
 
       - name: Build
         run: dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
+
+      - name: Verificar formato
+        run: dotnet format UniHome.Backend.slnx --verify-no-changes --no-restore
 
       - name: Test unit
         run: >-
@@ -59,5 +64,113 @@ jobs:
         with:
           name: test-results
           path: TestResults/**/*.trx
+          if-no-files-found: ignore
+          retention-days: 7
+
+  dependency-scan:
+    name: Dependencias vulnerables (dotnet list package)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore
+        run: dotnet restore UniHome.Backend.slnx --locked-mode
+
+      - name: Listar paquetes vulnerables
+        run: >-
+          dotnet list UniHome.Backend.slnx package --vulnerable --include-transitive
+          --format json --output-version 1 > vulnerable-packages.json
+
+      - name: Mostrar resultado
+        run: cat vulnerable-packages.json
+
+      - name: Bloquear si hay severidad High o Critical
+        run: |
+          set -euo pipefail
+          if ! jq -e '(.projects | type) == "array"' vulnerable-packages.json > /dev/null 2>&1; then
+            echo "::error::vulnerable-packages.json no es JSON válido o no contiene '.projects' como arreglo; no se puede evaluar severidad."
+            exit 1
+          fi
+          if jq -e '
+            [
+              (.projects[]?.frameworks[]? // empty)
+              | (.topLevelPackages[]?, .transitivePackages[]?)
+              | .vulnerabilities[]?
+              | select(.severity == "High" or .severity == "Critical")
+            ] | length > 0
+          ' vulnerable-packages.json > /dev/null; then
+            echo "::error::Se encontraron paquetes con vulnerabilidades High o Critical."
+            jq '
+              [
+                .projects[]? as $p | $p.frameworks[]?
+                | (.topLevelPackages[]?, .transitivePackages[]?)
+                | select(.vulnerabilities != null)
+                | select(.vulnerabilities[]?.severity == "High" or .vulnerabilities[]?.severity == "Critical")
+                | {project: $p.path, id, vulnerabilities}
+              ]
+            ' vulnerable-packages.json
+            exit 1
+          fi
+          echo "Sin vulnerabilidades High/Critical en dependencias directas o transitivas."
+
+      - name: Upload reporte de dependencias
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vulnerable-packages-report
+          path: vulnerable-packages.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  secret-scan:
+    name: Gitleaks - historial completo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      GITLEAKS_VERSION: '8.30.1'
+      GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+
+    steps:
+      - name: Checkout (historial completo)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Instalar Gitleaks (CLI fijado por versión y checksum, sin Action con licencia)
+        run: |
+          set -euo pipefail
+          curl -sSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+
+      - name: Escanear historial completo
+        run: |
+          set -euo pipefail
+          ./gitleaks detect \
+            --source . \
+            --redact \
+            --report-format json \
+            --report-path gitleaks-report.json \
+            -v
+
+      - name: Upload reporte de Gitleaks
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
           if-no-files-found: ignore
           retention-days: 7
