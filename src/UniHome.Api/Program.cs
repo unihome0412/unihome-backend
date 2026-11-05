@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.AspNetCore.RateLimiting;
@@ -169,6 +170,25 @@ builder.Services.AddAuthorization();
 
 builder.Services.Configure<AuthRateLimitOptions>(
     builder.Configuration.GetSection(AuthRateLimitOptions.SectionName));
+
+builder.Services.Configure<ProxyOptions>(
+    builder.Configuration.GetSection(ProxyOptions.SectionName));
+
+// Azure Container Apps termina TLS en su ingress y reenvía HTTP; estos
+// encabezados solo se aplican si Proxy:TrustForwardedHeaders=true. ForwardLimit
+// en 1: no se confía en una cadena de varios valores enviada por el cliente.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardLimit = 1;
+
+    // El valor predeterminado solo confía en el salto inmediato si viene de
+    // loopback. El ingress de Container Apps no tiene una IP conocida y fija;
+    // activar Proxy:TrustForwardedHeaders ya es la declaración explícita de que
+    // la topología solo permite llegar al contenedor a través de ese ingress.
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -372,6 +392,16 @@ app.UseStatusCodePages(async statusCodeContext =>
         .WriteAsync(http, problem, http.RequestAborted)
         .ConfigureAwait(false);
 });
+
+var proxyOptions = app.Services.GetRequiredService<IOptions<ProxyOptions>>().Value;
+
+if (proxyOptions.TrustForwardedHeaders)
+{
+    // Debe ir antes de HSTS, HTTPS redirection, rate limiter y autenticación:
+    // todos ellos deben ver el esquema/IP ya reescritos, no los del salto HTTP
+    // interno entre el ingress de Container Apps y este proceso.
+    app.UseForwardedHeaders();
+}
 
 if (!app.Environment.IsDevelopment())
 {
