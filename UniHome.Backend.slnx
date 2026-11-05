@@ -10,6 +10,7 @@
     <Project Path="tests/UniHome.UnitTests/UniHome.UnitTests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj" />
     <Project Path="tools/UniHome.SmtpProbe/UniHome.SmtpProbe.csproj" />
   </Folder>
 </Solution>

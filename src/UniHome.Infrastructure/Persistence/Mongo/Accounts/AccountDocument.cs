@@ -15,7 +15,7 @@ public sealed class AccountDocument
     [BsonElement("nombreCompleto")]
     public string FullName { get; set; } = string.Empty;
 
-    [BsonElement("correoNormalizado")]
+    [BsonElement(MongoIdentitySchema.AccountsNormalizedEmailField)]
     public string NormalizedEmail { get; set; } = string.Empty;
 
     [BsonElement("fechaNacimiento")]

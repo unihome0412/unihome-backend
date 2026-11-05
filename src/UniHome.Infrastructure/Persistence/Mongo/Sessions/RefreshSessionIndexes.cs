@@ -4,10 +4,10 @@ namespace UniHome.Infrastructure.Persistence.Mongo.Sessions;
 
 internal static class RefreshSessionIndexes
 {
-    public const string CollectionName = "sesiones_refresh";
-    public const string UniqueCurrentTokenIndexName = "ux_sesiones_refresh_token_actual";
-    public const string AccountIndexName = "ix_sesiones_refresh_cuenta";
-    public const string ExpirationTtlIndexName = "ttl_sesiones_refresh_expiracion";
+    public const string CollectionName = MongoIdentitySchema.SessionsCollection;
+    public const string UniqueCurrentTokenIndexName = MongoIdentitySchema.SessionsUniqueCurrentTokenIndex;
+    public const string AccountIndexName = MongoIdentitySchema.SessionsAccountIndex;
+    public const string ExpirationTtlIndexName = MongoIdentitySchema.SessionsExpirationTtlIndex;
 
     /// <summary>
     /// El hash vigente es único para detectar colisiones y apoyar la rotación.
@@ -17,7 +17,7 @@ internal static class RefreshSessionIndexes
     [
         new(
             Builders<RefreshSessionDocument>.IndexKeys
-                .Ascending(document => document.CurrentTokenHash),
+                .Ascending(MongoIdentitySchema.SessionsCurrentTokenHashField),
             new CreateIndexOptions
             {
                 Unique = true,
@@ -25,11 +25,11 @@ internal static class RefreshSessionIndexes
             }),
         new(
             Builders<RefreshSessionDocument>.IndexKeys
-                .Ascending(document => document.AccountId),
+                .Ascending(MongoIdentitySchema.SessionsAccountIdField),
             new CreateIndexOptions { Name = AccountIndexName }),
         new(
             Builders<RefreshSessionDocument>.IndexKeys
-                .Ascending(document => document.ExpiresAtUtc),
+                .Ascending(MongoIdentitySchema.SessionsExpiresAtUtcField),
             new CreateIndexOptions
             {
                 ExpireAfter = TimeSpan.Zero,

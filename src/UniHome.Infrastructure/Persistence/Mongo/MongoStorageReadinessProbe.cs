@@ -47,6 +47,13 @@ internal sealed class MongoStorageReadinessProbe : IStorageReadinessProbe
                 .RunCommandAsync(ping, ReadPreference.Primary, timeout.Token)
                 .ConfigureAwait(false);
 
+            await MongoIdentitySchemaGuard.EnsureAsync(
+                database.GetCollection<BsonDocument>(MongoIdentitySchema.AccountsCollection), timeout.Token)
+                .ConfigureAwait(false);
+            await MongoIdentitySchemaGuard.EnsureAsync(
+                database.GetCollection<BsonDocument>(MongoIdentitySchema.SessionsCollection), timeout.Token)
+                .ConfigureAwait(false);
+
             return StorageReadiness.Ready();
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -65,7 +72,7 @@ internal sealed class MongoStorageReadinessProbe : IStorageReadinessProbe
                 exception.GetType().FullName,
                 Activity.Current?.Id);
 
-            return StorageReadiness.Unavailable("No fue posible contactar MongoDB.");
+            return StorageReadiness.Unavailable("Almacenamiento no disponible o esquema de identidad no preparado.");
         }
     }
 }

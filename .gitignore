@@ -5,6 +5,7 @@
 *.suo
 .env
 .env.*
+*.env
 TestResults/
 coverage/
 *.trx

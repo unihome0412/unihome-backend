@@ -11,15 +11,12 @@ namespace UniHome.Infrastructure.Persistence.Mongo.Sessions;
 /// <summary>
 /// Adaptador MongoDB de sesiones. La rotación usa findOneAndUpdate condicionado
 /// por el hash vigente para que solo una solicitud consuma el refresh token.
+/// Los índices los crea la migración versionada; la API no ejecuta DDL.
 /// </summary>
-internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository, IDisposable
+internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository
 {
     private readonly MongoDbClientProvider _clientProvider;
     private readonly ILogger<MongoRefreshSessionRepository> _logger;
-    private readonly SemaphoreSlim _indexGate = new(1, 1);
-
-    private bool _indexesEnsured;
-    private bool _disposed;
 
     public MongoRefreshSessionRepository(
         MongoDbClientProvider clientProvider,
@@ -209,8 +206,7 @@ internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository,
         }
     }
 
-    private async Task<IMongoCollection<RefreshSessionDocument>> GetCollectionAsync(
-        CancellationToken cancellationToken)
+    private async Task<IMongoCollection<RefreshSessionDocument>> GetCollectionAsync(CancellationToken cancellationToken)
     {
         if (!_clientProvider.IsConfigured)
         {
@@ -220,46 +216,8 @@ internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository,
         var collection = _clientProvider
             .GetDatabase()
             .GetCollection<RefreshSessionDocument>(RefreshSessionIndexes.CollectionName);
-
-        await EnsureIndexesAsync(collection, cancellationToken).ConfigureAwait(false);
-
+        await MongoIdentitySchemaGuard.EnsureAsync(collection, cancellationToken).ConfigureAwait(false);
         return collection;
-    }
-
-    private async Task EnsureIndexesAsync(
-        IMongoCollection<RefreshSessionDocument> collection,
-        CancellationToken cancellationToken)
-    {
-        if (Volatile.Read(ref _indexesEnsured))
-        {
-            return;
-        }
-
-        await _indexGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            if (_indexesEnsured)
-            {
-                return;
-            }
-
-            await collection
-                .Indexes
-                .CreateManyAsync(RefreshSessionIndexes.All, cancellationToken)
-                .ConfigureAwait(false);
-
-            Volatile.Write(ref _indexesEnsured, true);
-        }
-        catch (MongoException exception)
-        {
-            LogStorageFailure(exception);
-            throw new StorageUnavailableException();
-        }
-        finally
-        {
-            _indexGate.Release();
-        }
     }
 
     private static RefreshSessionDocument ToDocument(RefreshSession session) =>
@@ -314,14 +272,4 @@ internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository,
             Activity.Current?.Id);
     }
 
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        _indexGate.Dispose();
-    }
 }

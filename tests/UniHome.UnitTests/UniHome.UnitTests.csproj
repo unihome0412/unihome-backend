@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\UniHome.Application\UniHome.Application.csproj" />
     <ProjectReference Include="..\..\src\UniHome.Infrastructure\UniHome.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\tools\UniHome.MongoMigrator\UniHome.MongoMigrator.csproj" />
   </ItemGroup>
 
 </Project>

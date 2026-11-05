@@ -9,10 +9,11 @@ using UniHome.Domain.Accounts;
 namespace UniHome.Infrastructure.Persistence.Mongo.Accounts;
 
 /// <summary>
-/// Adaptador MongoDB del puerto de cuentas. Crea el índice único de correo de forma
-/// perezosa e idempotente, y traduce el error de clave duplicada a un conflicto.
+/// Adaptador MongoDB del puerto de cuentas. El índice único lo crea la migración
+/// versionada, no el proceso de la API; aquí solo se traduce el error de clave
+/// duplicada a un conflicto.
 /// </summary>
-internal sealed class MongoAccountRepository : IAccountRepository, IDisposable
+internal sealed class MongoAccountRepository : IAccountRepository
 {
     private const int DuplicateKeyCode = 11000;
 
@@ -20,10 +21,6 @@ internal sealed class MongoAccountRepository : IAccountRepository, IDisposable
 
     private readonly MongoDbClientProvider _clientProvider;
     private readonly ILogger<MongoAccountRepository> _logger;
-    private readonly SemaphoreSlim _indexGate = new(1, 1);
-
-    private bool _indexesEnsured;
-    private bool _disposed;
 
     public MongoAccountRepository(
         MongoDbClientProvider clientProvider,
@@ -140,8 +137,7 @@ internal sealed class MongoAccountRepository : IAccountRepository, IDisposable
         }
     }
 
-    private async Task<IMongoCollection<AccountDocument>> GetCollectionAsync(
-        CancellationToken cancellationToken)
+    private async Task<IMongoCollection<AccountDocument>> GetCollectionAsync(CancellationToken cancellationToken)
     {
         if (!_clientProvider.IsConfigured)
         {
@@ -151,48 +147,8 @@ internal sealed class MongoAccountRepository : IAccountRepository, IDisposable
         var collection = _clientProvider
             .GetDatabase()
             .GetCollection<AccountDocument>(AccountIndexes.CollectionName);
-
-        await EnsureIndexesAsync(collection, cancellationToken).ConfigureAwait(false);
-
+        await MongoIdentitySchemaGuard.EnsureAsync(collection, cancellationToken).ConfigureAwait(false);
         return collection;
-    }
-
-    private async Task EnsureIndexesAsync(
-        IMongoCollection<AccountDocument> collection,
-        CancellationToken cancellationToken)
-    {
-        if (Volatile.Read(ref _indexesEnsured))
-        {
-            return;
-        }
-
-        await _indexGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            if (_indexesEnsured)
-            {
-                return;
-            }
-
-            await collection
-                .Indexes
-                .CreateOneAsync(
-                    AccountIndexes.UniqueNormalizedEmail,
-                    cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-
-            Volatile.Write(ref _indexesEnsured, true);
-        }
-        catch (MongoException exception)
-        {
-            LogStorageFailure(exception);
-            throw new StorageUnavailableException();
-        }
-        finally
-        {
-            _indexGate.Release();
-        }
     }
 
     private static bool IsDuplicateKey(MongoWriteException exception) =>
@@ -275,14 +231,4 @@ internal sealed class MongoAccountRepository : IAccountRepository, IDisposable
             Activity.Current?.Id);
     }
 
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        _indexGate.Dispose();
-    }
 }

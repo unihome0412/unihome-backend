@@ -12,16 +12,16 @@ public sealed class RefreshSessionDocument
     [BsonId]
     public string Id { get; set; } = string.Empty;
 
-    [BsonElement("cuentaId")]
+    [BsonElement(MongoIdentitySchema.SessionsAccountIdField)]
     public string AccountId { get; set; } = string.Empty;
 
-    [BsonElement("hashRefreshActual")]
+    [BsonElement(MongoIdentitySchema.SessionsCurrentTokenHashField)]
     public string CurrentTokenHash { get; set; } = string.Empty;
 
     [BsonElement("refreshEmitidoEnUtc")]
     public DateTime CurrentTokenIssuedAtUtc { get; set; }
 
-    [BsonElement("expiraEnUtc")]
+    [BsonElement(MongoIdentitySchema.SessionsExpiresAtUtcField)]
     public DateTime ExpiresAtUtc { get; set; }
 
     [BsonElement("tokensUsados")]

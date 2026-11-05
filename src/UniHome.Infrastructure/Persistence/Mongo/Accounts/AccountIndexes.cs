@@ -4,15 +4,15 @@ namespace UniHome.Infrastructure.Persistence.Mongo.Accounts;
 
 internal static class AccountIndexes
 {
-    public const string CollectionName = "cuentas";
-    public const string UniqueEmailIndexName = "ux_cuentas_correo_normalizado";
+    public const string CollectionName = MongoIdentitySchema.AccountsCollection;
+    public const string UniqueEmailIndexName = MongoIdentitySchema.AccountsUniqueEmailIndex;
 
     /// <summary>
-    /// Índice único sobre el correo normalizado. Es la garantía definitiva ante
-    /// registros concurrentes con el mismo correo; la comprobación previa no basta.
+    /// Índice único sobre el correo normalizado. La migración versionada es la
+    /// única responsable de crearlo; el repositorio no ejecuta DDL.
     /// </summary>
     public static CreateIndexModel<AccountDocument> UniqueNormalizedEmail { get; } = new(
-        Builders<AccountDocument>.IndexKeys.Ascending(document => document.NormalizedEmail),
+        Builders<AccountDocument>.IndexKeys.Ascending(MongoIdentitySchema.AccountsNormalizedEmailField),
         new CreateIndexOptions
         {
             Unique = true,
