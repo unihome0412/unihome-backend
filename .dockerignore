@@ -8,8 +8,8 @@ opencode.json
 docs
 tests
 TestResults
-bin
-obj
-.env
-.env.*
-*.env
+**/bin
+**/obj
+**/.env
+**/.env.*
+**/*.env
