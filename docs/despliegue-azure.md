@@ -1,9 +1,10 @@
 # Despliegue en Azure Container Apps
 
 **Estado (2026-11-05):** desplegado en un entorno de desarrollo real, en la
-suscripción "Azure subscription 1", región `eastus`. `/health/live` y
-`/health/ready` responden `200` y HTTP redirige a HTTPS sin bucle (verificado).
-**No se registró ninguna cuenta real todavía** y no se tocó `main`.
+suscripción "Azure subscription 1", región `eastus`, imagen `unihome-api:v2`.
+`/health/live` y `/health/ready` responden `200`, HTTP redirige a HTTPS sin
+bucle, y Swagger UI está disponible de forma opcional vía
+`Api__EnableSwagger` (ver sección dedicada). **No se tocó `main`.**
 
 | Recurso | Nombre | Tipo/plan |
 |---|---|---|
@@ -14,6 +15,39 @@ suscripción "Azure subscription 1", región `eastus`. `/health/live` y
 | Container App | `unihome-api` | 0.25 vCPU / 0.5 GiB, 1–1 réplicas |
 
 URL pública: `https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io`
+Swagger UI (demo, ver sección dedicada): `https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io/swagger`
+
+## Swagger UI (demostración)
+
+Swagger UI renderiza el documento OpenAPI **nativo** de .NET 10
+(`Microsoft.AspNetCore.OpenApi`, vía `MapOpenApi()`); no se usa el generador de
+Swashbuckle, solo su paquete `Swashbuckle.AspNetCore.SwaggerUI` para la interfaz.
+Controlado por `Api__EnableSwagger`, **desactivado por defecto**:
+
+- `Api__EnableSwagger=false` (o ausente): `/swagger` y `/openapi/v1.json`
+  responden `404`; `/` no tiene ninguna ruta mapeada.
+- `Api__EnableSwagger=true`: `/swagger` y `/openapi/v1.json` responden `200`;
+  `/` redirige (`302`) a `/swagger`.
+
+El documento incluye un `servers` con la URL pública exacta en `https`
+(detectada de la propia solicitud), así que el botón "Authorize" (esquema
+Bearer, ya documentado en el propio OpenAPI) y cualquier solicitud de "Try it
+out" desde Swagger UI usan HTTPS, nunca HTTP plano.
+
+Activar/desactivar en el entorno ya desplegado:
+
+```powershell
+# Activar (demo)
+az containerapp update --name unihome-api --resource-group rg-unihome-dev `
+  --set-env-vars "Api__EnableSwagger=true"
+
+# Desactivar despues de la demo
+az containerapp update --name unihome-api --resource-group rg-unihome-dev `
+  --set-env-vars "Api__EnableSwagger=false"
+```
+
+`--set-env-vars` agrega o actualiza variables sin tocar las demás ya
+configuradas (secretos incluidos).
 
 ## Variables de entorno requeridas
 
@@ -39,6 +73,7 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Smtp__FromEmail` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `Smtp__FromName` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `Proxy__TrustForwardedHeaders` | No | `ProxyOptions` (`Proxy`) | Sí, en `true`, solo si el contenedor corre detrás del ingress de Container Apps |
+| `Api__EnableSwagger` | No | `ApiOptions` (`Api`) | No; `false` por defecto, activar solo para demostraciones puntuales |
 
 Si no existe ninguna clave bajo `Smtp`, el registro funciona sin enviar correo
 real (`correoConfirmacionEnviado: false`); si existe alguna, todas las
@@ -188,10 +223,10 @@ Remove-Item app.yaml
 
 ```powershell
 az acr login --name acrunihomedev
-docker build -t acrunihomedev.azurecr.io/unihome-api:v2 .
-docker push acrunihomedev.azurecr.io/unihome-api:v2
+docker build -t acrunihomedev.azurecr.io/unihome-api:v3 .
+docker push acrunihomedev.azurecr.io/unihome-api:v3
 az containerapp update --name unihome-api --resource-group rg-unihome-dev `
-  --image acrunihomedev.azurecr.io/unihome-api:v2
+  --image acrunihomedev.azurecr.io/unihome-api:v3
 ```
 
 Container Apps crea una revisión nueva y la activa automáticamente
