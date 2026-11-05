@@ -1,9 +1,19 @@
 # Despliegue en Azure Container Apps
 
-**Estado:** preparación de la imagen y de la configuración. **No se creó ningún
-recurso en Azure, no se inició sesión en Azure CLI y no se desplegó nada.** Este
-documento solo describe las variables de entorno requeridas y referencia el
-`Dockerfile` ya existente en la raíz del repositorio.
+**Estado (2026-11-05):** desplegado en un entorno de desarrollo real, en la
+suscripción "Azure subscription 1", región `eastus`. `/health/live` y
+`/health/ready` responden `200` y HTTP redirige a HTTPS sin bucle (verificado).
+**No se registró ninguna cuenta real todavía** y no se tocó `main`.
+
+| Recurso | Nombre | Tipo/plan |
+|---|---|---|
+| Grupo de recursos | `rg-unihome-dev` | — |
+| Log Analytics | `log-unihome-dev` | Retención 30 días (por defecto) |
+| Azure Container Registry | `acrunihomedev` | Basic |
+| Entorno de Container Apps | `cae-unihome-dev` | Consumption |
+| Container App | `unihome-api` | 0.25 vCPU / 0.5 GiB, 1–1 réplicas |
+
+URL pública: `https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io`
 
 ## Variables de entorno requeridas
 
@@ -68,15 +78,166 @@ Construcción local, sin publicar a ningún registro (verificación, no desplieg
 docker build -t unihome-api:local .
 ```
 
-## Pendiente antes de desplegar (fuera de alcance de este documento)
+## Crear los recursos desde cero
 
-- Crear el entorno de Container Apps, el Container App y el registro de
-  contenedor (ACR u otro) — requiere autorización explícita y sesión de Azure,
-  ninguna de las dos existe todavía.
-- Configurar los *secrets* de Container Apps con los valores reales de la
-  tabla anterior; nunca escribir esos valores en este repositorio.
-- Decidir y documentar la estrategia de CI/CD de imagen (build + push) una vez
-  autorizado el despliegue; hoy el `Dockerfile` solo se construye y prueba
-  localmente.
-- Revisar `/health/live` y `/health/ready` como *probes* de Container Apps
-  (liveness/readiness) cuando se configure el recurso.
+Requiere sesión iniciada (`az login`) con la suscripción "Azure subscription 1"
+activa, y el archivo de secretos local con las 9 variables no generadas aquí
+(nunca en el repositorio). Ningún comando de esta sección imprime valores
+sensibles: los secretos sensibles (`MongoDb__ConnectionString`,
+`Smtp__Username`, `Smtp__Password`, `Jwt__SigningKey`,
+`VerificationCode__HmacSecret`) se cargan desde un script externo al
+repositorio y se fijan directamente como *secrets* de Container Apps.
+
+```powershell
+az group create --name rg-unihome-dev --location eastus
+
+az monitor log-analytics workspace create `
+  --resource-group rg-unihome-dev --workspace-name log-unihome-dev --location eastus
+
+az acr create --resource-group rg-unihome-dev --name acrunihomedev `
+  --sku Basic --location eastus --admin-enabled true
+
+az acr login --name acrunihomedev
+docker build -t acrunihomedev.azurecr.io/unihome-api:v1 .
+docker push acrunihomedev.azurecr.io/unihome-api:v1
+
+$logId = az monitor log-analytics workspace show --resource-group rg-unihome-dev `
+  --workspace-name log-unihome-dev --query customerId -o tsv
+$logKey = az monitor log-analytics workspace get-shared-keys --resource-group rg-unihome-dev `
+  --workspace-name log-unihome-dev --query primarySharedKey -o tsv
+az containerapp env create --name cae-unihome-dev --resource-group rg-unihome-dev `
+  --location eastus --logs-workspace-id $logId --logs-workspace-key $logKey
+
+$acrUser = az acr credential show --name acrunihomedev --query username -o tsv
+$acrPass = az acr credential show --name acrunihomedev --query "passwords[0].value" -o tsv
+az containerapp create --name unihome-api --resource-group rg-unihome-dev `
+  --environment cae-unihome-dev --image acrunihomedev.azurecr.io/unihome-api:v1 `
+  --registry-server acrunihomedev.azurecr.io --registry-username $acrUser --registry-password $acrPass `
+  --target-port 8080 --ingress external --cpu 0.25 --memory 0.5Gi `
+  --min-replicas 1 --max-replicas 1
+```
+
+`ACR Tasks` (`az acr build`) está bloqueado en esta suscripción
+(`TasksOperationsNotAllowed`); por eso la imagen se construye localmente con
+Docker y se sube con `docker push` en vez de `az acr build`.
+
+Después, los *secrets* (valores reales, nunca en texto en comandos
+compartidos ni en este documento — usar variables en memoria de un script
+externo al repositorio) y las variables de entorno:
+
+```powershell
+az containerapp secret set --name unihome-api --resource-group rg-unihome-dev --secrets `
+  "mongodb-connection-string=<valor real>" `
+  "smtp-username=<valor real>" `
+  "smtp-password=<valor real>" `
+  "jwt-signing-key=<aleatorio >= 64 bytes, generado en el script>" `
+  "verification-code-hmac-secret=<aleatorio >= 64 bytes, generado en el script>"
+
+az containerapp update --name unihome-api --resource-group rg-unihome-dev --set-env-vars `
+  "ASPNETCORE_ENVIRONMENT=Production" `
+  "Proxy__TrustForwardedHeaders=true" `
+  "Jwt__Issuer=UniHome" `
+  "Jwt__Audience=UniHome.Mobile" `
+  "MongoDb__DatabaseName=<valor real>" `
+  "Smtp__Host=<valor real>" `
+  "Smtp__Port=<valor real>" `
+  "Smtp__UseStartTls=<valor real>" `
+  "Smtp__FromEmail=<valor real>" `
+  "Smtp__FromName=<valor real>" `
+  "MongoDb__ConnectionString=secretref:mongodb-connection-string" `
+  "Smtp__Username=secretref:smtp-username" `
+  "Smtp__Password=secretref:smtp-password" `
+  "Jwt__SigningKey=secretref:jwt-signing-key" `
+  "VerificationCode__HmacSecret=secretref:verification-code-hmac-secret"
+```
+
+**Nota de PowerShell:** si alguno de estos valores (en particular
+`MongoDb__ConnectionString`) contiene `&`, invocar `az.cmd` directo desde
+PowerShell puede hacer que `cmd.exe` lo interprete como separador de
+comandos. La forma confiable es invocar el intérprete real del CLI sin pasar
+por el envoltorio `.cmd`:
+
+```powershell
+& "C:\Program Files\Microsoft SDKs\Azure\CLI2\python.exe" -IBm azure.cli containerapp secret set ...
+```
+
+### Probes de liveness y readiness
+
+El CLI de `containerapp` no tiene una bandera directa para probes; se
+exportan y se vuelven a aplicar vía YAML (sin tocar nada más del recurso):
+
+```powershell
+az containerapp show --name unihome-api --resource-group rg-unihome-dev -o yaml > app.yaml
+# Insertar en properties.template.containers[0], junto a "resources":
+#   probes:
+#   - type: Liveness
+#     httpGet: { path: /health/live, port: 8080 }
+#     initialDelaySeconds: 5
+#     periodSeconds: 10
+#     failureThreshold: 3
+#   - type: Readiness
+#     httpGet: { path: /health/ready, port: 8080 }
+#     initialDelaySeconds: 5
+#     periodSeconds: 10
+#     failureThreshold: 3
+az containerapp update --name unihome-api --resource-group rg-unihome-dev --yaml app.yaml
+Remove-Item app.yaml
+```
+
+## Redesplegar una nueva versión de la imagen
+
+```powershell
+az acr login --name acrunihomedev
+docker build -t acrunihomedev.azurecr.io/unihome-api:v2 .
+docker push acrunihomedev.azurecr.io/unihome-api:v2
+az containerapp update --name unihome-api --resource-group rg-unihome-dev `
+  --image acrunihomedev.azurecr.io/unihome-api:v2
+```
+
+Container Apps crea una revisión nueva y la activa automáticamente
+(`activeRevisionsMode: Single`); la anterior queda inactiva, no se elimina de
+inmediato.
+
+## Verificar
+
+```powershell
+curl.exe https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io/health/live
+curl.exe https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io/health/ready
+curl.exe -I http://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io/health/live
+```
+
+## Eliminar todos los recursos (control de costo)
+
+Un solo comando elimina el grupo completo (ACR, entorno, Container App y Log
+Analytics) y detiene cualquier cargo asociado:
+
+```powershell
+az group delete --name rg-unihome-dev --yes --no-wait
+```
+
+## Costo esperado
+
+- **Container Apps (plan Consumption):** con 1 réplica mínima fija de 0.25
+  vCPU / 0.5 GiB corriendo permanentemente, se cobra por ese consumo continuo
+  (no hay escala a cero porque `--min-replicas 1`); el nivel gratuito mensual
+  de Consumption normalmente no cubre una réplica encendida 24/7 completa.
+- **Azure Container Registry (Basic):** costo fijo mensual bajo (~5 USD/mes a
+  precios públicos de referencia), más el almacenamiento de la imagen (pocos
+  MB en este caso).
+- **Log Analytics:** las primeras GB de ingestión por mes suelen estar en el
+  nivel gratuito; el consumo de un solo contenedor pequeño es bajo.
+- No se activó pago por uso adicional ni se cambió el plan de la suscripción;
+  solo se usaron los recursos explícitamente autorizados. Verificar el costo
+  real en Azure Cost Management, no asumir estas cifras como facturación
+  definitiva.
+
+## Pendiente
+
+- Decidir y documentar la estrategia de CI/CD de imagen (build + push
+  automatizado); hoy el build/push es manual desde esta máquina.
+- Evaluar reemplazar las credenciales admin del ACR por una identidad
+  administrada con rol `AcrPull`, en vez de usuario/contraseña del registro.
+- Registrar una cuenta real de prueba contra este despliegue (explícitamente
+  fuera de alcance de esta tarea).
+- `ACR Tasks` sigue bloqueado en esta suscripción; si se necesita build remoto
+  más adelante, abrir un caso de soporte de Azure.
