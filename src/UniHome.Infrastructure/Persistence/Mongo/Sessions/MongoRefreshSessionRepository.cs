@@ -206,6 +206,40 @@ internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository
         }
     }
 
+    public async Task RevokeAllForAccountAsync(
+        Guid accountId,
+        DateTimeOffset now,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<RefreshSessionDocument>.Filter.And(
+                Builders<RefreshSessionDocument>.Filter.Eq(
+                    document => document.AccountId,
+                    accountId.ToString("N", CultureInfo.InvariantCulture)),
+                Builders<RefreshSessionDocument>.Filter.Eq(
+                    document => document.RevokedAtUtc,
+                    null));
+
+            var update = Builders<RefreshSessionDocument>.Update
+                .Set(document => document.RevokedAtUtc, now.UtcDateTime)
+                .Set(document => document.RevokedReason, reason);
+
+            await collection
+                .UpdateManyAsync(filter, update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     private async Task<IMongoCollection<RefreshSessionDocument>> GetCollectionAsync(CancellationToken cancellationToken)
     {
         if (!_clientProvider.IsConfigured)

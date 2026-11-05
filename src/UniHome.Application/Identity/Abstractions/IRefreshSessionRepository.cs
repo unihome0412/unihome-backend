@@ -44,4 +44,14 @@ public interface IRefreshSessionRepository
         DateTimeOffset now,
         string reason,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// HU-096: revoca todas las sesiones activas de la cuenta (todos los
+    /// dispositivos), a diferencia de logout que solo afecta la sesión actual.
+    /// </summary>
+    Task RevokeAllForAccountAsync(
+        Guid accountId,
+        DateTimeOffset now,
+        string reason,
+        CancellationToken cancellationToken = default);
 }

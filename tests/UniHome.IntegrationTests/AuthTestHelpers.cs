@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using UniHome.Api.Contracts.Auth;
 using UniHome.Domain.Accounts;
@@ -25,6 +26,24 @@ internal static class AuthTestHelpers
             Password,
             status,
             emailConfirmed);
+
+        await factory.Accounts.AddAsync(account);
+        return account;
+    }
+
+    public static async Task<Account> SeedUnconfirmedAccountWithVerificationAsync(
+        UniHomeApiFactory factory,
+        string email)
+    {
+        var account = TestSupport.TestAccountFactory.Create(
+            email,
+            Password,
+            AccountStatus.Active,
+            emailConfirmed: false);
+
+        account.IssueEmailVerification(
+            Convert.ToBase64String(Encoding.UTF8.GetBytes($"protected:{email}")),
+            DateTimeOffset.UtcNow);
 
         await factory.Accounts.AddAsync(account);
         return account;

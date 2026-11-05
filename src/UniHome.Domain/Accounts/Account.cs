@@ -24,7 +24,8 @@ public sealed class Account
         DateTimeOffset createdAt,
         DateTimeOffset? emailConfirmedAt,
         VerificationCode? emailVerification,
-        IEnumerable<DateTimeOffset> verificationResendAttempts)
+        IEnumerable<DateTimeOffset> verificationResendAttempts,
+        DateTimeOffset? deletedAt)
     {
         Id = id;
         FullName = fullName;
@@ -39,6 +40,7 @@ public sealed class Account
         EmailConfirmedAt = emailConfirmedAt;
         EmailVerification = emailVerification;
         _verificationResendAttempts = [.. verificationResendAttempts];
+        DeletedAt = deletedAt;
     }
 
     public Guid Id { get; }
@@ -64,6 +66,8 @@ public sealed class Account
     public DateTimeOffset? EmailConfirmedAt { get; private set; }
 
     public VerificationCode? EmailVerification { get; private set; }
+
+    public DateTimeOffset? DeletedAt { get; private set; }
 
     public IReadOnlyList<DateTimeOffset> VerificationResendAttempts =>
         _verificationResendAttempts.AsReadOnly();
@@ -123,7 +127,8 @@ public sealed class Account
             now,
             emailConfirmedAt: null,
             emailVerification: null,
-            verificationResendAttempts: []);
+            verificationResendAttempts: [],
+            deletedAt: null);
     }
 
     public static Account Restore(
@@ -139,7 +144,8 @@ public sealed class Account
         DateTimeOffset createdAt,
         DateTimeOffset? emailConfirmedAt,
         VerificationCode? emailVerification,
-        IEnumerable<DateTimeOffset> verificationResendAttempts)
+        IEnumerable<DateTimeOffset> verificationResendAttempts,
+        DateTimeOffset? deletedAt = null)
     {
         if (id == Guid.Empty)
         {
@@ -184,7 +190,8 @@ public sealed class Account
             createdAt,
             emailConfirmedAt,
             emailVerification,
-            verificationResendAttempts);
+            verificationResendAttempts,
+            deletedAt);
     }
 
     /// <summary>
@@ -247,6 +254,13 @@ public sealed class Account
 
         if (validation != CodeValidationResult.Valid)
         {
+            if (validation == CodeValidationResult.Incorrect)
+            {
+                // Límite "por cuenta" de EP-M01-02: cada intento incorrecto cuenta,
+                // incluso si todavía no alcanza el máximo (ver MaxConfirmationAttempts).
+                EmailVerification.RegisterFailedAttempt();
+            }
+
             return validation switch
             {
                 CodeValidationResult.Expired => EmailConfirmationResult.ExpiredCode,
@@ -260,6 +274,21 @@ public sealed class Account
         EmailConfirmedAt = now;
 
         return EmailConfirmationResult.Confirmed;
+    }
+
+    /// <summary>
+    /// HU-096: borrado lógico. No elimina el documento; las sesiones activas se
+    /// revocan por separado (Application/Infrastructure), no aquí.
+    /// </summary>
+    public void Delete(DateTimeOffset now)
+    {
+        if (Status == AccountStatus.Deleted)
+        {
+            throw new InvalidOperationException("La cuenta ya está eliminada.");
+        }
+
+        Status = AccountStatus.Deleted;
+        DeletedAt = now;
     }
 
     private void PruneResendAttempts(DateTimeOffset now)

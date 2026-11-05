@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using UniHome.Api.Configuration;
 using UniHome.Api.Contracts.Auth;
 using UniHome.Api.Errors;
+using UniHome.Application.Identity.ConfirmEmail;
 using UniHome.Application.Identity.Login;
 using UniHome.Application.Identity.Logout;
 using UniHome.Application.Identity.RefreshSessions;
@@ -22,17 +23,23 @@ public sealed class AuthController : ControllerBase
     private readonly LoginService _login;
     private readonly RefreshSessionService _refreshSession;
     private readonly LogoutService _logout;
+    private readonly ConfirmEmailService _confirmEmail;
+    private readonly ResendConfirmationService _resendConfirmation;
 
     public AuthController(
         RegisterAccountService registerAccount,
         LoginService login,
         RefreshSessionService refreshSession,
-        LogoutService logout)
+        LogoutService logout,
+        ConfirmEmailService confirmEmail,
+        ResendConfirmationService resendConfirmation)
     {
         _registerAccount = registerAccount;
         _login = login;
         _refreshSession = refreshSession;
         _logout = logout;
+        _confirmEmail = confirmEmail;
+        _resendConfirmation = resendConfirmation;
     }
 
     /// <summary>
@@ -94,6 +101,91 @@ public sealed class AuthController : ControllerBase
 
         SetNoStore();
         return StatusCode(StatusCodes.Status201Created, response);
+    }
+
+    /// <summary>
+    /// EP-M01-02: confirma el correo con el código de 6 dígitos. Decisión
+    /// aprobada: recibe correo y código en el cuerpo, sin token de sesión de
+    /// registro. Correo inexistente, código incorrecto, sin emitir o ya usado
+    /// responden igual (400); el código vencido o con intentos agotados
+    /// responde 410. Si ya estaba confirmada, responde éxito de forma idempotente.
+    /// </summary>
+    [HttpPost("confirmacion-correo")]
+    [AllowAnonymous]
+    [EnableRateLimiting(AuthRateLimitPolicies.ConfirmEmail)]
+    [RequestSizeLimit(MaxAuthRequestBytes)]
+    [ProducesResponseType(typeof(ConfirmarCorreoResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status410Gone)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ConfirmEmail(
+        [FromBody] ConfirmarCorreoRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (Request.ContentLength is > MaxAuthRequestBytes)
+        {
+            return CreateProblemResult(
+                StatusCodes.Status413PayloadTooLarge,
+                "La solicitud excede el tamaño permitido.");
+        }
+
+        var result = await _confirmEmail
+            .ConfirmAsync(new ConfirmEmailCommand(request.Correo, request.Codigo), cancellationToken)
+            .ConfigureAwait(false);
+
+        SetNoStore();
+
+        return result.Status switch
+        {
+            ConfirmEmailStatus.Confirmed => Ok(new ConfirmarCorreoResponse(CorreoConfirmado: true)),
+            ConfirmEmailStatus.AlreadyConfirmed => Ok(new ConfirmarCorreoResponse(CorreoConfirmado: true)),
+            ConfirmEmailStatus.ValidationFailed => CreateValidationResult(result.ValidationErrors),
+            ConfirmEmailStatus.ExpiredCode => CreateProblemResult(
+                StatusCodes.Status410Gone,
+                "El código venció o se agotaron los intentos. Solicita un nuevo código."),
+            _ => CreateProblemResult(
+                StatusCodes.Status400BadRequest,
+                "El código no es válido.")
+        };
+    }
+
+    /// <summary>
+    /// EP-M01-03: reenvía el código de confirmación. Decisión aprobada: siempre
+    /// 202 sin cuerpo, exista o no el correo, para no revelar cuentas.
+    /// </summary>
+    [HttpPost("confirmacion-correo/reenvio")]
+    [AllowAnonymous]
+    [EnableRateLimiting(AuthRateLimitPolicies.Resend)]
+    [RequestSizeLimit(MaxAuthRequestBytes)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ResendConfirmation(
+        [FromBody] ReenviarCodigoRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (Request.ContentLength is > MaxAuthRequestBytes)
+        {
+            return CreateProblemResult(
+                StatusCodes.Status413PayloadTooLarge,
+                "La solicitud excede el tamaño permitido.");
+        }
+
+        var result = await _resendConfirmation
+            .ResendAsync(new ResendConfirmationCommand(request.Correo), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (result.Status == ResendConfirmationStatus.ValidationFailed)
+        {
+            return CreateValidationResult(result.ValidationErrors);
+        }
+
+        SetNoStore();
+        return Accepted();
     }
 
     /// <summary>

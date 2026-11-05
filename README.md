@@ -1,9 +1,9 @@
 # UniHome Backend
 
-API REST en .NET 10 para UniHome. Incluye la base de la Etapa 1 y dos rebanadas de
-M01: registro (HU-001/HU-012) y sesión (login, refresh y logout: HU-004/HU-005).
-**M01 no está completo**: confirmación de correo, recuperación y eliminación de cuenta
-siguen pendientes.
+API REST en .NET 10 para UniHome. Incluye la base de la Etapa 1 y M01: registro
+(HU-001/HU-012), sesión (login, refresh y logout: HU-004/HU-005), confirmación de
+correo y su reenvío (HU-003) y eliminación de cuenta (HU-096).
+**M01 no está completo**: la recuperación de contraseña (HU-006) sigue pendiente.
 
 ## Stack y capas
 
@@ -30,9 +30,12 @@ La API inicia sin MongoDB configurado. La configuración de MongoDB es externa
 | Método | Ruta | Descripción |
 |---|---|---|
 | `POST` | `/api/v1/auth/registro` | Registro de cuenta única, sin elección de rol (HU-001/HU-012). |
+| `POST` | `/api/v1/auth/confirmacion-correo` | Confirma el correo con el código de 6 dígitos (HU-003, EP-M01-02). |
+| `POST` | `/api/v1/auth/confirmacion-correo/reenvio` | Reenvía el código de confirmación; siempre `202` (HU-003, EP-M01-03). |
 | `POST` | `/api/v1/auth/login` | Login común por correo y contraseña (HU-004). |
 | `POST` | `/api/v1/auth/refresh` | Renovación con rotación de refresh token (EP-M01-08). |
 | `POST` | `/api/v1/auth/logout` | Cierre de la sesión actual con `Authorization: Bearer` (HU-005). |
+| `DELETE` | `/api/v1/cuentas/mi-cuenta` | Elimina (borrado lógico) la cuenta propia con `Authorization: Bearer` (HU-096, EP-M01-09). |
 
 Registro (`201`):
 
@@ -57,9 +60,30 @@ Login y refresh (`200`):
 ```
 
 `correoConfirmacionEnviado` es `false` si no hay proveedor de correo configurado.
-El código de confirmación se guarda como HMAC, nunca en claro. Los endpoints de
-confirmación y reenvío aún no están expuestos porque el contrato del token de sesión de
-registro no está definido.
+El código de confirmación se guarda como HMAC, nunca en claro.
+
+Confirmación de correo (`200`), idéntica si la cuenta ya estaba confirmada:
+
+```json
+{ "correoConfirmado": true }
+```
+
+**Decisión aprobada:** `confirmacion-correo` y su reenvío reciben el correo en el
+cuerpo (sin token de sesión de registro, porque ese contrato no está definido en la
+spec). Un correo inexistente, un código incorrecto, sin emitir o ya usado responden
+igual (`400`), para no revelar si la cuenta existe; un código vencido o con intentos
+agotados responde `410`. El reenvío siempre responde `202` sin cuerpo, exista o no el
+correo.
+
+Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
+`contrasena` y `confirmacionPerdidaInformacion: true`. Hace borrado lógico
+(`AccountStatus.Deleted`) y revoca todas las sesiones de la cuenta en todos los
+dispositivos (a diferencia de `logout`, que solo revoca la sesión actual). Tras
+eliminar, la cuenta no puede iniciar sesión, renovar tokens ni seguir usando un access
+token emitido antes de eliminarla (BE-SEC-008 ya cubre esto: el estado se revisa en
+cada petición autenticada). **Pendiente:** el rechazo `409` por vínculos activos de
+propiedades/ocupación (M05/M09) y la política de retención/anonimización de datos
+(ADR-005) no están implementados.
 
 ## Seguridad de sesión
 
@@ -93,14 +117,21 @@ registro no está definido.
   siguen sujetos a revisión de seguridad.
 - `Auth__RateLimit__LoginPermitLimit` / `LoginWindowSeconds` valen 10 intentos por 60
   segundos por IP; `RefreshPermitLimit` / `RefreshWindowSeconds` valen 20 por 60
-  segundos. Son umbrales provisionales pendientes de aprobación. El limitador es en
-  memoria y asume una sola instancia del proceso (BE-SEC-009); escalar horizontalmente
-  requiere el ADR de estado distribuido.
+  segundos; `ConfirmEmailPermitLimit` / `ConfirmEmailWindowSeconds` valen 10 por 60;
+  `ResendPermitLimit` / `ResendWindowSeconds` valen 5 por 60. Son umbrales
+  provisionales pendientes de aprobación. El limitador es en memoria y asume una sola
+  instancia del proceso (BE-SEC-009); escalar horizontalmente requiere el ADR de
+  estado distribuido.
+- Límite "por cuenta" de intentos de confirmación (spec EP-M01-02, sin valor fijado):
+  provisional de 5 intentos incorrectos por verificador
+  (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como
+  vencido (`410`) para forzar un reenvío en vez de permitir reintentos indefinidos.
 - El envío SMTP es opcional en Development. Si no existe la sección `Smtp`, el registro
   persiste la cuenta y devuelve `correoConfirmacionEnviado: false`; si existe, se valida
   al arrancar y `correoConfirmacionEnviado: true` solo indica que el relé aceptó el
   mensaje, no que se haya entregado al buzón final.
-- Registro, login, refresh y logout limitan el cuerpo de la solicitud a 8 KB.
+- Registro, confirmación de correo, su reenvío, login, refresh, logout y eliminación
+  de cuenta limitan el cuerpo de la solicitud a 8 KB.
 
 ## Persistencia y migraciones MongoDB
 
@@ -172,6 +203,13 @@ solo lectura; si falta una garantía crítica, la API no opera esa colección.
 - Refresh: `400` sin token, `401` por token/sesión inválidos o reuso, `413`, `429` y `503`.
 - Logout: `204`, `401` sin sesión válida, `413` por cuerpo excesivo y `503` si el
   almacenamiento falla.
+- Confirmación de correo: `200` (incluida la idempotente ya confirmada), `400` por
+  datos inválidos, correo inexistente o código incorrecto/sin emitir/ya usado, `410`
+  por código vencido o intentos agotados, `413`, `429` y `503`.
+- Reenvío de confirmación: `202` siempre que el formato sea válido, `400` por correo
+  mal formado, `413`, `429` y `503`.
+- Eliminación de cuenta: `204`, `400` sin confirmar la pérdida de información, `401`
+  por contraseña incorrecta o sesión inválida, `413` y `503`.
 
 ## Pruebas
 
@@ -183,7 +221,9 @@ dotnet format UniHome.Backend.slnx --verify-no-changes
 ```
 
 Las pruebas de integración habituales usan `WebApplicationFactory` y dobles en memoria;
-no requieren un clúster real. La CI de GitHub Actions solo ejecuta restore/build/test; no
+no requieren un clúster real. La CI de GitHub Actions (`.github/workflows/ci.yml`)
+ejecuta restore/build/formato/pruebas, revisión de dependencias vulnerables y Gitleaks
+sobre el historial completo; `.github/workflows/codeql.yml` ejecuta CodeQL para C#. No
 despliega ni usa credenciales.
 
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
@@ -206,12 +246,18 @@ y elimina únicamente sus documentos de prueba. No envía correos reales.
 
 ## Pendiente de M01 y decisiones abiertas
 
-- Confirmación y reenvío de código (EP-M01-02/03), recuperación (EP-M01-06/07) y
-  eliminación de cuenta (EP-M01-09).
+- Recuperación de contraseña (EP-M01-06/07).
 - **DEC-09**: mensaje/código definitivo ante correo duplicado en el registro.
 - **DEC-10**: tratamiento de menores de edad y consentimiento aplicable.
-- Rate limiting de registro y de intentos de confirmación; aprobación de los umbrales
-  provisionales de login/refresh.
+- Rate limiting de registro; aprobación de los umbrales provisionales de
+  login/refresh/confirmación/reenvío y del límite "por cuenta" de intentos de
+  confirmación (`VerificationCode.MaxConfirmationAttempts`).
+- **EP-M01-09** (eliminar cuenta) implementado solo en lo exigido por la spec:
+  borrado lógico y revocación de todas las sesiones. Pendiente: rechazo `409` por
+  vínculos activos de propiedades/ocupación (M05/M09, HU-096) y la política de
+  retención/anonimización de datos tras eliminar (ver ADR-005 más abajo). Tampoco se
+  implementó la restricción de que una cuenta administradora no se autoelimine por
+  esta ruta: hoy no existe concepto de administrador en el dominio.
 - Definir proxy/`ForwardedHeaders` confiables para que el rate limit por IP no agrupe
   clientes detrás de un balanceador; la implementación actual no confía en cabeceras.
 - Logout invalida el refresh token de la sesión actual. El access token ya emitido
@@ -222,5 +268,6 @@ y elimina únicamente sus documentos de prueba. No envía correos reales.
   explícita, usuario técnico verificado y respaldo/restauración comprobados. `apply`
   sigue bloqueado; solo el comando separado `promote` puede escribir, y aún no se ha
   ejecutado.
-- Retención/limpieza de cuentas no confirmadas (ADR-005).
+- Retención/limpieza de cuentas no confirmadas y anonimización de datos tras
+  eliminar una cuenta (ADR-005).
 - Scalar/Swagger UI solo si se aprueba explícitamente.

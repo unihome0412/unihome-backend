@@ -39,12 +39,14 @@ public sealed class MongoIdentityBsonMappingTests
             ("creadoEnUtc", BsonType.DateTime),
             ("correoConfirmadoEnUtc", BsonType.Null),
             ("verificacionCorreo", BsonType.Document),
-            ("intentosReenvioUtc", BsonType.Array));
+            ("intentosReenvioUtc", BsonType.Array),
+            ("eliminadaEnUtc", BsonType.Null));
         AssertTypes(document["aceptacionPrivacidad"].AsBsonDocument,
             ("version", BsonType.String), ("aceptadaEnUtc", BsonType.DateTime));
         AssertTypes(document["verificacionCorreo"].AsBsonDocument,
             ("hash", BsonType.String), ("emitidoEnUtc", BsonType.DateTime),
-            ("expiraEnUtc", BsonType.DateTime), ("consumidoEnUtc", BsonType.Null));
+            ("expiraEnUtc", BsonType.DateTime), ("consumidoEnUtc", BsonType.Null),
+            ("intentosFallidos", BsonType.Int32));
         Assert.Equal(BsonType.DateTime, Assert.Single(document["intentosReenvioUtc"].AsBsonArray).BsonType);
         Assert.Equal(Identifier, document["_id"].AsString);
         Assert.Equal(Timestamp, BsonSerializer.Deserialize<AccountDocument>(document).CreatedAtUtc);

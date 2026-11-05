@@ -25,6 +25,15 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     public const string TestIssuer = "UniHome.Test";
     public const string TestAudience = "UniHome.Mobile.Test";
 
+    /// <summary>
+    /// Secreto HMAC fijo de pruebas (no es un secreto real) para que las pruebas
+    /// puedan reproducir el mismo <c>HmacVerificationCodeProtector</c> que usa el
+    /// host; sin esta fijación el protector real genera una clave efímera
+    /// aleatoria por proceso y las pruebas no podrían construir códigos propios.
+    /// </summary>
+    public const string TestVerificationCodeHmacSecret =
+        "unihome-test-verification-code-hmac-secret-0123456789";
+
     public InMemoryAccountRepository Accounts { get; } = new();
 
     public InMemoryRefreshSessionRepository Sessions { get; } = new();
@@ -51,10 +60,15 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
                 ["Jwt:SigningKey"] = TestSigningKey,
                 ["Jwt:AccessTokenMinutes"] = "60",
                 ["Jwt:RefreshTokenDays"] = "30",
+                ["VerificationCode:HmacSecret"] = TestVerificationCodeHmacSecret,
                 ["Auth:RateLimit:LoginPermitLimit"] = "1000",
                 ["Auth:RateLimit:LoginWindowSeconds"] = "60",
                 ["Auth:RateLimit:RefreshPermitLimit"] = "1000",
-                ["Auth:RateLimit:RefreshWindowSeconds"] = "60"
+                ["Auth:RateLimit:RefreshWindowSeconds"] = "60",
+                ["Auth:RateLimit:ConfirmEmailPermitLimit"] = "1000",
+                ["Auth:RateLimit:ConfirmEmailWindowSeconds"] = "60",
+                ["Auth:RateLimit:ResendPermitLimit"] = "1000",
+                ["Auth:RateLimit:ResendWindowSeconds"] = "60"
             });
         });
 

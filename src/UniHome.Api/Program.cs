@@ -19,6 +19,8 @@ using UniHome.Api.Configuration;
 using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Identity.ConfirmEmail;
+using UniHome.Application.Identity.DeleteAccount;
 using UniHome.Application.Identity.Login;
 using UniHome.Application.Identity.Logout;
 using UniHome.Application.Identity.RefreshSessions;
@@ -96,6 +98,9 @@ builder.Services.AddScoped<RegisterAccountService>();
 builder.Services.AddScoped<LoginService>();
 builder.Services.AddScoped<RefreshSessionService>();
 builder.Services.AddScoped<LogoutService>();
+builder.Services.AddScoped<ConfirmEmailService>();
+builder.Services.AddScoped<ResendConfirmationService>();
+builder.Services.AddScoped<DeleteAccountService>();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -222,6 +227,44 @@ builder.Services.AddRateLimiter(options =>
                 {
                     PermitLimit = Math.Max(1, limits.RefreshPermitLimit),
                     Window = TimeSpan.FromSeconds(Math.Max(1, limits.RefreshWindowSeconds)),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        });
+
+    options.AddPolicy(
+        AuthRateLimitPolicies.ConfirmEmail,
+        httpContext =>
+        {
+            var limits = httpContext.RequestServices
+                .GetRequiredService<IOptions<AuthRateLimitOptions>>()
+                .Value;
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                GetClientPartitionKey(httpContext),
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = Math.Max(1, limits.ConfirmEmailPermitLimit),
+                    Window = TimeSpan.FromSeconds(Math.Max(1, limits.ConfirmEmailWindowSeconds)),
+                    QueueLimit = 0,
+                    AutoReplenishment = true
+                });
+        });
+
+    options.AddPolicy(
+        AuthRateLimitPolicies.Resend,
+        httpContext =>
+        {
+            var limits = httpContext.RequestServices
+                .GetRequiredService<IOptions<AuthRateLimitOptions>>()
+                .Value;
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                GetClientPartitionKey(httpContext),
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = Math.Max(1, limits.ResendPermitLimit),
+                    Window = TimeSpan.FromSeconds(Math.Max(1, limits.ResendWindowSeconds)),
                     QueueLimit = 0,
                     AutoReplenishment = true
                 });

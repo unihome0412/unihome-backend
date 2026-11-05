@@ -52,6 +52,21 @@ internal sealed class PrefixVerificationCodeProtector : IVerificationCodeProtect
         string.Equals(Protect(code), protectedCode, StringComparison.Ordinal);
 }
 
+/// <summary>
+/// Protector de prueba cuyo resultado es Base64 válido, igual que el real
+/// (<c>HmacVerificationCodeProtector</c>). <see cref="VerificationCode.Matches"/>
+/// decodifica <c>CodeHash</c> como Base64; <see cref="PrefixVerificationCodeProtector"/>
+/// no sirve para pruebas que validan/confirman un código real.
+/// </summary>
+internal sealed class Base64VerificationCodeProtector : IVerificationCodeProtector
+{
+    public string Protect(string code) =>
+        Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"protected:{code}"));
+
+    public bool Matches(string code, string protectedCode) =>
+        string.Equals(Protect(code), protectedCode, StringComparison.Ordinal);
+}
+
 internal sealed class RecordingVerificationEmailSender : IVerificationEmailSender
 {
     private readonly List<(string Email, string Code)> _messages = [];

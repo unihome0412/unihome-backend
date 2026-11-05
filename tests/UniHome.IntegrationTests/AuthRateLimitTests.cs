@@ -50,6 +50,36 @@ public sealed class AuthRateLimitTests : IClassFixture<RateLimitedApiFactory>
             third.Content.Headers.ContentType?.MediaType);
     }
 
+    [Fact]
+    public async Task ConfirmacionCorreo_ExcedeElLimitePorIp_DebeResponder429()
+    {
+        using var first = await ConfirmEmailAsync();
+        using var second = await ConfirmEmailAsync();
+        using var third = await ConfirmEmailAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, first.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, third.StatusCode);
+        Assert.Equal(
+            "application/problem+json",
+            third.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task ReenvioCodigo_ExcedeElLimitePorIp_DebeResponder429()
+    {
+        using var first = await ResendAsync();
+        using var second = await ResendAsync();
+        using var third = await ResendAsync();
+
+        Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
+        Assert.Equal(HttpStatusCode.Accepted, second.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, third.StatusCode);
+        Assert.Equal(
+            "application/problem+json",
+            third.Content.Headers.ContentType?.MediaType);
+    }
+
     private Task<HttpResponseMessage> LoginAsync() =>
         _client.PostAsJsonAsync(
             "/api/v1/auth/login",
@@ -63,4 +93,14 @@ public sealed class AuthRateLimitTests : IClassFixture<RateLimitedApiFactory>
         _client.PostAsJsonAsync(
             "/api/v1/auth/refresh",
             new { refreshToken = "token-invalido" });
+
+    private Task<HttpResponseMessage> ConfirmEmailAsync() =>
+        _client.PostAsJsonAsync(
+            "/api/v1/auth/confirmacion-correo",
+            new { correo = AuthTestHelpers.UniqueEmail(), codigo = "000000" });
+
+    private Task<HttpResponseMessage> ResendAsync() =>
+        _client.PostAsJsonAsync(
+            "/api/v1/auth/confirmacion-correo/reenvio",
+            new { correo = AuthTestHelpers.UniqueEmail() });
 }

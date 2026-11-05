@@ -241,6 +241,28 @@ internal sealed class FakeRefreshSessionRepository : IRefreshSessionRepository
         return Task.CompletedTask;
     }
 
+    public Task RevokeAllForAccountAsync(
+        Guid accountId,
+        DateTimeOffset now,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            foreach (var session in _sessions.Values.Where(
+                session => session.AccountId == accountId && session.RevokedAt is null).ToList())
+            {
+                _sessions[session.Id] = session with
+                {
+                    RevokedAt = now,
+                    RevokedReason = reason
+                };
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     public void SetExpiresAt(Guid sessionId, DateTimeOffset expiresAt)
     {
         lock (_gate)

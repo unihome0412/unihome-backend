@@ -179,11 +179,13 @@ internal sealed class MongoAccountRepository : IAccountRepository
                     CodeHash = account.EmailVerification.CodeHash,
                     IssuedAtUtc = account.EmailVerification.IssuedAt.UtcDateTime,
                     ExpiresAtUtc = account.EmailVerification.ExpiresAt.UtcDateTime,
-                    ConsumedAtUtc = account.EmailVerification.ConsumedAt?.UtcDateTime
+                    ConsumedAtUtc = account.EmailVerification.ConsumedAt?.UtcDateTime,
+                    FailedAttempts = account.EmailVerification.FailedAttempts
                 },
             VerificationResendAttemptsUtc = account.VerificationResendAttempts
                 .Select(attempt => attempt.UtcDateTime)
-                .ToList()
+                .ToList(),
+            DeletedAtUtc = account.DeletedAt?.UtcDateTime
         };
 
     private static Account ToDomain(AccountDocument document)
@@ -199,7 +201,8 @@ internal sealed class MongoAccountRepository : IAccountRepository
                 ToDateTimeOffset(document.EmailVerification.ExpiresAtUtc),
                 document.EmailVerification.ConsumedAtUtc is null
                     ? null
-                    : ToDateTimeOffset(document.EmailVerification.ConsumedAtUtc.Value));
+                    : ToDateTimeOffset(document.EmailVerification.ConsumedAtUtc.Value),
+                document.EmailVerification.FailedAttempts);
 
         return Account.Restore(
             Guid.ParseExact(document.Id, "N"),
@@ -216,7 +219,10 @@ internal sealed class MongoAccountRepository : IAccountRepository
                 ? null
                 : ToDateTimeOffset(document.EmailConfirmedAtUtc.Value),
             verification,
-            document.VerificationResendAttemptsUtc.Select(ToDateTimeOffset));
+            document.VerificationResendAttemptsUtc.Select(ToDateTimeOffset),
+            document.DeletedAtUtc is null
+                ? null
+                : ToDateTimeOffset(document.DeletedAtUtc.Value));
     }
 
     private static DateTimeOffset ToDateTimeOffset(DateTime value) =>

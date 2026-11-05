@@ -172,6 +172,63 @@ public sealed class AccountTests
         Assert.Equal(EmailConfirmationResult.IncorrectCode, result);
     }
 
+    [Fact]
+    public void ConfirmEmail_TrasAgotarIntentos_SeTrataComoVencido()
+    {
+        var account = CreateAccount();
+        account.IssueEmailVerification(Hash("123456"), Now);
+
+        for (var attempt = 0; attempt < VerificationCode.MaxConfirmationAttempts; attempt++)
+        {
+            var incorrect = account.ConfirmEmail(Hash("000000"), Now.AddSeconds(attempt));
+            Assert.Equal(EmailConfirmationResult.IncorrectCode, incorrect);
+        }
+
+        // El código correcto ya no se acepta: el límite "por cuenta" lo bloqueó.
+        var afterLimit = account.ConfirmEmail(Hash("123456"), Now.AddSeconds(100));
+
+        Assert.Equal(EmailConfirmationResult.ExpiredCode, afterLimit);
+        Assert.False(account.IsEmailConfirmed);
+        Assert.Equal(VerificationCode.MaxConfirmationAttempts, account.EmailVerification!.FailedAttempts);
+    }
+
+    [Fact]
+    public void ConfirmEmail_IntentosPorDebajoDelLimite_NoBloqueaElCodigoCorrecto()
+    {
+        var account = CreateAccount();
+        account.IssueEmailVerification(Hash("123456"), Now);
+
+        for (var attempt = 0; attempt < VerificationCode.MaxConfirmationAttempts - 1; attempt++)
+        {
+            account.ConfirmEmail(Hash("000000"), Now.AddSeconds(attempt));
+        }
+
+        var result = account.ConfirmEmail(Hash("123456"), Now.AddSeconds(50));
+
+        Assert.Equal(EmailConfirmationResult.Confirmed, result);
+        Assert.True(account.IsEmailConfirmed);
+    }
+
+    [Fact]
+    public void Delete_CambiaEstadoYRegistraFecha()
+    {
+        var account = CreateAccount();
+
+        account.Delete(Now.AddDays(1));
+
+        Assert.Equal(AccountStatus.Deleted, account.Status);
+        Assert.Equal(Now.AddDays(1), account.DeletedAt);
+    }
+
+    [Fact]
+    public void Delete_SobreUnaCuentaYaEliminada_Lanza()
+    {
+        var account = CreateAccount();
+        account.Delete(Now);
+
+        Assert.Throws<InvalidOperationException>(() => account.Delete(Now.AddMinutes(1)));
+    }
+
     private static Account CreateAccount() =>
         Account.Register(
             Guid.NewGuid(),

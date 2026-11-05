@@ -66,6 +66,7 @@ internal static class ApiProblemDetails
         StatusCodes.Status404NotFound => "Recurso no encontrado.",
         StatusCodes.Status405MethodNotAllowed => "Método no permitido.",
         StatusCodes.Status409Conflict => "Conflicto.",
+        StatusCodes.Status410Gone => "El código ya no es válido.",
         StatusCodes.Status413PayloadTooLarge => "Solicitud demasiado grande.",
         StatusCodes.Status415UnsupportedMediaType => "Tipo de contenido no soportado.",
         StatusCodes.Status422UnprocessableEntity => "Regla de negocio no satisfecha.",

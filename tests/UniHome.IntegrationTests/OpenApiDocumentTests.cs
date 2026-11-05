@@ -47,5 +47,29 @@ public sealed class OpenApiDocumentTests : IClassFixture<UniHomeApiFactory>
             .GetProperty("post");
 
         Assert.False(login.TryGetProperty("security", out _));
+
+        var deleteAccount = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/cuentas/mi-cuenta")
+            .GetProperty("delete");
+
+        Assert.True(deleteAccount.TryGetProperty("security", out var deleteSecurity));
+        Assert.Contains(
+            deleteSecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        var confirmEmail = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/auth/confirmacion-correo")
+            .GetProperty("post");
+
+        Assert.False(confirmEmail.TryGetProperty("security", out _));
+
+        var resend = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/auth/confirmacion-correo/reenvio")
+            .GetProperty("post");
+
+        Assert.False(resend.TryGetProperty("security", out _));
     }
 }

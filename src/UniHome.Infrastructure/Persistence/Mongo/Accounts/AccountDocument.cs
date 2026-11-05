@@ -47,6 +47,9 @@ public sealed class AccountDocument
 
     [BsonElement("intentosReenvioUtc")]
     public List<DateTime> VerificationResendAttemptsUtc { get; set; } = [];
+
+    [BsonElement("eliminadaEnUtc")]
+    public DateTime? DeletedAtUtc { get; set; }
 }
 
 [BsonIgnoreExtraElements]
@@ -73,4 +76,7 @@ public sealed class VerificationCodeDocument
 
     [BsonElement("consumidoEnUtc")]
     public DateTime? ConsumedAtUtc { get; set; }
+
+    [BsonElement("intentosFallidos")]
+    public int FailedAttempts { get; set; }
 }
