@@ -1,0 +1,8 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- Builds reproducibles: cada proyecto conserva su packages.lock.json. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+</Project>
