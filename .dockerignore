@@ -1,12 +1,8 @@
 .git
 .github
-.local-sdd
 .opencode
 .vs
-AGENTS.md
 opencode.json
-docs
-tests
 TestResults
 **/bin
 **/obj
