@@ -6,14 +6,26 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      azure_deploy:
+        description: 'Solicitar despliegue a Azure DEV (requiere aprobación)'
+        type: boolean
+        required: true
+        default: false
+      confirm_target:
+        description: 'Para desplegar escribir exactamente DESPLEGAR_UNIHOME_DEV'
+        type: string
+        required: false
+        default: ''
 
-# Despliegue CD intencionalmente excluido hasta aprobación y Environment protegido.
+# CD Azure DEV: solo dispatch manual de main + confirmación exacta + Environment protegido + CI verde.
 permissions:
   contents: read
 
+# Un push a main NO debe cancelar una publicación manual que ya empezó.
 concurrency:
-  group: unihome-devsecops-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: unihome-devsecops-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && inputs.azure_deploy == true && 'deploy' || 'ci' }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.azure_deploy == true) }}
 
 jobs:
   detect-changes:
@@ -558,3 +570,161 @@ jobs:
           path: reports/hardening.md
           if-no-files-found: error
           retention-days: 7
+
+  validate-azure-deploy-request:
+    name: Azure DEV - Validar solicitud manual
+    needs: pr-quality-gate
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.azure_deploy == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exigir main, CI verde y confirmación literal
+        env:
+          GIT_REF: ${{ github.ref }}
+          CONFIRMATION: ${{ inputs.confirm_target }}
+          GATE_RESULT: ${{ needs.pr-quality-gate.result }}
+        run: |
+          set -euo pipefail
+          [ "$GIT_REF" = 'refs/heads/main' ] || { echo '::error::Solo se permite deploy desde main'; exit 1; }
+          [ "$GATE_RESULT" = 'success' ] || { echo '::error::Quality Gate no aprobó'; exit 1; }
+          [ "$CONFIRMATION" = 'DESPLEGAR_UNIHOME_DEV' ] || { echo '::error::Confirmación exacta incorrecta'; exit 1; }
+          echo 'Confirmación manual válida. Se verificará Environment azure-dev.'
+
+  # El CD aparece en el mismo grafo. En PR, push y ejecuciones manuales sin
+  # confirmación queda Skipped y NO interactúa con Azure.
+  deploy-azure-dev:
+    name: Deploy Azure DEV (Container Apps, aprobación manual)
+    needs: [pr-quality-gate, hardening-report, validate-azure-deploy-request]
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          inputs.azure_deploy == true &&
+          needs.validate-azure-deploy-request.result == 'success' &&
+          needs.pr-quality-gate.result == 'success' &&
+          needs.hardening-report.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    concurrency:
+      group: unihome-azure-dev-deploy
+      cancel-in-progress: false
+    environment:
+      name: azure-dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_RESOURCE_GROUP: rg-unihome-dev
+      AZURE_CONTAINER_APP: unihome-api
+      AZURE_ACR_NAME: acrunihomedev
+
+    steps:
+      - name: Checkout exacto de main aprobado por CI
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Confirmar que las credenciales federadas están configuradas
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$AZURE_CLIENT_ID" || { echo '::error::Falta AZURE_CLIENT_ID en azure-dev'; exit 1; }
+          test -n "$AZURE_TENANT_ID" || { echo '::error::Falta AZURE_TENANT_ID en azure-dev'; exit 1; }
+          test -n "$AZURE_SUBSCRIPTION_ID" || { echo '::error::Falta AZURE_SUBSCRIPTION_ID en azure-dev'; exit 1; }
+
+      - name: Autenticar Azure mediante OIDC (sin client secret)
+        uses: azure/login@v2 # Fijar commit SHA al aprobar la integración definitiva
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Preflight de recursos existentes (no crear infraestructura)
+        id: preflight
+        run: |
+          set -euo pipefail
+          az extension add --name containerapp --upgrade --yes --only-show-errors
+          az group show -n "$AZURE_RESOURCE_GROUP" --query name -o tsv > /dev/null
+          REGISTRY_SERVER="$(az acr show -n "$AZURE_ACR_NAME" -g "$AZURE_RESOURCE_GROUP" --query loginServer -o tsv)"
+          test "$REGISTRY_SERVER" = "${AZURE_ACR_NAME}.azurecr.io" || { echo '::error::ACR inesperado'; exit 1; }
+          EXISTING_IMAGE="$(az containerapp show -n "$AZURE_CONTAINER_APP" -g "$AZURE_RESOURCE_GROUP" --query 'properties.template.containers[0].image' -o tsv)"
+          test -n "$EXISTING_IMAGE" || { echo '::error::No se encontró la imagen actual'; exit 1; }
+          APP_FQDN="$(az containerapp show -n "$AZURE_CONTAINER_APP" -g "$AZURE_RESOURCE_GROUP" --query 'properties.configuration.ingress.fqdn' -o tsv)"
+          test -n "$APP_FQDN" || { echo '::error::No se encontró el hostname HTTPS'; exit 1; }
+          [[ "$APP_FQDN" =~ ^[a-zA-Z0-9.-]+$ ]] || { echo '::error::FQDN inválido'; exit 1; }
+          MIN_REPLICAS="$(az containerapp show -n "$AZURE_CONTAINER_APP" -g "$AZURE_RESOURCE_GROUP" --query 'properties.template.scale.minReplicas' -o tsv)"
+          if [[ "$MIN_REPLICAS" =~ ^[0-9]+$ ]] && [ "$MIN_REPLICAS" -lt 2 ]; then
+            echo '::warning::Este entorno aún no garantiza dos réplicas; validar cumplimiento antes de producción.'
+          fi
+          echo "registry_server=$REGISTRY_SERVER" >> "$GITHUB_OUTPUT"
+          echo "app_fqdn=$APP_FQDN" >> "$GITHUB_OUTPUT"
+          echo "previous_image=$EXISTING_IMAGE" >> "$GITHUB_OUTPUT"
+          {
+            echo '## Preflight Azure DEV'
+            echo '- Recursos existentes comprobados; no se crean recursos.'
+            echo '- Imagen anterior registrada para posible reversión manual.'
+            echo '- Los secretos de la aplicación y la configuración de MongoDB no se modifican.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Construir imagen de main en runner (sin Docker local)
+        id: image
+        env:
+          REGISTRY_SERVER: ${{ steps.preflight.outputs.registry_server }}
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY_SERVER}/unihome-api:sha-${GITHUB_SHA}"
+          docker build --pull --tag "$IMAGE" .
+          echo "uri=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Publicar imagen en ACR existente
+        env:
+          IMAGE: ${{ steps.image.outputs.uri }}
+        run: |
+          set -euo pipefail
+          az acr login --name "$AZURE_ACR_NAME" --only-show-errors
+          docker push "$IMAGE"
+
+      - name: Actualizar solamente imagen de Container Apps
+        env:
+          IMAGE: ${{ steps.image.outputs.uri }}
+        run: |
+          set -euo pipefail
+          az containerapp update \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$IMAGE" \
+            --only-show-errors > /dev/null
+
+      - name: Comprobar imagen publicada y health checks HTTPS
+        env:
+          IMAGE: ${{ steps.image.outputs.uri }}
+          APP_FQDN: ${{ steps.preflight.outputs.app_fqdn }}
+          PREVIOUS_IMAGE: ${{ steps.preflight.outputs.previous_image }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            ACTUAL="$(az containerapp show -n "$AZURE_CONTAINER_APP" -g "$AZURE_RESOURCE_GROUP" --query 'properties.template.containers[0].image' -o tsv)"
+            if [[ "$ACTUAL" == "$IMAGE" ]] && \
+               curl -fsS --connect-timeout 5 --max-time 15 "https://${APP_FQDN}/health/live" >/dev/null && \
+               curl -fsS --connect-timeout 5 --max-time 15 "https://${APP_FQDN}/health/ready" >/dev/null; then
+              {
+                echo '## Deploy Azure DEV correcto'
+                echo "- Imagen: \`${IMAGE}\`"
+                echo "- Health: \`https://${APP_FQDN}/health/live\` y \`/health/ready\` respondieron OK."
+                echo "- Imagen anterior (rollback manual): \`${PREVIOUS_IMAGE}\`"
+                echo '- No se cambiaron secretos, variables ni número de réplicas.'
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          {
+            echo '## Deploy Azure DEV requiere revisión'
+            echo '- La revisión no pasó las comprobaciones de imagen y health durante la ventana de validación.'
+            echo "- Imagen anterior para rollback manual: \`${PREVIOUS_IMAGE}\`"
+            echo '- No se ejecutó reversión automática ni se cambió MongoDB.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo '::error::No se verificó salud de la nueva versión; revisar revisiones y considerar rollback manual autorizado.'
+          exit 1
