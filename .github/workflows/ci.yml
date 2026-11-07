@@ -1,4 +1,4 @@
-name: CI
+name: UniHome CI/CD - DevSecOps
 
 on:
   pull_request:
@@ -7,16 +7,86 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Despliegue CD intencionalmente excluido hasta aprobación y Environment protegido.
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: unihome-devsecops-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  detect-changes:
+    name: Detect changes (filtrado por jobs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.paths.outputs.code }}
+      docker: ${{ steps.paths.outputs.docker }}
+    steps:
+      - name: Checkout completo para detectar la diferencia
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Determinar cambios
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${BASE_SHA}" ]] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git diff --name-only "$BASE_SHA" HEAD > changes.txt
+          else
+            git ls-files > changes.txt
+          fi
+          if grep -Eq '^(src/|tests/|tools/|\.github/|Dockerfile$|\.dockerignore$|UniHome\.Backend\.slnx$|Directory\.Build\.props$|global\.json$)' changes.txt; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq '^(Dockerfile$|\.dockerignore$|src/|Directory\.Build\.props$|\.github/workflows/ci\.yml$)' changes.txt; then
+            echo "docker=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docker=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "### Archivos modificados" >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+          head -100 changes.txt >> "$GITHUB_STEP_SUMMARY"
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+
+  semgrep-sast:
+    name: Semgrep SAST
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Instalar Semgrep en entorno aislado
+        run: |
+          python3 -m venv /tmp/semgrep-ci
+          /tmp/semgrep-ci/bin/pip install --disable-pip-version-check semgrep
+      - name: Analizar reglas de seguridad de C#
+        run: |
+          mkdir -p reports
+          /tmp/semgrep-ci/bin/semgrep scan \
+            --config p/security-audit \
+            --error --severity ERROR --metrics=off \
+            --json --output reports/semgrep.json \
+            src tests
+      - name: Conservar evidencia
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: semgrep-sast-report
+          path: reports/semgrep.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-test:
     name: Build, formato y pruebas (.NET 10)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -58,6 +128,9 @@ jobs:
           --logger "trx;LogFileName=integration.trx"
           --results-directory TestResults/integration
 
+      - name: Probar la lógica del quality gate
+        run: python3 -m unittest discover -s tools/ci -p 'test_*.py' -v
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -69,6 +142,7 @@ jobs:
 
   dependency-scan:
     name: Dependencias vulnerables (dotnet list package)
+    needs: detect-changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -134,6 +208,7 @@ jobs:
 
   secret-scan:
     name: Gitleaks - historial completo
+    needs: detect-changes
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -173,4 +248,313 @@ jobs:
           name: gitleaks-report
           path: gitleaks-report.json
           if-no-files-found: ignore
+          retention-days: 7
+
+  contract-test:
+    name: Contract Test (OpenAPI)
+    needs: [detect-changes, build-test]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Restore + build
+        run: |
+          dotnet restore UniHome.Backend.slnx --locked-mode
+          dotnet build UniHome.Backend.slnx -c Release --no-restore -warnaserror
+      - name: Verificar contratos OpenAPI reales (sin Pact inventado)
+        run: >-
+          dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
+          -c Release --no-build --no-restore
+          --filter "FullyQualifiedName~OpenApiTests|FullyQualifiedName~OpenApiDocumentTests|FullyQualifiedName~SwaggerUiTests"
+          --logger "trx;LogFileName=openapi-contract.trx"
+          --results-directory TestResults/contracts
+      - name: Guardar contratos verificados
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: openapi-contract-tests
+          path: TestResults/contracts/**/*.trx
+          if-no-files-found: ignore
+          retention-days: 7
+
+  pact-contract:
+    name: Contract Test (Pact, pendiente de contratos)
+    needs: [detect-changes, contract-test]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_PACT == 'true' && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: No simular cumplimiento cuando no hay proyecto Pact
+        run: |
+          if [ ! -f tests/UniHome.PactTests/UniHome.PactTests.csproj ]; then
+            echo "::error::No hay suite Pact implementada. Agregar pruebas de consumidor/proveedor antes de habilitar esta variable."
+            exit 1
+          fi
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet test tests/UniHome.PactTests/UniHome.PactTests.csproj -c Release
+
+  sonarcloud-sast:
+    name: SonarCloud SAST (.NET)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_SONAR == 'true' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+      SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Verificar configuración
+        run: |
+          test -n "$SONAR_TOKEN" || { echo "::error::Falta SONAR_TOKEN"; exit 1; }
+          test -n "$SONAR_PROJECT_KEY" || { echo "::error::Falta SONAR_PROJECT_KEY"; exit 1; }
+          test -n "$SONAR_ORGANIZATION" || { echo "::error::Falta SONAR_ORGANIZATION"; exit 1; }
+      - name: Analizar con SonarScanner for .NET
+        run: |
+          dotnet tool install --global dotnet-sonarscanner
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet sonarscanner begin \
+            /k:"$SONAR_PROJECT_KEY" /o:"$SONAR_ORGANIZATION" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.qualitygate.wait=true \
+            /d:sonar.token="$SONAR_TOKEN"
+          dotnet restore UniHome.Backend.slnx --locked-mode
+          dotnet build UniHome.Backend.slnx -c Release --no-restore
+          dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+  mongo-db-test:
+    name: Database Test (MongoDB aislado, manual)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MONGO_CI == 'true' && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MongoDb__ConnectionString: ${{ secrets.UNIHOME_CI_MONGO_URI }}
+      MongoDb__DatabaseName: unihome_ci_verificacion
+      UNIHOME_RUN_MONGO_INTEGRATION_TESTS: '1'
+      UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_ci_verificacion
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Exigir conexión y base de CI ya migrada M01-001
+        run: |
+          test -n "$MongoDb__ConnectionString" || { echo "::error::Falta UNIHOME_CI_MONGO_URI"; exit 1; }
+          if [ "$MongoDb__DatabaseName" != 'unihome_ci_verificacion' ]; then exit 1; fi
+          echo "La base exclusiva debe existir y tener M01-001. No se aplican migraciones aquí."
+      - run: dotnet restore UniHome.Backend.slnx --locked-mode
+      - name: Pruebas reales de persistencia y lock (escriben en la base CI)
+        run: >-
+          dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
+          -c Release --no-restore
+          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests"
+          --logger "trx;LogFileName=mongo-ci.trx"
+          --results-directory TestResults/mongo
+      - name: Evidencias
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mongodb-ci-results
+          path: TestResults/mongo/**/*.trx
+          if-no-files-found: ignore
+          retention-days: 7
+
+  mutation-test:
+    name: Mutation Test (Stryker.NET, manual)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MUTATION == 'true' && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Stryker mutación real
+        working-directory: tests/UniHome.UnitTests
+        run: |
+          dotnet tool install --global dotnet-stryker
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet stryker --solution ../../UniHome.Backend.slnx
+      - name: Conservar reporte
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stryker-mutation-report
+          path: tests/UniHome.UnitTests/StrykerOutput/**/*
+          if-no-files-found: ignore
+          retention-days: 7
+
+  docker-build:
+    name: Docker Build (sin push ni Azure)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_DOCKER == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Construir imagen aislada
+        run: |
+          docker build --tag unihome-ci:${GITHUB_SHA::12} .
+          docker save --output unihome-ci.tar unihome-ci:${GITHUB_SHA::12}
+      - name: Imagen para Dockle (no registro remoto)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-container-image
+          path: unihome-ci.tar
+          retention-days: 1
+
+  container-lint:
+    name: Docker Container Lint (Dockle)
+    needs: [detect-changes, docker-build]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_DOCKER == 'true' && needs.docker-build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Descargar imagen construida
+        uses: actions/download-artifact@v4 # etiqueta oficial; fijar SHA antes de producción
+        with:
+          name: ci-container-image
+      - name: Cargar y auditar imagen
+        run: |
+          set -euo pipefail
+          docker load --input unihome-ci.tar
+          curl -fsSL -o dockle.tar.gz \
+            https://github.com/goodwithtech/dockle/releases/download/v0.4.15/dockle_0.4.15_Linux-64bit.tar.gz
+          tar -xzf dockle.tar.gz dockle
+          chmod +x dockle
+          ./dockle --exit-code 1 --exit-level FATAL unihome-ci:${GITHUB_SHA::12}
+
+  dast-zap:
+    name: DAST (OWASP ZAP) - instancia efímera local
+    needs: [detect-changes, build-test]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_ZAP == 'true' && github.event_name == 'workflow_dispatch' && needs.build-test.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compilar sin configuración real de MongoDB
+        run: |
+          dotnet restore UniHome.Backend.slnx --locked-mode
+          dotnet build src/UniHome.Api/UniHome.Api.csproj -c Release --no-restore
+      - name: Iniciar API local sin secretos ni servicios reales
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          MongoDb__ConnectionString: ''
+          MongoDb__DatabaseName: ''
+          SMTP__Password: ''
+        run: |
+          nohup dotnet run --project src/UniHome.Api/UniHome.Api.csproj \
+            -c Release --no-build --no-launch-profile \
+            --urls http://127.0.0.1:5088 > /tmp/unihome-api.log 2>&1 &
+          for attempt in $(seq 1 40); do
+            if curl --silent --fail http://127.0.0.1:5088/health/live > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::La API local no levantó para ZAP"
+          sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' /tmp/unihome-api.log | tail -30
+          exit 1
+      - name: ZAP baseline pasivo (solo loopback, sin ataques de escritura)
+        run: |
+          mkdir -p zap-reports
+          chmod 777 zap-reports
+          docker run --rm --network host \
+            -v "$PWD/zap-reports:/zap/wrk:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://127.0.0.1:5088/health/live \
+            -m 1 -I -r zap.html -J zap.json
+      - name: Evidencia ZAP
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: zap-baseline-report
+          path: zap-reports/*
+          if-no-files-found: ignore
+          retention-days: 7
+
+  restler-fuzzing:
+    name: RESTler Fuzzing (pendiente de harness aislado)
+    needs: [detect-changes, contract-test]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_RESTLER == 'true' && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: No ejecutar fuzzing contra Azure ni contra bases compartidas
+        run: |
+          if [ ! -f tools/ci/restler/run-isolated.sh ]; then
+            echo "::error::Falta harness RESTler con API efímera, contratos OpenAPI y datos aislados. No se ejecuta fuzzing remoto."
+            exit 1
+          fi
+          bash tools/ci/restler/run-isolated.sh
+
+  pr-quality-gate:
+    name: PR Quality Gate (controles obligatorios)
+    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, dast-zap, restler-fuzzing]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+      CODE_CHANGED: ${{ needs.detect-changes.outputs.code }}
+      EVENT_NAME: ${{ github.event_name }}
+      UNIHOME_ENABLE_SONAR: ${{ vars.UNIHOME_ENABLE_SONAR }}
+      UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
+      UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
+      UNIHOME_ENABLE_PACT: ${{ vars.UNIHOME_ENABLE_PACT }}
+      UNIHOME_ENABLE_DOCKER: ${{ vars.UNIHOME_ENABLE_DOCKER }}
+      UNIHOME_ENABLE_ZAP: ${{ vars.UNIHOME_ENABLE_ZAP }}
+      UNIHOME_ENABLE_RESTLER: ${{ vars.UNIHOME_ENABLE_RESTLER }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Evaluar resultados reales (skipped != passed)
+        run: python3 tools/ci/hardening.py --gate
+
+  hardening-report:
+    name: Hardening Report (Combinado)
+    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, dast-zap, restler-fuzzing, pr-quality-gate]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NEEDS_JSON: ${{ toJSON(needs) }}
+      CODE_CHANGED: ${{ needs.detect-changes.outputs.code }}
+      EVENT_NAME: ${{ github.event_name }}
+      UNIHOME_ENABLE_SONAR: ${{ vars.UNIHOME_ENABLE_SONAR }}
+      UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
+      UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
+      UNIHOME_ENABLE_PACT: ${{ vars.UNIHOME_ENABLE_PACT }}
+      UNIHOME_ENABLE_DOCKER: ${{ vars.UNIHOME_ENABLE_DOCKER }}
+      UNIHOME_ENABLE_ZAP: ${{ vars.UNIHOME_ENABLE_ZAP }}
+      UNIHOME_ENABLE_RESTLER: ${{ vars.UNIHOME_ENABLE_RESTLER }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Consolidar estados y documentar skipped / failed
+        run: python3 tools/ci/hardening.py --output reports/hardening.md
+      - name: Guardar reporte
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unihome-hardening-report
+          path: reports/hardening.md
+          if-no-files-found: error
           retention-days: 7
