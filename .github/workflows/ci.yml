@@ -328,11 +328,12 @@ jobs:
         run: |
           dotnet tool install --global dotnet-sonarscanner
           export PATH="$PATH:$HOME/.dotnet/tools"
-          dotnet sonarscanner begin \
-            /k:"$SONAR_PROJECT_KEY" /o:"$SONAR_ORGANIZATION" \
-            /d:sonar.host.url="https://sonarcloud.io" \
-            /d:sonar.qualitygate.wait=true \
-            /d:sonar.token="$SONAR_TOKEN"
+	  dotnet sonarscanner begin \
+  	    /k:"$SONAR_PROJECT_KEY" /o:"$SONAR_ORGANIZATION" \
+  	    /d:sonar.host.url="https://sonarcloud.io" \
+  	    /d:sonar.branch.name=main \
+  	    /d:sonar.qualitygate.wait=true \
+  	    /d:sonar.token="$SONAR_TOKEN"
           dotnet restore UniHome.Backend.slnx --locked-mode
           dotnet build UniHome.Backend.slnx -c Release --no-restore
           dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
