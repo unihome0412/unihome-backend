@@ -331,7 +331,6 @@ jobs:
           dotnet sonarscanner begin \
             /k:"$SONAR_PROJECT_KEY" /o:"$SONAR_ORGANIZATION" \
             /d:sonar.host.url="https://sonarcloud.io" \
-            /d:sonar.branch.name=main \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.token="$SONAR_TOKEN"
           dotnet restore UniHome.Backend.slnx --locked-mode
