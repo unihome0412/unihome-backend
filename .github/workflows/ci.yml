@@ -76,7 +76,7 @@ jobs:
             src tests
       - name: Conservar evidencia
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: semgrep-sast-report
           path: reports/semgrep.json
@@ -133,7 +133,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-results
           path: TestResults/**/*.trx
@@ -199,7 +199,7 @@ jobs:
 
       - name: Upload reporte de dependencias
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vulnerable-packages-report
           path: vulnerable-packages.json
@@ -243,7 +243,7 @@ jobs:
 
       - name: Upload reporte de Gitleaks
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gitleaks-report
           path: gitleaks-report.json
@@ -276,7 +276,7 @@ jobs:
           --results-directory TestResults/contracts
       - name: Guardar contratos verificados
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: openapi-contract-tests
           path: TestResults/contracts/**/*.trx
@@ -368,7 +368,7 @@ jobs:
           --results-directory TestResults/mongo
       - name: Evidencias
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mongodb-ci-results
           path: TestResults/mongo/**/*.trx
@@ -394,7 +394,7 @@ jobs:
           dotnet stryker --solution ../../UniHome.Backend.slnx
       - name: Conservar reporte
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: stryker-mutation-report
           path: tests/UniHome.UnitTests/StrykerOutput/**/*
@@ -414,7 +414,7 @@ jobs:
           docker build --tag unihome-ci:${GITHUB_SHA::12} .
           docker save --output unihome-ci.tar unihome-ci:${GITHUB_SHA::12}
       - name: Imagen para Dockle (no registro remoto)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-container-image
           path: unihome-ci.tar
@@ -484,7 +484,7 @@ jobs:
             -m 1 -I -r zap.html -J zap.json
       - name: Evidencia ZAP
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zap-baseline-report
           path: zap-reports/*
@@ -552,7 +552,7 @@ jobs:
         run: python3 tools/ci/hardening.py --output reports/hardening.md
       - name: Guardar reporte
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unihome-hardening-report
           path: reports/hardening.md
