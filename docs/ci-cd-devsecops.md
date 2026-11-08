@@ -23,9 +23,9 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 
 | Job | Variable de repositorio | Otro requisito | Evento permitido |
 |---|---|---|---|
-| SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | push main o manual |
+| SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
 | Database Test (MongoDB) | `UNIHOME_ENABLE_MONGO_CI=true` | Secret `UNIHOME_CI_MONGO_URI`; base **exclusiva `unihome_ci_verificacion`**, preparada previamente con M01-001; usuario con permisos limitados; acceso por IP del runner | Solo manual |
-| Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Validar previamente soporte `.slnx` y definir umbral de mutación | Solo manual |
+| Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | Solo instancia efímera local `/health/live`, sin secretos; escaneo **pasivo limitado**, no prueba toda la API | Solo manual |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Primero desarrollar `tests/UniHome.PactTests` con contratos de Mobile; en su ausencia falla al activarse | Solo manual |
@@ -34,6 +34,31 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 **Ninguno de estos trabajos usa `unihome_desarrollo`, crea migraciones, ejecuta deploy o escribe en Azure.** El trabajo MongoDB solo debe habilitarse después de autorización explícita de la base de CI. Los runners de GitHub tienen IPs variables; para Atlas se recomienda un runner de red controlada si no existe acceso seguro. **No abrir Atlas a `0.0.0.0/0`** para simplificar pruebas.
 
 ZAP: el escaneo inicial alcanza únicamente `http://127.0.0.1:5088/health/live`. Esto demuestra conexión, no cobertura DAST del flujo autenticado. RESTler / Pact requieren contratos y datos de prueba que aún no están implementados. No activar como simples interruptores para aparentar cobertura.
+
+## SonarQube Cloud
+
+- **PR interno hacia `main`**: se ejecuta análisis real de Pull Request. `SonarScanner for .NET` detecta automáticamente los metadatos desde el evento de GitHub Actions; no se pasan `sonar.branch.name` ni parámetros de rama manuales. El checkout usa `fetch-depth: 0`.
+- **Push a `main` y `workflow_dispatch` desde `main`**: se ejecuta análisis de la rama principal.
+- **`workflow_dispatch` desde una rama feature**: Sonar no se ejecuta y el gate no lo exige, porque el plan Free no admite análisis de ramas no principales. Stryker puede seguir ejecutándose en su evento manual.
+- **PR desde fork**: el job no se ejecuta porque GitHub no expone `SONAR_TOKEN` a esos PR; el gate falla cerrado si Sonar está habilitado y el job quedó `skipped`. No se usa `pull_request_target`.
+- **Cobertura para el Quality Gate**: el job de Sonar ejecuta las pruebas unitarias .NET con `XPlat Code Coverage` (Cobertura) y las pruebas Python de `tools/ci` con `coverage.py`. Los reportes se pasan al scanner; no se desactiva la condición de cobertura nueva.
+- Se mantiene `sonar.qualitygate.wait=true`: si el Quality Gate real falla, el job de Sonar falla y bloquea el PR.
+
+## Mutation testing (Stryker.NET)
+
+- Herramienta local fijada en `dotnet-tools.json` (`dotnet-stryker` 5.0.0); no se instala una versión global variable.
+- Configuración versionada: `tests/UniHome.UnitTests/stryker-config.json`. Muta únicamente `src/UniHome.Application/Identity/Login/LoginService.cs`.
+- Ejecución local reproducible:
+
+```bash
+dotnet tool restore
+cd tests/UniHome.UnitTests
+dotnet stryker --config-file stryker-config.json
+```
+
+- Reportes: `tests/UniHome.UnitTests/StrykerOutput/<timestamp>/reports/mutation-report.html` y `mutation-report.json`. No se versionan.
+- El job manual `mutation-test` restaura la herramienta desde el manifiesto, ejecuta pruebas unitarias, corre Stryker y publica ambos reportes. Falla si no hay mutaciones evaluadas, si hay errores de ejecución o si faltan los reportes.
+- Línea base verificada localmente: 57 mutantes en el archivo objetivo, 46 evaluados, 44 detectados, 2 sobrevivientes en `ConfigureAwait(false)` (sin efecto observable en el entorno de prueba) y mutation score de 95.65 %.
 
 ## Flujo
 
@@ -70,9 +95,9 @@ Las pruebas activadas en un contexto admisible pasan a ser **obligatorias** para
 
 ## Advertencias
 
-- Esta entrega se validó sintácticamente (YAML), con pruebas de la lógica del quality gate y comprobación de archivos y referencias, **no se ejecutó en GitHub Actions ni compiló .NET 10 en este entorno**. El primer PR será la validación real.
+- Esta entrega se validó sintácticamente (YAML), con pruebas de la lógica del quality gate y comprobación de archivos y referencias. La integración de Stryker.NET se validó localmente con .NET 10 y una ejecución real de mutaciones; el primer run de GitHub Actions sigue siendo la validación del pipeline completo.
 - Semgrep usa reglas externas y una versión de CLI instalada al ejecutar: para un pipeline reproducible de producción habrá que fijar versiones/digests y comprobar la licencia/costos aplicables.
 - Dockle usa un binario oficial descargado de GitHub; fijar y validar su checksum antes de exigirlo en producción.
-- Algunos jobs opcionales (Pact, RESTler, pruebas Mongo, Stryker) aún requieren su harness/configuración y deben quedar desactivados hasta ser verificados.
+- Algunos jobs opcionales (Pact, RESTler y pruebas Mongo) aún requieren su harness/configuración y deben quedar desactivados hasta ser verificados. Stryker.NET ya tiene configuración versionada y línea base local verificada.
 - Si el CI que actualmente está en GitHub fue modificado **después** del ZIP del 6 de noviembre, no aplicar el paquete a ciegas: reconciliar las diferencias antes.
 - Conservar `.local-sdd/` únicamente en local. `AGENTS.md`, `opencode.json`, `memoria.md` del SDD tampoco deben subir. La documentación técnica de CI en este paquete sí puede versionarse.

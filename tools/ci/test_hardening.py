@@ -1,6 +1,13 @@
 """Pruebas del quality gate, sin dependencias ni red."""
+import json
+import os
+import sys
 import unittest
-from hardening import evaluate
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from unittest.mock import patch
+
+from hardening import evaluate, main
 
 class GateTests(unittest.TestCase):
     def test_obligatorios_aprobados(self):
@@ -37,6 +44,135 @@ class GateTests(unittest.TestCase):
             "detect-changes", "dependency-scan", "secret-scan")}
         _, issues = evaluate(needs, False, {}, "pull_request")
         self.assertEqual([], issues)
+
+    def test_mutation_success_en_manual_cumple(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+        needs["mutation-test"] = {"result": "success"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "workflow_dispatch")
+        self.assertEqual([], issues)
+        self.assertIn("mutation-test", required)
+
+    def test_mutation_skipped_en_manual_bloquea(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+        needs["mutation-test"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "workflow_dispatch")
+        self.assertIn("mutation-test", required)
+        self.assertTrue(any("mutation-test" in issue for issue in issues))
+
+    def test_mutation_failure_en_manual_bloquea(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+        needs["mutation-test"] = {"result": "failure"}
+        _, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "workflow_dispatch")
+        self.assertTrue(any("mutation-test" in issue for issue in issues))
+
+    def test_mutation_skipped_en_pull_request_no_bloquea(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+        needs["mutation-test"] = {"result": "skipped"}
+        _, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "pull_request")
+        self.assertEqual([], issues)
+
+    @staticmethod
+    def _base_needs():
+        return {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+
+    def test_sonar_pr_interno_aprobado(self):
+        needs = self._base_needs()
+        needs["sonarcloud-sast"] = {"result": "success"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_SONAR": "true"}, "pull_request", "refs/pull/12/merge")
+        self.assertEqual([], issues)
+        self.assertIn("sonarcloud-sast", required)
+
+    def test_sonar_pr_fallido_bloquea(self):
+        needs = self._base_needs()
+        needs["sonarcloud-sast"] = {"result": "failure"}
+        _, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_SONAR": "true"}, "pull_request", "refs/pull/12/merge")
+        self.assertTrue(any("sonarcloud-sast" in issue for issue in issues))
+
+    def test_sonar_pr_omitido_bloquea(self):
+        needs = self._base_needs()
+        needs["sonarcloud-sast"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_SONAR": "true"}, "pull_request", "refs/pull/12/merge")
+        self.assertIn("sonarcloud-sast", required)
+        self.assertTrue(any("sonarcloud-sast" in issue for issue in issues))
+
+    def test_sonar_manual_main_aprobado(self):
+        needs = self._base_needs()
+        needs["sonarcloud-sast"] = {"result": "success"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_SONAR": "true"}, "workflow_dispatch", "refs/heads/main")
+        self.assertEqual([], issues)
+        self.assertIn("sonarcloud-sast", required)
+
+    def test_sonar_manual_feature_omitido_no_bloquea(self):
+        needs = self._base_needs()
+        needs["sonarcloud-sast"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_SONAR": "true"}, "workflow_dispatch", "refs/heads/feature/ci-stryker")
+        self.assertEqual([], issues)
+        self.assertNotIn("sonarcloud-sast", required)
+
+    def test_sonar_push_main_omitido_bloquea(self):
+        needs = self._base_needs()
+        needs["sonarcloud-sast"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_SONAR": "true"}, "push", "refs/heads/main")
+        self.assertIn("sonarcloud-sast", required)
+        self.assertTrue(any("sonarcloud-sast" in issue for issue in issues))
+
+    def test_main_manual_feature_no_exige_sonar(self):
+        needs = self._base_needs()
+        needs["sonarcloud-sast"] = {"result": "skipped"}
+        env = {
+            "NEEDS_JSON": json.dumps(needs),
+            "CODE_CHANGED": "true",
+            "EVENT_NAME": "workflow_dispatch",
+            "EVENT_REF": "refs/heads/feature/ci-stryker",
+            "UNIHOME_ENABLE_SONAR": "true",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(sys, "argv", ["hardening.py", "--gate"]),
+            redirect_stdout(StringIO()) as stdout,
+            redirect_stderr(StringIO()),
+        ):
+            result = main()
+        self.assertEqual(0, result)
+        self.assertIn("| `sonarcloud-sast` | **skipped** | no |", stdout.getvalue())
+
+    def test_main_pr_sonar_omitido_bloquea(self):
+        needs = self._base_needs()
+        needs["sonarcloud-sast"] = {"result": "skipped"}
+        env = {
+            "NEEDS_JSON": json.dumps(needs),
+            "CODE_CHANGED": "true",
+            "EVENT_NAME": "pull_request",
+            "EVENT_REF": "refs/pull/12/merge",
+            "UNIHOME_ENABLE_SONAR": "true",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(sys, "argv", ["hardening.py", "--gate"]),
+            redirect_stdout(StringIO()),
+            redirect_stderr(StringIO()) as stderr,
+        ):
+            result = main()
+        self.assertEqual(1, result)
+        self.assertIn(
+            "sonarcloud-sast: esperado success; encontrado skipped",
+            stderr.getvalue(),
+        )
 
 if __name__ == '__main__':
     unittest.main()

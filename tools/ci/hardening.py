@@ -9,8 +9,9 @@ from pathlib import Path
 
 MUST_RUN_ALWAYS = ("detect-changes", "dependency-scan", "secret-scan")
 MUST_RUN_FOR_CODE = ("semgrep-sast", "build-test", "contract-test")
+MAIN_REF_ONLY = {"sonarcloud-sast"}
 OPTIONAL = {
-    "sonarcloud-sast": ("UNIHOME_ENABLE_SONAR", {"push", "workflow_dispatch"}),
+    "sonarcloud-sast": ("UNIHOME_ENABLE_SONAR", {"pull_request", "push", "workflow_dispatch"}),
     "mongo-db-test": ("UNIHOME_ENABLE_MONGO_CI", {"workflow_dispatch"}),
     "mutation-test": ("UNIHOME_ENABLE_MUTATION", {"workflow_dispatch"}),
     "pact-contract": ("UNIHOME_ENABLE_PACT", {"workflow_dispatch"}),
@@ -21,13 +22,18 @@ OPTIONAL = {
 }
 
 
-def evaluate(needs: dict, changed: bool, flags: dict, event: str) -> tuple[list, list]:
+def evaluate(needs: dict, changed: bool, flags: dict, event: str, ref: str = "") -> tuple[list, list]:
     required = set(MUST_RUN_ALWAYS)
     if changed:
         required.update(MUST_RUN_FOR_CODE)
         for job, (flag, events) in OPTIONAL.items():
-            if str(flags.get(flag, "")).lower() == "true" and event in events:
-                required.add(job)
+            if str(flags.get(flag, "")).lower() != "true" or event not in events:
+                continue
+            # SonarCloud Free solo analiza main o PRs internos a main.
+            # Un workflow_dispatch desde una rama feature no debe exigir Sonar.
+            if job in MAIN_REF_ONLY and event != "pull_request" and ref != "refs/heads/main":
+                continue
+            required.add(job)
     problems = []
     for job in sorted(required):
         status = needs.get(job, {}).get("result", "missing")
@@ -66,7 +72,8 @@ def main() -> int:
     needs = json.loads(os.environ.get("NEEDS_JSON", "{}"))
     flags = {k: os.environ.get(k, "") for k in {v[0] for v in OPTIONAL.values()}}
     changed = os.environ.get("CODE_CHANGED", "true").lower() == "true"
-    required, problems = evaluate(needs, changed, flags, os.environ.get("EVENT_NAME", ""))
+    required, problems = evaluate(
+        needs, changed, flags, os.environ.get("EVENT_NAME", ""), os.environ.get("EVENT_REF", ""))
     report = make_report(needs, required, problems, changed)
     if args.output:
         path = Path(args.output)

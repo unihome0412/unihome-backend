@@ -9,6 +9,17 @@ public sealed class LoginServiceTests
     private static readonly DateTimeOffset Now = new(2026, 1, 15, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public async Task Login_ConComandoNulo_LanzaArgumentNullException()
+    {
+        var service = CreateService(
+            new InMemoryAccountRepository(),
+            new RecordingPasswordHasher(),
+            new FakeRefreshSessionRepository());
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() => service.LoginAsync(null!));
+    }
+
+    [Fact]
     public async Task Login_ConCredencialesValidas_CreaSesionYEmiteTokens()
     {
         var repository = new InMemoryAccountRepository();
@@ -125,10 +136,14 @@ public sealed class LoginServiceTests
     }
 
     [Theory]
-    [InlineData("", AccountTestData.Password)]
-    [InlineData("ana@uni.edu", "")]
-    [InlineData("no-es-correo", AccountTestData.Password)]
-    public async Task Login_ConDatosInvalidos_NoCreaSesion(string email, string password)
+    [InlineData("", AccountTestData.Password, "correo", "El correo electrónico es obligatorio.")]
+    [InlineData("ana@uni.edu", "", "contrasena", "La contraseña es obligatoria.")]
+    [InlineData("no-es-correo", AccountTestData.Password, "correo", "El correo electrónico no tiene un formato válido.")]
+    public async Task Login_ConDatosInvalidos_NoCreaSesion(
+        string email,
+        string password,
+        string expectedField,
+        string expectedMessage)
     {
         var repository = new InMemoryAccountRepository();
         var sessions = new FakeRefreshSessionRepository();
@@ -137,7 +152,9 @@ public sealed class LoginServiceTests
         var result = await service.LoginAsync(new LoginCommand(email, password));
 
         Assert.Equal(LoginStatus.ValidationFailed, result.Status);
-        Assert.NotEmpty(result.ValidationErrors);
+        var error = Assert.Single(result.ValidationErrors);
+        Assert.Equal(expectedField, error.Key);
+        Assert.Equal(new[] { expectedMessage }, error.Value);
         Assert.Equal(0, sessions.Count);
     }
 
@@ -152,7 +169,29 @@ public sealed class LoginServiceTests
             new LoginCommand("ana@uni.edu", new string('x', 129)));
 
         Assert.Equal(LoginStatus.ValidationFailed, result.Status);
+        var error = Assert.Single(result.ValidationErrors);
+        Assert.Equal("contrasena", error.Key);
+        Assert.Equal(
+            new[] { "La contraseña no debe superar 128 caracteres." },
+            error.Value);
         Assert.Empty(hasher.VerifyCalls);
+    }
+
+    [Fact]
+    public async Task Login_ConContrasenaDeLongitudMaxima_NoFallaValidacion()
+    {
+        var repository = new InMemoryAccountRepository();
+        await repository.AddAsync(AccountTestData.Create("ana@uni.edu"));
+        var hasher = new RecordingPasswordHasher();
+        var service = CreateService(repository, hasher, new FakeRefreshSessionRepository());
+        var password = new string('x', 128);
+
+        var result = await service.LoginAsync(
+            new LoginCommand("ana@uni.edu", password));
+
+        Assert.Equal(LoginStatus.InvalidCredentials, result.Status);
+        var verification = Assert.Single(hasher.VerifyCalls);
+        Assert.Equal(password, verification.Password);
     }
 
     private static LoginService CreateService(
