@@ -226,9 +226,18 @@ ejecuta restore/build/formato/pruebas, revisión de dependencias vulnerables y G
 sobre el historial completo; `.github/workflows/codeql.yml` ejecuta CodeQL para C#. No
 despliega ni usa credenciales.
 
+El job manual `mongo-db-test` (habilitado con la variable de repositorio
+`UNIHOME_ENABLE_MONGO_CI=true`) levanta MongoDB Community 8.0.34 dentro del runner
+de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
+local ni secretos: la URI se limita a `127.0.0.1`, la base es
+`unihome_ci_verificacion`, se aplica únicamente `M01-001` a esa base temporal y las
+pruebas reales de identidad y bloqueo distribuido se ejecutan con TRX. El job falla
+si MongoDB no inicia, si la migración no queda válida, si las pruebas se omiten o
+si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
+
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
-ejecutarla en una base de verificación aislada, primero revisar y aplicar la
-migración con la herramienta separada. La prueba no aplica DDL y puede utilizar
+ejecutarla localmente en una base de verificación aislada, primero revisar y aplicar
+la migración con la herramienta separada. La prueba no aplica DDL y puede utilizar
 una credencial de ejecución con CRUD y lectura de metadatos sin permisos de DDL:
 
 ```powershell

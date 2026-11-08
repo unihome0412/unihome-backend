@@ -140,8 +140,13 @@ autoriza migrar `unihome_desarrollo`.
 
 ## Pruebas y límites
 
-La prueba Atlas opt-in usa la API y repositorios reales, pero captura el correo en
-memoria. Requiere el esquema previamente migrado y no llama a `ApplyAsync`.
+La prueba real opt-in usa la API y repositorios reales, pero captura el correo en
+memoria. Requiere el esquema previamente migrado y no llama a `ApplyAsync`. Puede
+ejecutarse contra un Atlas autorizado o contra el MongoDB efímero de GitHub
+Actions. En CI, el job manual `mongo-db-test` levanta MongoDB Community 8.0.34 en
+un contenedor temporal, valida la URI loopback, aplica solo `M01-001` a
+`unihome_ci_verificacion` y verifica ledger, checksum e índices antes de ejecutar
+las pruebas. El job falla si las pruebas se omiten o si no hay TRX.
 La auditoría de las 20 colecciones externas se ejecuta aparte con la herramienta,
 no es un fixture exigido por la prueba de identidad. La confirmación se realiza mediante dominio/repositorio como precondición;
 **no prueba un endpoint de confirmación**, aún pendiente de contrato.
@@ -152,7 +157,8 @@ y espera el código 11000, además del conflicto REST. Un coordinador de pruebas
 espera a que ambas solicitudes alcancen el CAS antes de liberarlas; las operaciones
 de persistencia y sus filtros no se sustituyen.
 No se ha probado una identidad Atlas independiente sin permisos de DDL; no se
-crearon usuarios ni se modificaron privilegios del clúster.
+crearon usuarios ni se modificaron privilegios del clúster. La ejecución real de
+MongoDB CI se registra en el artefacto `mongodb-ci-results` del workflow.
 
 Los resultados de restore/build/test/format se informan por separado para no
 confundir las pruebas con dobles con la ejecución contra Atlas. Pendientes:
@@ -168,8 +174,9 @@ ledger inmutable, sanitización del parser, rechazo de índices adicionales
 peligrosos y barrera de concurrencia de pruebas; se retiró el DDL de la prueba.
 La repetición Atlas de esta versión quedó **bloqueada por permisos de la herramienta**,
 incluso después de la autorización expresa del usuario. No atribuir el resultado
-Atlas anterior al código final. Ejecutar el comando opt-in del README en el entorno
-local autorizado antes de dar por verificada esta revisión con base real.
+Atlas anterior al código final. La verificación con base real se realiza mediante
+el job manual `mongo-db-test` (MongoDB efímero y aislado) o el comando opt-in del
+README en un entorno local autorizado.
 
 Validación local de esta revisión final:
 
