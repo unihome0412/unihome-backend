@@ -38,5 +38,39 @@ class GateTests(unittest.TestCase):
         _, issues = evaluate(needs, False, {}, "pull_request")
         self.assertEqual([], issues)
 
+    def test_mutation_success_en_manual_cumple(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+        needs["mutation-test"] = {"result": "success"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "workflow_dispatch")
+        self.assertEqual([], issues)
+        self.assertIn("mutation-test", required)
+
+    def test_mutation_skipped_en_manual_bloquea(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+        needs["mutation-test"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "workflow_dispatch")
+        self.assertIn("mutation-test", required)
+        self.assertTrue(any("mutation-test" in issue for issue in issues))
+
+    def test_mutation_failure_en_manual_bloquea(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+        needs["mutation-test"] = {"result": "failure"}
+        _, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "workflow_dispatch")
+        self.assertTrue(any("mutation-test" in issue for issue in issues))
+
+    def test_mutation_skipped_en_pull_request_no_bloquea(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+        needs["mutation-test"] = {"result": "skipped"}
+        _, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "pull_request")
+        self.assertEqual([], issues)
+
 if __name__ == '__main__':
     unittest.main()

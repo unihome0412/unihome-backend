@@ -9,3 +9,6 @@
 TestResults/
 coverage/
 *.trx
+StrykerOutput/
+__pycache__/
+*.pyc
