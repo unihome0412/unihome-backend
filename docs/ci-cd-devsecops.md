@@ -23,7 +23,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 
 | Job | Variable de repositorio | Otro requisito | Evento permitido |
 |---|---|---|---|
-| SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | push main o manual |
+| SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
 | Database Test (MongoDB) | `UNIHOME_ENABLE_MONGO_CI=true` | Secret `UNIHOME_CI_MONGO_URI`; base **exclusiva `unihome_ci_verificacion`**, preparada previamente con M01-001; usuario con permisos limitados; acceso por IP del runner | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
@@ -34,6 +34,15 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 **Ninguno de estos trabajos usa `unihome_desarrollo`, crea migraciones, ejecuta deploy o escribe en Azure.** El trabajo MongoDB solo debe habilitarse después de autorización explícita de la base de CI. Los runners de GitHub tienen IPs variables; para Atlas se recomienda un runner de red controlada si no existe acceso seguro. **No abrir Atlas a `0.0.0.0/0`** para simplificar pruebas.
 
 ZAP: el escaneo inicial alcanza únicamente `http://127.0.0.1:5088/health/live`. Esto demuestra conexión, no cobertura DAST del flujo autenticado. RESTler / Pact requieren contratos y datos de prueba que aún no están implementados. No activar como simples interruptores para aparentar cobertura.
+
+## SonarQube Cloud
+
+- **PR interno hacia `main`**: se ejecuta análisis real de Pull Request. `SonarScanner for .NET` detecta automáticamente los metadatos desde el evento de GitHub Actions; no se pasan `sonar.branch.name` ni parámetros de rama manuales. El checkout usa `fetch-depth: 0`.
+- **Push a `main` y `workflow_dispatch` desde `main`**: se ejecuta análisis de la rama principal.
+- **`workflow_dispatch` desde una rama feature**: Sonar no se ejecuta y el gate no lo exige, porque el plan Free no admite análisis de ramas no principales. Stryker puede seguir ejecutándose en su evento manual.
+- **PR desde fork**: el job no se ejecuta porque GitHub no expone `SONAR_TOKEN` a esos PR; el gate falla cerrado si Sonar está habilitado y el job quedó `skipped`. No se usa `pull_request_target`.
+- **Cobertura para el Quality Gate**: el job de Sonar ejecuta las pruebas unitarias .NET con `XPlat Code Coverage` (Cobertura) y las pruebas Python de `tools/ci` con `coverage.py`. Los reportes se pasan al scanner; no se desactiva la condición de cobertura nueva.
+- Se mantiene `sonar.qualitygate.wait=true`: si el Quality Gate real falla, el job de Sonar falla y bloquea el PR.
 
 ## Mutation testing (Stryker.NET)
 

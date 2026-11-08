@@ -1,7 +1,12 @@
 """Pruebas del resumen de Stryker, sin dependencias ni red."""
+import json
+import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
 
-from stryker_summary import render, summarize
+from stryker_summary import main, render, summarize
 
 
 class StrykerSummaryTests(unittest.TestCase):
@@ -77,6 +82,57 @@ class StrykerSummaryTests(unittest.TestCase):
         self.assertEqual(0, summary["mutants"])
         self.assertEqual(0, summary["tested"])
         self.assertEqual(0, summary["score"])
+
+    @staticmethod
+    def _write_report(root: Path, report: dict) -> None:
+        reports = root / "2026-01-01.00-00-00" / "reports"
+        reports.mkdir(parents=True)
+        (reports / "mutation-report.json").write_text(
+            json.dumps(report), encoding="utf-8")
+
+    def test_main_sin_reporte_falla(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                result = main(Path(tmp))
+        self.assertEqual(1, result)
+        self.assertIn("No se encontró mutation-report.json", stderr.getvalue())
+
+    def test_main_reporte_valido_aprueba(self):
+        report = {"files": {"a.cs": {"mutants": [{"status": "Killed"}]}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_report(root, report)
+            with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                result = main(root)
+        self.assertEqual(0, result)
+        self.assertIn("Mutation score", stdout.getvalue())
+
+    def test_main_reporte_vacio_falla(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_report(root, {"files": {}})
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = main(root)
+        self.assertEqual(1, result)
+
+    def test_main_sin_mutaciones_evaluadas_falla(self):
+        report = {"files": {"a.cs": {"mutants": [{"status": "Ignored"}]}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_report(root, report)
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = main(root)
+        self.assertEqual(1, result)
+
+    def test_main_error_de_ejecucion_falla(self):
+        report = {"files": {"a.cs": {"mutants": [
+            {"status": "Killed"}, {"status": "RuntimeError"}]}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_report(root, report)
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = main(root)
+        self.assertEqual(1, result)
 
 
 if __name__ == "__main__":

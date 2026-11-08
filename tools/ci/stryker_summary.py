@@ -2,12 +2,11 @@
 """Resume el reporte JSON de Stryker.NET y falla si no hay mutaciones evaluadas."""
 from __future__ import annotations
 
-import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
+REPORT_ROOT = Path("tests/UniHome.UnitTests/StrykerOutput")
 TESTED_STATUSES = ("Killed", "Survived", "Timeout", "NoCoverage", "RuntimeError")
 
 
@@ -119,21 +118,11 @@ def _escape(value: str) -> str:
     return value.replace("|", "\\|")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--report", type=Path)
-    parser.add_argument(
-        "--output-root",
-        type=Path,
-        default=Path("tests/UniHome.UnitTests/StrykerOutput"),
-    )
-    parser.add_argument("--summary-file", type=Path)
-    args = parser.parse_args()
-
-    report_path = args.report or find_latest_report(args.output_root)
+def main(root: Path = REPORT_ROOT) -> int:
+    report_path = find_latest_report(root)
     if report_path is None or not report_path.is_file():
         print(
-            f"::error::No se encontró mutation-report.json en {args.output_root}",
+            f"::error::No se encontró mutation-report.json en {root}",
             file=sys.stderr,
         )
         return 1
@@ -142,13 +131,6 @@ def main() -> int:
     summary = summarize(report)
     text = render(summary)
     print(text)
-
-    summary_file = args.summary_file
-    if summary_file is None and os.environ.get("GITHUB_STEP_SUMMARY"):
-        summary_file = Path(os.environ["GITHUB_STEP_SUMMARY"])
-    if summary_file is not None:
-        with summary_file.open("a", encoding="utf-8") as file:
-            file.write(text)
 
     if summary["mutants"] == 0:
         print(

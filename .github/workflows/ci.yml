@@ -305,7 +305,9 @@ jobs:
   sonarcloud-sast:
     name: SonarCloud SAST (.NET)
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_SONAR == 'true' && github.event_name != 'pull_request' }}
+    # PR interno a main: análisis real de PR. Push y manual: solo desde main.
+    # Las ramas feature no se analizan como ramas independientes (plan Free).
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_SONAR == 'true' && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -324,6 +326,18 @@ jobs:
           test -n "$SONAR_TOKEN" || { echo "::error::Falta SONAR_TOKEN"; exit 1; }
           test -n "$SONAR_PROJECT_KEY" || { echo "::error::Falta SONAR_PROJECT_KEY"; exit 1; }
           test -n "$SONAR_ORGANIZATION" || { echo "::error::Falta SONAR_ORGANIZATION"; exit 1; }
+      - name: Verificar contexto de GitHub Actions
+        run: |
+          echo "Evento: $GITHUB_EVENT_NAME"
+          echo "Ref: $GITHUB_REF"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "Head: $GITHUB_HEAD_REF"
+            echo "Base: $GITHUB_BASE_REF"
+            test -n "$GITHUB_HEAD_REF" || { echo "::error::Falta GITHUB_HEAD_REF en el PR"; exit 1; }
+            test "$GITHUB_BASE_REF" = "main" || { echo "::error::El PR no apunta a main"; exit 1; }
+          else
+            test "$GITHUB_REF" = "refs/heads/main" || { echo "::error::Sonar solo analiza main fuera de PR"; exit 1; }
+          fi
       - name: Analizar con SonarScanner for .NET
         run: |
           dotnet tool install --global dotnet-sonarscanner
@@ -332,9 +346,19 @@ jobs:
             /k:"$SONAR_PROJECT_KEY" /o:"$SONAR_ORGANIZATION" \
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.qualitygate.wait=true \
+            /d:sonar.cs.cobertura.reportsPaths="TestResults/sonar/**/coverage.cobertura.xml" \
+            /d:sonar.python.coverage.reportPaths="coverage/python-coverage.xml" \
             /d:sonar.token="$SONAR_TOKEN"
           dotnet restore UniHome.Backend.slnx --locked-mode
           dotnet build UniHome.Backend.slnx -c Release --no-restore
+          dotnet test tests/UniHome.UnitTests/UniHome.UnitTests.csproj \
+            -c Release --no-build --no-restore \
+            --collect:"XPlat Code Coverage" \
+            --results-directory TestResults/sonar
+          python3 -m pip install --disable-pip-version-check --only-binary :all: --no-deps coverage==7.17.2
+          python3 -m coverage run --source=tools/ci -m unittest discover -s tools/ci -p 'test_*.py'
+          mkdir -p coverage
+          python3 -m coverage xml -o coverage/python-coverage.xml
           dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
   mongo-db-test:
@@ -412,7 +436,9 @@ jobs:
         run: dotnet stryker --config-file stryker-config.json
       - name: Resumir y validar mutaciones reales
         if: always()
-        run: python3 tools/ci/stryker_summary.py --output-root tests/UniHome.UnitTests/StrykerOutput
+        run: |
+          set -o pipefail
+          python3 tools/ci/stryker_summary.py | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Conservar reportes HTML y JSON
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -548,6 +574,7 @@ jobs:
       NEEDS_JSON: ${{ toJSON(needs) }}
       CODE_CHANGED: ${{ needs.detect-changes.outputs.code }}
       EVENT_NAME: ${{ github.event_name }}
+      EVENT_REF: ${{ github.ref }}
       UNIHOME_ENABLE_SONAR: ${{ vars.UNIHOME_ENABLE_SONAR }}
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
@@ -570,6 +597,7 @@ jobs:
       NEEDS_JSON: ${{ toJSON(needs) }}
       CODE_CHANGED: ${{ needs.detect-changes.outputs.code }}
       EVENT_NAME: ${{ github.event_name }}
+      EVENT_REF: ${{ github.ref }}
       UNIHOME_ENABLE_SONAR: ${{ vars.UNIHOME_ENABLE_SONAR }}
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}

@@ -8,6 +8,7 @@
 *.env
 TestResults/
 coverage/
+.coverage
 *.trx
 StrykerOutput/
 __pycache__/
