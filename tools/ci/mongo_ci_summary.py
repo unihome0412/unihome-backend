@@ -23,6 +23,7 @@ EXPECTED_TESTS = (
     "MongoIdentityPersistenceTests.RegistroLoginRefreshConcurrenteYLogout_DebeFuncionarContraMongoReal",
     "MongoPromotionLockPersistenceTests.BloqueoDistribuido_ExclusionMutua_RenovacionYFencingObsoleto_DebeFuncionarContraMongoReal",
 )
+SUMMARY_PATH = Path("TestResults/mongo/mongo-ci-summary.md")
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,7 @@ def inspect_trx(path: Path) -> Evidence:
         finish = _parse_instant(times.get("finish"))
         if start is not None and finish is not None:
             duration_seconds = max(0.0, (finish - start).total_seconds())
-    if duration_seconds == 0.0:
+    if duration_seconds <= 0.0:
         duration_seconds = sum(test.duration_seconds for test in tests)
 
     passed = sum(test.outcome == PASSED for test in tests)
@@ -163,10 +164,9 @@ def render_report(
     return "\n".join(lines)
 
 
-def _write_summary(report: str, summary_path: Path | None) -> None:
-    if summary_path is not None:
-        summary_path.parent.mkdir(parents=True, exist_ok=True)
-        summary_path.write_text(report + "\n", encoding="utf-8")
+def _write_summary(report: str) -> None:
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SUMMARY_PATH.write_text(report + "\n", encoding="utf-8")
 
     github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if github_summary:
@@ -183,10 +183,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--database", required=True)
     parser.add_argument("--initialization", default="unknown")
     parser.add_argument("--tests-outcome", default="unknown")
-    parser.add_argument("--summary", help="Ruta opcional para el resumen Markdown")
     args = parser.parse_args(argv)
 
-    summary_path = Path(args.summary) if args.summary else None
     trx_path = Path(args.trx)
     issues: list[str] = []
 
@@ -204,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         args.database,
         args.initialization,
     )
-    _write_summary(report, summary_path)
+    _write_summary(report)
 
     if issues:
         for issue in issues:

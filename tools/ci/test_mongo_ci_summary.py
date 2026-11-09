@@ -2,10 +2,12 @@
 import io
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import chdir, redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from mongo_ci_summary import EXPECTED_TESTS, main
+
+SUMMARY_PATH = Path("TestResults/mongo/mongo-ci-summary.md")
 
 TRX_HEADER = (
     '<?xml version="1.0" encoding="utf-8"?>'
@@ -25,7 +27,7 @@ def make_trx(results: list[tuple[str, str]]) -> str:
 
 
 class MongoSummaryTests(unittest.TestCase):
-    def run_main(self, trx_path: Path, summary_path: Path, **kwargs):
+    def run_main(self, trx_path: Path, **kwargs):
         argv = [
             "--trx",
             str(trx_path),
@@ -37,8 +39,6 @@ class MongoSummaryTests(unittest.TestCase):
             kwargs.get("initialization", "success"),
             "--tests-outcome",
             kwargs.get("tests_outcome", "success"),
-            "--summary",
-            str(summary_path),
         ]
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -47,33 +47,34 @@ class MongoSummaryTests(unittest.TestCase):
         return result, stdout.getvalue(), stderr.getvalue()
 
     def test_aprueba_las_dos_pruebas_reales(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
             trx = Path(directory) / "mongo-ci.trx"
-            summary = Path(directory) / "summary.md"
             trx.write_text(
                 make_trx([(name, "Passed") for name in EXPECTED_TESTS]),
                 encoding="utf-8",
             )
 
-            result, output, _ = self.run_main(trx, summary)
+            result, output, _ = self.run_main(trx)
 
             self.assertEqual(0, result)
             self.assertIn("| Pruebas ejecutadas | 2 |", output)
             self.assertIn("| Pruebas aprobadas | 2 |", output)
             self.assertIn("| Resultado final | **PASS** |", output)
             self.assertIn("| Tiempo de ejecución | 3.25 s |", output)
-            self.assertIn("PASS", summary.read_text(encoding="utf-8"))
+            self.assertIn(
+                "PASS",
+                SUMMARY_PATH.read_text(encoding="utf-8"),
+            )
 
     def test_omision_no_se_considera_aprobada(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
             trx = Path(directory) / "mongo-ci.trx"
-            summary = Path(directory) / "summary.md"
             trx.write_text(
                 make_trx([(EXPECTED_TESTS[0], "NotExecuted"), (EXPECTED_TESTS[1], "Passed")]),
                 encoding="utf-8",
             )
 
-            result, output, errors = self.run_main(trx, summary)
+            result, output, errors = self.run_main(trx)
 
             self.assertEqual(1, result)
             self.assertIn("| Pruebas omitidas | 1 |", output)
@@ -81,60 +82,48 @@ class MongoSummaryTests(unittest.TestCase):
             self.assertIn("::error::", errors)
 
     def test_falta_una_prueba_esperada(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
             trx = Path(directory) / "mongo-ci.trx"
-            summary = Path(directory) / "summary.md"
             trx.write_text(make_trx([(EXPECTED_TESTS[0], "Passed")]), encoding="utf-8")
 
-            result, output, _ = self.run_main(trx, summary)
+            result, output, _ = self.run_main(trx)
 
             self.assertEqual(1, result)
             self.assertIn("Falta la prueba MongoDB esperada", output)
 
     def test_trx_inexistente_falla_y_genera_reporte(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
             trx = Path(directory) / "no-existe.trx"
-            summary = Path(directory) / "summary.md"
 
-            result, output, _ = self.run_main(trx, summary)
+            result, output, _ = self.run_main(trx)
 
             self.assertEqual(1, result)
             self.assertIn("No se encontró o no se pudo leer el TRX", output)
             self.assertIn("| Resultado final | **FAIL** |", output)
-            self.assertTrue(summary.exists())
+            self.assertTrue(SUMMARY_PATH.exists())
 
     def test_paso_de_pruebas_omitido_bloquea(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
             trx = Path(directory) / "mongo-ci.trx"
-            summary = Path(directory) / "summary.md"
             trx.write_text(
                 make_trx([(name, "Passed") for name in EXPECTED_TESTS]),
                 encoding="utf-8",
             )
 
-            result, output, _ = self.run_main(
-                trx,
-                summary,
-                tests_outcome="skipped",
-            )
+            result, output, _ = self.run_main(trx, tests_outcome="skipped")
 
             self.assertEqual(1, result)
             self.assertIn("El paso de pruebas MongoDB no terminó correctamente", output)
 
     def test_inicializacion_fallida_bloquea(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
             trx = Path(directory) / "mongo-ci.trx"
-            summary = Path(directory) / "summary.md"
             trx.write_text(
                 make_trx([(name, "Passed") for name in EXPECTED_TESTS]),
                 encoding="utf-8",
             )
 
-            result, output, _ = self.run_main(
-                trx,
-                summary,
-                initialization="failure",
-            )
+            result, output, _ = self.run_main(trx, initialization="failure")
 
             self.assertEqual(1, result)
             self.assertIn("La inicialización de la base efímera", output)

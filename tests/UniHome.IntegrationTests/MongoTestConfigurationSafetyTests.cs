@@ -25,7 +25,9 @@ public sealed class MongoTestConfigurationSafetyTests
     [InlineData("mongodb://[::1]:27017/?directConnection=true")]
     public void UriLoopbackDirectaSinCredenciales_EsAceptada(string uri)
     {
-        MongoIntegrationEnvironment.EnsureLoopbackOnly(uri);
+        var exception = Record.Exception(() =>
+            MongoIntegrationEnvironment.EnsureLoopbackOnly(uri));
+        Assert.Null(exception);
     }
 
     [Theory]

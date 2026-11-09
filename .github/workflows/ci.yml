@@ -486,7 +486,6 @@ jobs:
           --database "$MONGO_CI_DATABASE"
           --initialization "$MONGO_CI_INITIALIZATION"
           --tests-outcome "$MONGO_CI_TEST_OUTCOME"
-          --summary TestResults/mongo/mongo-ci-summary.md
       - name: Publicar evidencias MongoDB
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
