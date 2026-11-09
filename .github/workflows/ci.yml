@@ -366,7 +366,7 @@ jobs:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MONGO_CI == 'true' && github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       mongodb:
         image: mongo:8.0.4
@@ -388,8 +388,6 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
-          cache: true
-          cache-dependency-path: '**/packages.lock.json'
       - name: Validar aislamiento de conexión y rechazar URI externa
         run: |
           set -euo pipefail

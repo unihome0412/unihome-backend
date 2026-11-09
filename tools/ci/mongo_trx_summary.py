@@ -62,6 +62,11 @@ def parse_trx(file_path: Path) -> dict:
     }
 
 
+def matches_test_name(actual_name: str, expected_name: str) -> bool:
+    """Valida si el nombre coincide exactamente o termina en '.' + expected_name (Namespace.Clase.Metodo)."""
+    return actual_name == expected_name or actual_name.endswith(f".{expected_name}")
+
+
 def validate(summary: dict) -> list[str]:
     issues: list[str] = []
     counters = summary.get("counters", {})
@@ -84,12 +89,18 @@ def validate(summary: dict) -> list[str]:
     if not_executed > 0:
         issues.append(f"Hay {not_executed} pruebas omitidas (skipped) en MongoDB CI. skipped != passed.")
 
-    found_names = {r.get("testName", ""): r.get("outcome", "") for r in results}
     for expected in EXPECTED_TESTS:
-        if expected not in found_names:
+        matching = [
+            r for r in results
+            if matches_test_name(r.get("testName", ""), expected)
+        ]
+        if not matching:
             issues.append(f"Falta la prueba esperada: {expected}.")
-        elif found_names[expected].lower() != "passed":
-            issues.append(f"La prueba {expected} no tiene estado Passed (estado: {found_names[expected]}).")
+        else:
+            for match in matching:
+                outcome = match.get("outcome", "")
+                if outcome.lower() != "passed":
+                    issues.append(f"La prueba {expected} no tiene estado Passed (estado: {outcome}).")
 
     return issues
 
@@ -142,6 +153,11 @@ def render_markdown(summary: dict, issues: list[str]) -> str:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Valida el reporte TRX de MongoDB CI.")
     parser.add_argument("--trx", type=Path, default=None, help="Ruta al archivo .trx")
     parser.add_argument("--dir", type=Path, default=DEFAULT_TRX_DIR, help="Directorio con archivos .trx")
