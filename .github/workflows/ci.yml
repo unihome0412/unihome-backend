@@ -372,7 +372,7 @@ jobs:
         # MongoDB Community 8.0.34, fijado por digest para evitar cambios de tag.
         image: mongo:8.0.34@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
         ports:
-          - 27017:27017
+          - 127.0.0.1:27017:27017
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
           --health-interval 5s
