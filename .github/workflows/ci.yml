@@ -371,6 +371,12 @@ jobs:
       mongo:
         # MongoDB Community 8.0.34, fijado por digest para evitar cambios de tag.
         image: mongo:8.0.34@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+        # El runner Ubuntu 24.04 usa kernel 7.0.x. MongoDB 8.0.34 aplica un
+        # guard de TCMalloc para kernels 6.19–7.0.13; en el runner el kernel ya
+        # contiene la corrección y este ajuste evita el falso bloqueo. Solo se
+        # aplica al contenedor efímero de CI.
+        env:
+          GLIBC_TUNABLES: glibc.pthread.rseq=1
         ports:
           - 127.0.0.1:27017:27017
         options: >-
