@@ -276,3 +276,8 @@ az group delete --name rg-unihome-dev --yes --no-wait
   fuera de alcance de esta tarea).
 - `ACR Tasks` sigue bloqueado en esta suscripción; si se necesita build remoto
   más adelante, abrir un caso de soporte de Azure.
+- **Escalado a 2 réplicas y estado compartido (propuesta ADR-006):** El despliegue
+  actual opera con 1 réplica (0.25 vCPU / 0.5 GiB). La propuesta ADR-006 plantea
+  2 réplicas con estado compartido en Redis para coordinar el rate limit y el
+  caché de cuenta (BE-SEC-008); el momento exacto de pasar a 2 réplicas se definirá
+  con el equipo y el profesor según el crédito de Azure disponible. Variables planeadas (aún no existen en el código ni se configuran en Azure): `Redis__ConnectionString` y `Auth__RateLimit__IpHashSalt`, ambas sensibles; se agregarán a la tabla de variables cuando se implementen.

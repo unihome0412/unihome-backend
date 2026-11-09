@@ -120,8 +120,10 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   segundos; `ConfirmEmailPermitLimit` / `ConfirmEmailWindowSeconds` valen 10 por 60;
   `ResendPermitLimit` / `ResendWindowSeconds` valen 5 por 60. Son umbrales
   provisionales pendientes de aprobación. El limitador es en memoria y asume una sola
-  instancia del proceso (BE-SEC-009); escalar horizontalmente requiere el ADR de
-  estado distribuido.
+  instancia del proceso (BE-SEC-009); para escalar horizontalmente a 2 réplicas se
+  diseñó la propuesta ADR-006 (estado compartido acotado con Redis en Upstash para
+  rate limit y caché de cuenta BE-SEC-008, actualmente planeada y pendiente de
+  implementación).
 - Límite "por cuenta" de intentos de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
   (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como
@@ -249,9 +251,10 @@ y elimina únicamente sus documentos de prueba. No envía correos reales.
 - Recuperación de contraseña (EP-M01-06/07).
 - **DEC-09**: mensaje/código definitivo ante correo duplicado en el registro.
 - **DEC-10**: tratamiento de menores de edad y consentimiento aplicable.
-- Rate limiting de registro; aprobación de los umbrales provisionales de
-  login/refresh/confirmación/reenvío y del límite "por cuenta" de intentos de
-  confirmación (`VerificationCode.MaxConfirmationAttempts`).
+- Rate limiting de registro (planeado en propuesta ADR-006 a 5 intentos/minuto);
+  aprobación de los umbrales provisionales de login/refresh/confirmación/reenvío
+  y del límite "por cuenta" de intentos de confirmación
+  (`VerificationCode.MaxConfirmationAttempts`).
 - **EP-M01-09** (eliminar cuenta) implementado solo en lo exigido por la spec:
   borrado lógico y revocación de todas las sesiones. Pendiente: rechazo `409` por
   vínculos activos de propiedades/ocupación (M05/M09, HU-096) y la política de
