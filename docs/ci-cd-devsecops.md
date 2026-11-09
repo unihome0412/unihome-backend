@@ -24,14 +24,14 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Job | Variable de repositorio | Otro requisito | Evento permitido |
 |---|---|---|---|
 | SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
-| Database Test (MongoDB) | `UNIHOME_ENABLE_MONGO_CI=true` | Secret `UNIHOME_CI_MONGO_URI`; base **exclusiva `unihome_ci_verificacion`**, preparada previamente con M01-001; usuario con permisos limitados; acceso por IP del runner | Solo manual |
+| Database Test (MongoDB) | `UNIHOME_ENABLE_MONGO_CI=true` | Service container `mongo:8.0.4` efímero en runner (`127.0.0.1:27017`); base aislada `unihome_ci_verificacion` inicializada con M01-001; validación estricta TRX | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | Solo instancia efímera local `/health/live`, sin secretos; escaneo **pasivo limitado**, no prueba toda la API | Solo manual |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Primero desarrollar `tests/UniHome.PactTests` con contratos de Mobile; en su ausencia falla al activarse | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | Primero implementar `tools/ci/restler/run-isolated.sh` y un harness 100 % aislado; si falta, **falla** | Solo manual |
 
-**Ninguno de estos trabajos usa `unihome_desarrollo`, crea migraciones, ejecuta deploy o escribe en Azure.** El trabajo MongoDB solo debe habilitarse después de autorización explícita de la base de CI. Los runners de GitHub tienen IPs variables; para Atlas se recomienda un runner de red controlada si no existe acceso seguro. **No abrir Atlas a `0.0.0.0/0`** para simplificar pruebas.
+**Ninguno de estos trabajos usa `unihome_desarrollo`, toca bases de Atlas, ejecuta deploy o escribe en Azure.** El trabajo `mongo-db-test` corre 100 % aislado en un contenedor de servicio efímero `mongo:8.0.4` dentro del runner de GitHub Actions, inicializa la base temporal `unihome_ci_verificacion` con `UniHome.MongoMigrator` y destruye el contenedor al terminar, sin requerir secretos externos ni conexión a Atlas.
 
 ZAP: el escaneo inicial alcanza únicamente `http://127.0.0.1:5088/health/live`. Esto demuestra conexión, no cobertura DAST del flujo autenticado. RESTler / Pact requieren contratos y datos de prueba que aún no están implementados. No activar como simples interruptores para aparentar cobertura.
 

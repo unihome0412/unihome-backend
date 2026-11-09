@@ -366,9 +366,20 @@ jobs:
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MONGO_CI == 'true' && github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    services:
+      mongodb:
+        image: mongo:8.0.4
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --norc --eval 'db.runCommand({ ping: 1 }).ok' | grep -q '^1$'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 5s
     env:
-      MongoDb__ConnectionString: ${{ secrets.UNIHOME_CI_MONGO_URI }}
+      MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?connectTimeoutMS=5000&serverSelectionTimeoutMS=5000'
       MongoDb__DatabaseName: unihome_ci_verificacion
       UNIHOME_RUN_MONGO_INTEGRATION_TESTS: '1'
       UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_ci_verificacion
@@ -377,26 +388,69 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
-      - name: Exigir conexión y base de CI ya migrada M01-001
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Validar aislamiento de conexión y rechazar URI externa
         run: |
-          test -n "$MongoDb__ConnectionString" || { echo "::error::Falta UNIHOME_CI_MONGO_URI"; exit 1; }
-          if [ "$MongoDb__DatabaseName" != 'unihome_ci_verificacion' ]; then exit 1; fi
-          echo "La base exclusiva debe existir y tener M01-001. No se aplican migraciones aquí."
-      - run: dotnet restore UniHome.Backend.slnx --locked-mode
-      - name: Pruebas reales de persistencia y lock (escriben en la base CI)
+          set -euo pipefail
+          if [ "$MongoDb__DatabaseName" != "unihome_ci_verificacion" ]; then
+            echo "::error::Base de datos no autorizada para CI: $MongoDb__DatabaseName"
+            exit 1
+          fi
+          if [[ "$MongoDb__ConnectionString" =~ mongodb\+srv: ]] || [[ "$MongoDb__ConnectionString" =~ mongodb\.net ]]; then
+            echo "::error::Prohibido conectar a servidores externos o Atlas en CI"
+            exit 1
+          fi
+          if [[ ! "$MongoDb__ConnectionString" =~ ^mongodb://(127\.0\.0\.1|localhost):27017 ]]; then
+            echo "::error::La conexión debe apuntar exclusivamente a loopback local (127.0.0.1:27017)"
+            exit 1
+          fi
+          echo "Conexión validada: contenedor efímero local en 127.0.0.1:27017, base unihome_ci_verificacion."
+      - name: Verificar disponibilidad del servicio MongoDB
+        run: |
+          set -euo pipefail
+          echo "Esperando socket 127.0.0.1:27017..."
+          for i in {1..30}; do
+            if bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/27017' 2>/dev/null; then
+              echo "MongoDB listo en el puerto 27017."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Tiempo de espera agotado para conectar a MongoDB en 127.0.0.1:27017"
+          exit 1
+      - name: Restaurar dependencias (.NET 10)
+        run: dotnet restore UniHome.Backend.slnx --locked-mode
+      - name: Compilar Release
+        run: dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
+      - name: Inicializar base efímera M01-001 (plan, apply y verify)
+        run: |
+          set -euo pipefail
+          echo "--- Plan de migración M01-001 ---"
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj -c Release --no-build -- plan --database unihome_ci_verificacion
+          echo "--- Aplicación de migración M01-001 ---"
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj -c Release --no-build -- apply --database unihome_ci_verificacion --confirm
+          echo "--- Verificación de migración M01-001 ---"
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj -c Release --no-build -- verify --database unihome_ci_verificacion
+      - name: Pruebas reales de persistencia y lock (MongoDB CI)
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
-          -c Release --no-restore
+          -c Release --no-restore --no-build
           --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests"
           --logger "trx;LogFileName=mongo-ci.trx"
           --results-directory TestResults/mongo
-      - name: Evidencias
+      - name: Resumir y validar resultados de pruebas MongoDB (TRX)
+        if: always()
+        run: |
+          set -o pipefail
+          python3 tools/ci/mongo_trx_summary.py | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Conservar evidencias de MongoDB CI
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mongodb-ci-results
           path: TestResults/mongo/**/*.trx
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 7
 
   # Job manual y opcional: no participa en despliegues ni se ejecuta en push/PR.
