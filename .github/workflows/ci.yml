@@ -479,13 +479,16 @@ jobs:
         env:
           MONGO_CI_INITIALIZATION: ${{ steps.mongo-migration.outcome }}
           MONGO_CI_TEST_OUTCOME: ${{ steps.mongo-tests.outcome }}
-        run: >-
-          python3 tools/ci/mongo_ci_summary.py
-          --trx TestResults/mongo/mongo-ci.trx
-          --mongo-version "$MONGO_CI_VERSION"
-          --database "$MONGO_CI_DATABASE"
-          --initialization "$MONGO_CI_INITIALIZATION"
-          --tests-outcome "$MONGO_CI_TEST_OUTCOME"
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults/mongo
+          python3 tools/ci/mongo_ci_summary.py \
+            --trx TestResults/mongo/mongo-ci.trx \
+            --mongo-version "$MONGO_CI_VERSION" \
+            --database "$MONGO_CI_DATABASE" \
+            --initialization "$MONGO_CI_INITIALIZATION" \
+            --tests-outcome "$MONGO_CI_TEST_OUTCOME" \
+            | tee TestResults/mongo/mongo-ci-summary.md
       - name: Publicar evidencias MongoDB
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

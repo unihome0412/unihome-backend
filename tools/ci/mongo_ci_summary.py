@@ -23,7 +23,6 @@ EXPECTED_TESTS = (
     "MongoIdentityPersistenceTests.RegistroLoginRefreshConcurrenteYLogout_DebeFuncionarContraMongoReal",
     "MongoPromotionLockPersistenceTests.BloqueoDistribuido_ExclusionMutua_RenovacionYFencingObsoleto_DebeFuncionarContraMongoReal",
 )
-SUMMARY_PATH = Path("TestResults/mongo/mongo-ci-summary.md")
 
 
 @dataclass(frozen=True)
@@ -164,10 +163,7 @@ def render_report(
     return "\n".join(lines)
 
 
-def _write_summary(report: str) -> None:
-    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SUMMARY_PATH.write_text(report + "\n", encoding="utf-8")
-
+def _emit_summary(report: str) -> None:
     github_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if github_summary:
         with open(github_summary, "a", encoding="utf-8") as file:
@@ -202,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         args.database,
         args.initialization,
     )
-    _write_summary(report)
+    _emit_summary(report)
 
     if issues:
         for issue in issues:
