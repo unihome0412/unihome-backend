@@ -234,6 +234,10 @@ local ni secretos: la URI se limita a `127.0.0.1`, la base es
 pruebas reales de identidad y bloqueo distribuido se ejecutan con TRX. El job falla
 si MongoDB no inicia, si la migración no queda válida, si las pruebas se omiten o
 si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
+La ejecución manual de verificación
+([42570584187](https://github.com/unihome0412/unihome-backend/actions/runs/42570584187),
+commit `9f4b4b5`) dejó 2/2 pruebas reales aprobadas, 0 omitidas y la limpieza
+temporal confirmada.
 
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
 ejecutarla localmente en una base de verificación aislada, primero revisar y aplicar

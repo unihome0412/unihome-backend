@@ -85,6 +85,10 @@ dotnet stryker --config-file stryker-config.json
 - Evidencia: `mongodb-ci-results` con el TRX, la salida de migración/verificación
   y el resumen Markdown. El contenedor se destruye al finalizar el job y la base
   temporal se elimina explícitamente.
+- Verificación real (9 de noviembre de 2026):
+  [ejecución manual 42570584187](https://github.com/unihome0412/unihome-backend/actions/runs/42570584187),
+  commit `9f4b4b5`, job `mongo-db-test` en verde, TRX con 2 pruebas ejecutadas y
+  aprobadas, 0 fallidas, 0 omitidas, M01-001 válida y limpieza confirmada.
 
 ## Flujo
 
@@ -124,6 +128,6 @@ Las pruebas activadas en un contexto admisible pasan a ser **obligatorias** para
 - Esta entrega se validó sintácticamente (YAML), con pruebas de la lógica del quality gate y comprobación de archivos y referencias. La integración de Stryker.NET se validó localmente con .NET 10 y una ejecución real de mutaciones; el primer run de GitHub Actions sigue siendo la validación del pipeline completo.
 - Semgrep usa reglas externas y una versión de CLI instalada al ejecutar: para un pipeline reproducible de producción habrá que fijar versiones/digests y comprobar la licencia/costos aplicables.
 - Dockle usa un binario oficial descargado de GitHub; fijar y validar su checksum antes de exigirlo en producción.
-- Pact y RESTler aún requieren su harness/configuración y deben quedar desactivados hasta ser verificados. Stryker.NET ya tiene configuración versionada y línea base local verificada. MongoDB CI está configurado con un contenedor efímero; su evidencia real se publica en `mongodb-ci-results` y debe consultarse antes de declararlo aprobado.
+- Pact y RESTler aún requieren su harness/configuración y deben quedar desactivados hasta ser verificados. Stryker.NET ya tiene configuración versionada y línea base local verificada. MongoDB CI fue verificado en la ejecución manual `42570584187`: job `mongo-db-test` en verde, 2/2 pruebas reales, 0 omitidas y artefacto `mongodb-ci-results`; la base temporal y el contenedor se destruyeron al finalizar.
 - Si el CI que actualmente está en GitHub fue modificado **después** del ZIP del 6 de noviembre, no aplicar el paquete a ciegas: reconciliar las diferencias antes.
 - Conservar `.local-sdd/` únicamente en local. `AGENTS.md`, `opencode.json`, `memoria.md` del SDD tampoco deben subir. La documentación técnica de CI en este paquete sí puede versionarse.
