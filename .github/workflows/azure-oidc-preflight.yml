@@ -1,0 +1,145 @@
+name: Azure OIDC Preflight (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-oidc-preflight-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  oidc-preflight:
+    name: OIDC login and read-only Azure checks
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: azure-dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Autenticar con OIDC
+        id: azure_login
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Consultas de solo lectura y resumen
+        id: preflight
+        if: ${{ steps.azure_login.outcome == 'success' }}
+        run: |
+          set -uo pipefail
+
+          summary="$GITHUB_STEP_SUMMARY"
+          result="PASS"
+          cause=""
+
+          fail() {
+            result="FAIL"
+            cause="$1"
+            echo "::error::$1"
+            {
+              echo "## Azure OIDC Preflight"
+              echo ""
+              echo "- Resultado: **FAIL**"
+              echo "- Causa: $cause"
+              echo "- Escrituras: **ninguna**"
+              echo "- CD: **no ejecutado**"
+            } >> "$summary"
+            exit 1
+          }
+
+          if ! subscription_state="$(az account show --query state -o tsv 2>&1)"; then
+            fail "No se pudo confirmar la suscripción activa; error de autenticación/ARM, no de RBAC de unihome-api."
+          fi
+          if [ "$subscription_state" != "Enabled" ]; then
+            fail "La suscripción no está activa: ${subscription_state:-desconocido}."
+          fi
+
+          subscription_name="$(az account show --query name -o tsv 2>&1)" \
+            || fail "No se pudo leer el nombre de la suscripción."
+          principal_type="$(az account show --query user.type -o tsv 2>&1)" \
+            || fail "No se pudo confirmar el tipo de identidad autenticada."
+          principal_name="$(az account show --query user.name -o tsv 2>&1)" \
+            || fail "No se pudo confirmar la identidad autenticada."
+
+          if [ "$principal_type" != "servicePrincipal" ]; then
+            fail "La sesión no corresponde a un service principal OIDC."
+          fi
+
+          if ! app_json="$(az containerapp show \
+            --name unihome-api --resource-group rg-unihome-dev \
+            --query '{name:name,provisioningState:properties.provisioningState,revision:properties.latestRevisionName,readyRevision:properties.latestReadyRevisionName}' \
+            -o json 2>&1)"; then
+            if printf '%s' "$app_json" | grep -Eiq 'AuthorizationFailed|does not have authorization|Forbidden'; then
+              fail "RBAC: la identidad OIDC no tiene permiso de lectura sobre unihome-api."
+            fi
+            fail "Error de lectura de unihome-api después del login OIDC."
+          fi
+
+          if ! revisions_json="$(az containerapp revision list \
+            --name unihome-api --resource-group rg-unihome-dev \
+            --query '[].{name:name,active:properties.active,running:properties.runningState,health:properties.healthState,traffic:properties.trafficWeight}' \
+            -o json 2>&1)"; then
+            if printf '%s' "$revisions_json" | grep -Eiq 'AuthorizationFailed|does not have authorization|Forbidden'; then
+              fail "RBAC: la identidad OIDC no tiene permiso para leer las revisiones de unihome-api."
+            fi
+            fail "Error de lectura de las revisiones de unihome-api."
+          fi
+
+          acr_result="SKIP"
+          acr_detail="No consultado."
+          if acr_json="$(az acr show --name acrunihomedev --resource-group rg-unihome-dev \
+            --query '{name:name,sku:sku.name,adminUserEnabled:adminUserEnabled,roleAssignmentMode:roleAssignmentMode}' \
+            -o json 2>&1)"; then
+            acr_result="PASS"
+            acr_detail="Metadatos mínimos consultados correctamente."
+          elif printf '%s' "$acr_json" | grep -Eiq 'AuthorizationFailed|does not have authorization|Forbidden'; then
+            acr_result="RBAC_LIMITED"
+            acr_detail="Sin permiso de lectura de control-plane para ACR; no es un fallo de autenticación."
+          else
+            acr_result="WARN"
+            acr_detail="No se pudieron consultar metadatos de ACR."
+          fi
+
+          {
+            echo "## Azure OIDC Preflight"
+            echo ""
+            echo "- Resultado: **$result**"
+            echo "- Suscripción: \`$subscription_name\`"
+            echo "- Estado de suscripción: \`$subscription_state\`"
+            echo "- Tipo de identidad: \`$principal_type\`"
+            echo "- Identidad autenticada: \`$principal_name\`"
+            echo "- \`unihome-api\`: lectura correcta"
+            echo "- Revisiones: lectura correcta"
+            echo "- ACR: **$acr_result** — $acr_detail"
+            echo "- Escrituras: **ninguna**"
+            echo "- Imágenes/publicaciones: **ninguna**"
+            echo "- CD/despliegue: **no ejecutado**"
+          } >> "$summary"
+
+          printf 'OIDC_PREFLIGHT_RESULT=%s\n' "$result"
+          printf 'ACR_PREFLIGHT_RESULT=%s\n' "$acr_result"
+          printf '%s\n' "$app_json"
+          printf '%s\n' "$revisions_json"
+          if [ "$acr_result" = "PASS" ]; then
+            printf '%s\n' "$acr_json"
+          fi
+
+      - name: Publicar resumen de fallo de autenticación
+        if: ${{ always() && steps.azure_login.outcome != 'success' }}
+        run: |
+          {
+            echo "## Azure OIDC Preflight"
+            echo ""
+            echo "- Resultado: **FAIL**"
+            echo "- Etapa: autenticación OIDC"
+            echo "- Causa: \`azure/login\` no completó la autenticación federada."
+            echo "- Escrituras: **ninguna**"
+            echo "- CD: **no ejecutado**"
+          } >> "$GITHUB_STEP_SUMMARY"
