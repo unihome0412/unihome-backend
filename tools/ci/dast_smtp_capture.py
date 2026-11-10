@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+MAILBOX_DIR = Path(".dast-mail")
+
 
 class CaptureHandler:
     """Escribe cada mensaje aceptado como un archivo .eml en el directorio."""
@@ -73,19 +75,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=587)
     parser.add_argument("--cert", required=True, type=Path)
     parser.add_argument("--key", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    args.output.mkdir(parents=True, exist_ok=True)
+    output = Path(MAILBOX_DIR)
+    output.mkdir(parents=True, exist_ok=True)
 
     controller = build_controller(
-        args.output, args.host, args.port, args.cert, args.key)
+        output, args.host, args.port, args.cert, args.key)
     controller.start()
 
-    ready = args.output / ".ready"
+    ready = output / ".ready"
     ready.write_text("ready\n", encoding="utf-8")
     print(f"SMTP de captura escuchando en {args.host}:{args.port}", flush=True)
 

@@ -83,7 +83,6 @@ class CaptureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             args = SimpleNamespace(
-                output=output,
                 host="127.0.0.1",
                 port=587,
                 cert=Path("cert.pem"),
@@ -96,6 +95,7 @@ class CaptureTests(unittest.TestCase):
             captured = {}
             with (
                 patch.object(dast_smtp_capture, "parse_args", return_value=args),
+                patch.object(dast_smtp_capture, "MAILBOX_DIR", output),
                 patch.object(dast_smtp_capture, "build_controller", return_value=controller),
                 patch.object(dast_smtp_capture.time, "sleep", side_effect=KeyboardInterrupt),
             ):
@@ -112,11 +112,9 @@ class CaptureTests(unittest.TestCase):
             "--port", "587",
             "--cert", "cert.pem",
             "--key", "key.pem",
-            "--output", "mail",
         ]):
             args = dast_smtp_capture.parse_args()
         self.assertEqual(587, args.port)
-        self.assertEqual("mail", args.output.name)
 
 
 if __name__ == "__main__":

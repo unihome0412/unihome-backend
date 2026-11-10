@@ -642,7 +642,7 @@ jobs:
       MongoDb__DatabaseName: unihome_dast
       MongoDb__ServerSelectionTimeoutSeconds: '5'
       UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_dast
-      SMTP_DAST_MAILBOX: /tmp/unihome-dast-mail
+      SMTP_DAST_MAILBOX: .dast-mail
       SMTP_PID_FILE: /tmp/unihome-dast-smtp.pid
       API_PID_FILE: /tmp/unihome-dast-api.pid
     steps:
@@ -753,7 +753,6 @@ jobs:
             tools/ci/dast_smtp_capture.py \
             --host 127.0.0.1 --port 587 \
             --cert "$SMTP_DIR/server-chain.pem" --key "$SMTP_DIR/server-key.pem" \
-            --output "$SMTP_DAST_MAILBOX" \
             > "$RUNNER_TEMP/unihome-dast-smtp.log" 2>&1 &
           echo $! > "$SMTP_PID_FILE"
           for attempt in $(seq 1 20); do

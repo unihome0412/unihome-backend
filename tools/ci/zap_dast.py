@@ -20,6 +20,8 @@ import email
 import json
 import os
 import re
+import secrets
+import string
 import sys
 import time
 import urllib.error
@@ -32,7 +34,6 @@ from email import policy
 from pathlib import Path
 from typing import Any
 
-PASSWORD = "ClaveSegura1"
 PRIVACY_VERSION = "2026-01"
 EXPECTED_ZAP_VERSION = "2.17.0"
 ZAP_IMAGE_REF = (
@@ -40,7 +41,7 @@ ZAP_IMAGE_REF = (
     "9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af"
 )
 OUTPUT_DIR = Path("artifacts/dast-zap")
-MAILBOX_DIR = Path("/tmp/unihome-dast-mail")
+MAILBOX_DIR = Path(".dast-mail")
 RISK_ORDER = ("Critical", "High", "Medium", "Low", "Informational")
 RISK_BY_CODE = {"3": "High", "2": "Medium", "1": "Low", "0": "Informational"}
 CONFIDENCE_BY_CODE = {
@@ -713,14 +714,20 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _register_payload(email: str) -> dict[str, Any]:
+def _generate_password() -> str:
+    alphabet = string.ascii_letters + string.digits
+    suffix = "".join(secrets.choice(alphabet) for _ in range(24))
+    return f"Dast{suffix}1"
+
+
+def _register_payload(email: str, password: str) -> dict[str, Any]:
     return {
         "nombreCompleto": "Cuenta DAST",
         "correo": email,
         "fechaNacimiento": "2004-05-10",
         "genero": "Mujer",
-        "contrasena": PASSWORD,
-        "confirmarContrasena": PASSWORD,
+        "contrasena": password,
+        "confirmarContrasena": password,
         "aceptoAvisoPrivacidad": True,
         "versionAvisoPrivacidad": PRIVACY_VERSION,
     }
@@ -742,6 +749,7 @@ def run_scan(args: argparse.Namespace) -> int:
     output.mkdir(parents=True, exist_ok=True)
     mailbox = Path(MAILBOX_DIR)
     generated_at = datetime.now(timezone.utc).isoformat()
+    password = _generate_password()
     technical_errors: list[str] = []
     health: dict[str, Any] = {}
 
@@ -779,7 +787,8 @@ def run_scan(args: argparse.Namespace) -> int:
     def register_account(role: str) -> str:
         account_email = f"dast.{role}.{uuid.uuid4().hex}@uni.edu"
         _, payload, _ = http.request(
-            "POST", "/api/v1/auth/registro", body=_register_payload(account_email),
+            "POST", "/api/v1/auth/registro",
+            body=_register_payload(account_email, password),
             expected={201}, note=f"registro {role}")
         response = _json_body(payload)
         if response.get("correoConfirmacionEnviado") is not True:
@@ -796,7 +805,7 @@ def run_scan(args: argparse.Namespace) -> int:
     account_a = register_account("a")
     _, login_payload, _ = http.request(
         "POST", "/api/v1/auth/login",
-        body={"correo": account_a, "contrasena": PASSWORD},
+        body={"correo": account_a, "contrasena": password},
         expected={200}, note="login A")
     tokens_a = _json_body(login_payload)
     access_a = str(tokens_a.get("accessToken") or "")
@@ -807,7 +816,7 @@ def run_scan(args: argparse.Namespace) -> int:
     account_c = register_account("c")
     _, login_c_payload, _ = http.request(
         "POST", "/api/v1/auth/login",
-        body={"correo": account_c, "contrasena": PASSWORD},
+        body={"correo": account_c, "contrasena": password},
         expected={200}, note="login C")
     tokens_c = _json_body(login_c_payload)
     access_c = str(tokens_c.get("accessToken") or "")
@@ -835,11 +844,11 @@ def run_scan(args: argparse.Namespace) -> int:
         expected={401}, note="refresh tras logout")
     http.request(
         "DELETE", "/api/v1/cuentas/mi-cuenta",
-        body={"contrasena": PASSWORD, "confirmacionPerdidaInformacion": True},
+        body={"contrasena": password, "confirmacionPerdidaInformacion": True},
         token=access_c, expected={204}, auth=True, note="borrado C")
     http.request(
         "POST", "/api/v1/auth/login",
-        body={"correo": account_c, "contrasena": PASSWORD},
+        body={"correo": account_c, "contrasena": password},
         expected={401, 403}, note="login C tras borrado")
 
     messages, records = zap.wait_for_passive(expected_messages=len(http.records))
