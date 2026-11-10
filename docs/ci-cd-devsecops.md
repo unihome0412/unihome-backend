@@ -228,6 +228,29 @@ dotnet stryker --config-file stryker-config.json
   commit `9f4b4b5`, job `mongo-db-test` en verde, TRX con 2 pruebas ejecutadas y
   aprobadas, 0 fallidas, 0 omitidas, M01-001 válida y limpieza confirmada.
 
+## CD Azure preparado (sin despliegue)
+
+El job `deploy-azure` existe pero está desactivado por defecto. Solo puede
+ejecutarse en `workflow_dispatch` desde `main`, con el input explícito
+`deploy_to_azure=true`, `UNIHOME_ENABLE_AZURE_CD=true`, environment `azure-dev`
+y todos los gates previos en verde. Autentica por OIDC, publica la imagen ya
+auditada por Dockle con etiqueta SHA y digest registrado, actualiza Container
+Apps, exige estado `Running`, verifica `/health/live` y `/health/ready` y
+revierte a la imagen anterior si falla. CI y CD usan grupos de concurrencia
+separados; un push no cancela un deploy en progreso. ACR no se declara inmutable:
+el tag por SHA y el digest son evidencia, no una garantía de bloqueo de tags.
+
+La auditoría del 2026-11-10 no pudo confirmar recursos por falta de sesión de
+Azure CLI; la URL pública respondió `200`, el environment tiene branch policy
+`main` pero no required reviewers, y no se configuró la variable de activación.
+Permisos OIDC propuestos, riesgos, FinOps y los pasos de autorización están en
+[`azure-cd-preparacion.md`](azure-cd-preparacion.md). No se creó ni modificó
+ningún recurso Azure, no se publicaron imágenes y no se reiniciaron revisiones.
+Las ejecuciones manuales `42864581083` (input `false`) y PR `42864050099`
+terminaron en verde y mostraron `deploy-azure` como `skipped`; la PR #18 no
+tiene ningún check de despliegue ejecutado. El flujo CD todavía **no se probó
+en Azure**.
+
 ## Flujo
 
 ```text
@@ -259,7 +282,7 @@ Las pruebas activadas en un contexto admisible pasan a ser **obligatorias** para
 2. Revisar `git diff`, crear un commit de trabajo propio y subir **solo** la rama de CI para un PR hacia `main`.
 3. Revisar el primer run. No declarar que ha pasado hasta ver **Build**, **Semgrep**, **OpenAPI**, **Dependency**, **Secret** y **PR Quality Gate** en verde.
 4. En GitHub > Settings > Rules > Rulesets, configurar revisión requerida, checks requeridos `PR Quality Gate (controles obligatorios)` y `CodeQL - análisis C#`; validar los **nombres exactos** que GitHub muestre, porque pueden depender del workflow/repo.
-5. No activar despliegue Azure todavía. Una fase CD posterior debe usar `workflow_dispatch`, ambiente protegido con aprobadores, autenticación OIDC y presupuestos/alertas revisados.
+5. No activar `UNIHOME_ENABLE_AZURE_CD` ni ejecutar el job `deploy-azure` todavía. Para el primer despliegue deben existir aprobadores en `azure-dev`, identidad federada y roles verificados, presupuesto/alertas revisados y la autorización humana descrita en `azure-cd-preparacion.md`.
 
 ## Advertencias
 

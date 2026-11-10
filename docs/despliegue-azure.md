@@ -1,10 +1,16 @@
 # Despliegue en Azure Container Apps
 
-**Estado (2026-11-05):** desplegado en un entorno de desarrollo real, en la
-suscripción "Azure subscription 1", región `eastus`, imagen `unihome-api:v2`.
-`/health/live` y `/health/ready` responden `200`, HTTP redirige a HTTPS sin
-bucle, y Swagger UI está disponible de forma opcional vía
-`Api__EnableSwagger` (ver sección dedicada). **No se tocó `main`.**
+**Estado histórico (2026-11-05):** las notas siguientes describen un entorno de
+desarrollo desplegado manualmente en la suscripción "Azure subscription 1",
+región `eastus`, imagen `unihome-api:v2`. La URL pública respondió `200` en
+`/health/live` y `/health/ready` durante la auditoría del 2026-11-10.
+
+**Auditoría de preparación CD (2026-11-10):** no se autenticó Azure ni se
+modificaron recursos. La CLI no tenía sesión, por lo que no se pudieron
+confirmar por API el resource group, ACR, entorno ni Container App. El CD
+automático preparado está en `.github/workflows/ci.yml` y permanece desactivado;
+ver [`azure-cd-preparacion.md`](azure-cd-preparacion.md) para OIDC, permisos,
+protecciones, rollback y FinOps. No se tocó `main` en esta auditoría.
 
 | Recurso | Nombre | Tipo/plan |
 |---|---|---|
@@ -130,6 +136,8 @@ az group create --name rg-unihome-dev --location eastus
 az monitor log-analytics workspace create `
   --resource-group rg-unihome-dev --workspace-name log-unihome-dev --location eastus
 
+# Referencia histórica. Para el CD se recomienda una identidad administrada con
+# AcrPull y NO usar el usuario administrador del registro.
 az acr create --resource-group rg-unihome-dev --name acrunihomedev `
   --sku Basic --location eastus --admin-enabled true
 
@@ -156,6 +164,12 @@ az containerapp create --name unihome-api --resource-group rg-unihome-dev `
 `ACR Tasks` (`az acr build`) está bloqueado en esta suscripción
 (`TasksOperationsNotAllowed`); por eso la imagen se construye localmente con
 Docker y se sube con `docker push` en vez de `az acr build`.
+
+**Riesgo de la configuración histórica:** el ejemplo anterior usa el usuario
+administrador de ACR y sus credenciales en Container Apps. El CD preparado no
+las usa: autentica con OIDC y publica con `az acr login`. Antes de producción,
+asignar `AcrPull` a una identidad administrada de la Container App y deshabilitar
+el usuario administrador del registro. No ejecutar ese cambio sin autorización.
 
 Después, los *secrets* (valores reales, nunca en texto en comandos
 compartidos ni en este documento — usar variables en memoria de un script
@@ -221,6 +235,11 @@ Remove-Item app.yaml
 ```
 
 ## Redesplegar una nueva versión de la imagen
+
+Los ejemplos `v1`/`v2` son históricos. El CD preparado usa el SHA completo del
+commit como tag y registra el digest; no afirma que el tag sea inmutable ni
+activa tag locking de ACR, porque eso requiere una decisión y autorización de
+Azure. Ver [`azure-cd-preparacion.md`](azure-cd-preparacion.md).
 
 ```powershell
 az acr login --name acrunihomedev

@@ -6,14 +6,27 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy_to_azure:
+        description: >-
+          Desplegar a Azure Container Apps. Requiere autorización humana,
+          environment azure-dev y UNIHOME_ENABLE_AZURE_CD=true.
+        required: false
+        default: false
+        type: boolean
 
-# Despliegue CD intencionalmente excluido hasta aprobación y Environment protegido.
+# El job deploy-azure es manual y falla cerrado. No se ejecuta en PR/push y
+# requiere la variable de repositorio y el environment protegido.
 permissions:
   contents: read
 
 concurrency:
-  group: unihome-devsecops-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # CI y CD usan grupos distintos: un push a main no cancela un deploy; los
+  # deploys manuales se serializan y nunca se cancelan entre sí.
+  group: >-
+    unihome-devsecops-${{ github.workflow }}-${{ github.event_name }}-${{
+    (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_azure == 'true') && 'cd' || 'ci' }}-${{ github.ref }}
+  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_to_azure == 'true') }}
 
 jobs:
   detect-changes:
@@ -632,7 +645,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Descargar imagen construida
-        uses: actions/download-artifact@v4 # etiqueta oficial; fijar SHA antes de producción
+        # v4.3.0 lee artefactos v4 de upload-artifact v4.6.2 (mismo protocolo).
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ci-container-image
       - name: Cargar y auditar imagen
@@ -1443,4 +1457,262 @@ jobs:
           name: unihome-hardening-report
           path: reports/hardening.md
           if-no-files-found: error
+          retention-days: 7
+
+  deploy-azure:
+    name: Deploy Azure Container Apps (manual y aprobado)
+    needs: [detect-changes, build-test, contract-test, docker-build, container-lint, pr-quality-gate, hardening-report]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: azure-dev
+    concurrency:
+      group: azure-dev-deploy-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      DEPLOY_TO_AZURE: ${{ inputs.deploy_to_azure }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-unihome-dev' }}
+      AZURE_ACR_NAME: ${{ vars.AZURE_ACR_NAME || 'acrunihomedev' }}
+      AZURE_CONTAINER_APP: ${{ vars.AZURE_CONTAINER_APP || 'unihome-api' }}
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION || 'eastus' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validar autorización explícita y rama main
+        run: |
+          set -euo pipefail
+          test "${DEPLOY_TO_AZURE:-}" = "true"
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+          echo "Despliegue autorizado por input manual; environment=azure-dev."
+      - name: Autenticar con OIDC (sin credenciales persistentes)
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Descargar imagen exacta auditada por Dockle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ci-container-image
+      - name: Publicar imagen etiquetada por SHA en ACR
+        run: |
+          set -euo pipefail
+          IMAGE="${AZURE_ACR_NAME}.azurecr.io/${AZURE_CONTAINER_APP}:${GITHUB_SHA}"
+          docker load --input unihome-ci.tar
+          docker tag "unihome-ci:${GITHUB_SHA::12}" "$IMAGE"
+          az acr login --name "$AZURE_ACR_NAME"
+          push_output="$(docker push "$IMAGE" 2>&1)"
+          printf '%s\n' "$push_output"
+          image_digest="$(printf '%s\n' "$push_output" \
+            | sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' \
+            | tail -n 1)"
+          if [ -z "$image_digest" ]; then
+            image_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null \
+              | sed 's/^.*@//' || true)"
+          fi
+          if [ -z "$image_digest" ]; then
+            echo "::error::No se pudo registrar el digest de la imagen publicada."
+            exit 1
+          fi
+          {
+            echo "IMAGE=$IMAGE"
+            echo "IMAGE_SHORT=${GITHUB_SHA::12}"
+            echo "IMAGE_DIGEST=$image_digest"
+          } >> "$GITHUB_ENV"
+      - name: Actualizar revisión y ejecutar recuperación verificada
+        run: |
+          set -euo pipefail
+          previous_image="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query 'properties.template.containers[0].image' -o tsv)"
+          previous_revision="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query 'properties.latestRevisionName' -o tsv)"
+          previous_fqdn="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query 'properties.latestRevisionFqdn' -o tsv)"
+          revision_mode="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query 'properties.configuration.activeRevisionsMode' -o tsv)"
+          if [ -z "$previous_image" ] || [ -z "$previous_revision" ] \
+            || [ -z "$previous_fqdn" ] || [ "$revision_mode" != "Single" ]; then
+            echo "::error::Se requiere imagen/revisión/FQDN y activeRevisionsMode=Single para un rollback seguro."
+            exit 1
+          fi
+          previous_healthy=false
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error "https://$previous_fqdn/health/live" > /dev/null \
+              && curl --fail --silent --show-error "https://$previous_fqdn/health/ready" > /dev/null; then
+              previous_healthy=true
+              break
+            fi
+            echo "La revisión anterior aún no responde health checks (intento ${attempt}/12)."
+            sleep 5
+          done
+          if [ "$previous_healthy" != "true" ]; then
+            echo "::error::La revisión anterior no está sana; no se inicia el despliegue."
+            exit 1
+          fi
+          {
+            echo "PREVIOUS_IMAGE=$previous_image"
+            echo "PREVIOUS_REVISION=$previous_revision"
+            echo "PREVIOUS_FQDN=$previous_fqdn"
+          } >> "$GITHUB_ENV"
+
+          update_started=false
+          rollback_done=false
+          rollback() {
+            if [ "$rollback_done" = "true" ]; then
+              return 0
+            fi
+            rollback_done=true
+            echo "::warning::Restaurando la imagen anterior $previous_image."
+            if ! az containerapp update \
+              --name "$AZURE_CONTAINER_APP" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --image "$previous_image" \
+              --revision-suffix "rb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"; then
+              echo "::error::Falló el rollback a la imagen anterior."
+              return 1
+            fi
+            local rollback_fqdn=""
+            for attempt in $(seq 1 12); do
+              rollback_fqdn="$(az containerapp show \
+                --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+                --query 'properties.latestRevisionFqdn' -o tsv 2>/dev/null || true)"
+              if [ -n "$rollback_fqdn" ]; then
+                break
+              fi
+              sleep 5
+            done
+            if [ -z "$rollback_fqdn" ]; then
+              echo "::error::El rollback no publicó un FQDN verificable."
+              return 1
+            fi
+            local rollback_healthy=false
+            for attempt in $(seq 1 12); do
+              if curl --fail --silent --show-error "https://$rollback_fqdn/health/live" > /dev/null \
+                && curl --fail --silent --show-error "https://$rollback_fqdn/health/ready" > /dev/null; then
+                rollback_healthy=true
+                break
+              fi
+              echo "Rollback aún no responde health checks (intento ${attempt}/12)."
+              sleep 5
+            done
+            if [ "$rollback_healthy" != "true" ]; then
+              echo "::error::El rollback no superó la verificación de salud."
+              return 1
+            fi
+            echo "Rollback verificado en $rollback_fqdn."
+          }
+          on_exit() {
+            local code=$?
+            if [ "$code" -ne 0 ] && [ "$update_started" = "true" ] && [ "$rollback_done" != "true" ]; then
+              rollback || true
+            fi
+            exit "$code"
+          }
+          trap on_exit EXIT
+
+          update_started=true
+          az containerapp update \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --image "$IMAGE" \
+            --revision-suffix "sha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          new_revision="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query 'properties.latestRevisionName' -o tsv)"
+          if [ -z "$new_revision" ] || [ "$new_revision" = "$previous_revision" ]; then
+            echo "::error::Container Apps no creó una revisión nueva verificable."
+            exit 1
+          fi
+
+          revision_state=""
+          for attempt in $(seq 1 30); do
+            revision_state="$(az containerapp revision show \
+              --name "$AZURE_CONTAINER_APP" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --revision "$new_revision" \
+              --query 'properties.runningState' -o tsv 2>/dev/null || true)"
+            if [ "$revision_state" = "Running" ]; then
+              break
+            fi
+            if [ "$revision_state" = "Failed" ] || [ "$revision_state" = "Stopped" ]; then
+              break
+            fi
+            echo "Revisión $new_revision aún no está Running (estado: ${revision_state:-desconocido})."
+            sleep 5
+          done
+          if [ "$revision_state" != "Running" ]; then
+            echo "::error::La revisión $new_revision no alcanzó estado Running."
+            exit 1
+          fi
+
+          new_fqdn="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query 'properties.latestRevisionFqdn' -o tsv)"
+          if [ -z "$new_fqdn" ]; then
+            echo "::error::Container Apps no publicó FQDN para la revisión nueva."
+            exit 1
+          fi
+
+          healthy=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "https://$new_fqdn/health/live" > /dev/null \
+              && curl --fail --silent --show-error "https://$new_fqdn/health/ready" > /dev/null; then
+              healthy=true
+              break
+            fi
+            echo "Health check pendiente (intento ${attempt}/30)."
+            sleep 10
+          done
+          if [ "$healthy" != "true" ]; then
+            echo "::error::Health checks de la revisión nueva fallaron."
+            exit 1
+          fi
+
+          update_started=false
+          {
+            echo "NEW_REVISION=$new_revision"
+            echo "HEALTH_FQDN=$new_fqdn"
+          } >> "$GITHUB_ENV"
+      - name: Resumir evidencia de despliegue
+        if: always()
+        run: |
+          {
+            echo "# Azure Container Apps — despliegue manual"
+            echo ""
+            echo "- Repositorio: \`$GITHUB_REPOSITORY\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Imagen (tag SHA): \`${IMAGE:-no-publicada}\`"
+            echo "- Digest registrado: \`${IMAGE_DIGEST:-n/d}\`"
+            echo "- Revisión anterior: \`${PREVIOUS_REVISION:-n/d}\`"
+            echo "- FQDN anterior: \`${PREVIOUS_FQDN:-n/d}\`"
+            echo "- Revisión nueva: \`${NEW_REVISION:-n/d}\`"
+            echo "- FQDN nuevo: \`${HEALTH_FQDN:-n/d}\`"
+            echo "- Resultado: \`${{ job.status }}\`"
+            echo "- Environment: \`azure-dev\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "image=${IMAGE:-}"
+            echo "image_digest=${IMAGE_DIGEST:-}"
+            echo "previous_revision=${PREVIOUS_REVISION:-}"
+            echo "previous_fqdn=${PREVIOUS_FQDN:-}"
+            echo "new_revision=${NEW_REVISION:-}"
+            echo "health_fqdn=${HEALTH_FQDN:-}"
+            echo "result=${{ job.status }}"
+          } > azure-deploy-summary.txt
+      - name: Publicar evidencia de despliegue
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: azure-cd-evidence
+          path: azure-deploy-summary.txt
+          if-no-files-found: warn
           retention-days: 7
