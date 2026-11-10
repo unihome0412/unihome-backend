@@ -21,6 +21,22 @@ OPTIONAL = {
     "restler-fuzzing": ("UNIHOME_ENABLE_RESTLER", {"workflow_dispatch"}),
 }
 
+# El DAST con ZAP es una validación manual de main y de las ramas feature.
+# En PR/push nunca se exige; en una rama de documentación no se bloquea el gate.
+OPTIONAL_REF_PATTERNS = {
+    "dast-zap": ("refs/heads/main", "refs/heads/feature/"),
+}
+
+
+def _ref_allowed(job: str, ref: str) -> bool:
+    patterns = OPTIONAL_REF_PATTERNS.get(job)
+    if not patterns or not ref:
+        return True
+    return any(
+        ref.startswith(pattern) if pattern.endswith("/") else ref == pattern
+        for pattern in patterns
+    )
+
 
 def evaluate(needs: dict, changed: bool, flags: dict, event: str, ref: str = "") -> tuple[list, list]:
     required = set(MUST_RUN_ALWAYS)
@@ -33,6 +49,8 @@ def evaluate(needs: dict, changed: bool, flags: dict, event: str, ref: str = "")
             # Un workflow_dispatch desde una rama feature no debe exigir Sonar.
             if job in MAIN_REF_ONLY and event != "pull_request" and ref != "refs/heads/main":
                 continue
+            if not _ref_allowed(job, ref):
+                continue
             required.add(job)
     problems = []
     for job in sorted(required):
@@ -42,13 +60,23 @@ def evaluate(needs: dict, changed: bool, flags: dict, event: str, ref: str = "")
     return sorted(required), problems
 
 
-def make_report(needs: dict, required: list, issues: list, changed: bool) -> str:
+def make_report(
+    needs: dict,
+    required: list,
+    issues: list,
+    changed: bool,
+    event: str = "",
+    ref: str = "",
+) -> str:
     rows = [
         "# UniHome — Hardening Report",
         "",
         f"- Cambios de código o CI: **{'sí' if changed else 'no (solo documentación)'}**",
+        f"- Evento / rama evaluados: **{event or 'n/d'} / {ref or 'n/d'}**",
         f"- Quality Gate: **{'FAIL' if issues else 'PASS'}**",
         "- `skipped` NO equivale a una prueba aprobada.",
+        f"- DAST ZAP manual: **{'obligatorio' if 'dast-zap' in required else 'no exigido'}** "
+        "(solo `workflow_dispatch` con `UNIHOME_ENABLE_ZAP=true` desde `main` o `feature/*`).",
         "",
         "| Job | Resultado | Obligatorio en esta ejecución |",
         "|---|---|---|",
@@ -72,9 +100,10 @@ def main() -> int:
     needs = json.loads(os.environ.get("NEEDS_JSON", "{}"))
     flags = {k: os.environ.get(k, "") for k in {v[0] for v in OPTIONAL.values()}}
     changed = os.environ.get("CODE_CHANGED", "true").lower() == "true"
-    required, problems = evaluate(
-        needs, changed, flags, os.environ.get("EVENT_NAME", ""), os.environ.get("EVENT_REF", ""))
-    report = make_report(needs, required, problems, changed)
+    event = os.environ.get("EVENT_NAME", "")
+    ref = os.environ.get("EVENT_REF", "")
+    required, problems = evaluate(needs, changed, flags, event, ref)
+    report = make_report(needs, required, problems, changed, event, ref)
     if args.output:
         path = Path(args.output)
         path.parent.mkdir(parents=True, exist_ok=True)

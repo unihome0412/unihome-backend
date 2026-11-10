@@ -239,6 +239,29 @@ La ejecución manual de verificación
 commit `9f4b4b5`) dejó 2/2 pruebas reales aprobadas, 0 omitidas y la limpieza
 temporal confirmada.
 
+El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
+**baseline pasivo real** de OWASP ZAP con la imagen oficial
+`ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
+`127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001 y un SMTP de
+captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
+operación documentada y publica `zap-report.html`, `zap-report.json`,
+`dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el
+artefacto `dast-zap-results`. No usa Active Scan, `-I`, exclusiones,
+`continue-on-error`, Atlas, Brevo, Azure ni secretos reales.
+
+```powershell
+gh variable set UNIHOME_ENABLE_ZAP --body true
+gh workflow run ci.yml --ref feature/ci-dast-zap
+gh run list --workflow ci.yml --limit 5
+gh run download <run-id> -n dast-zap-results -D artifacts/dast-zap
+```
+
+El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
+cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas y
+las cabeceras ausentes deben revisarse; el escaneo pasivo no demuestra lógica
+de negocio ni autorización a nivel de objeto.
+
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
 ejecutarla localmente en una base de verificación aislada, primero revisar y aplicar
 la migración con la herramienta separada. La prueba no aplica DDL y puede utilizar
