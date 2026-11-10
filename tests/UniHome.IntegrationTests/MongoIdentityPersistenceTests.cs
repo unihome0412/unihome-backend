@@ -16,8 +16,9 @@ using UniHome.IntegrationTests.TestSupport;
 namespace UniHome.IntegrationTests;
 
 /// <summary>
-/// Prueba real y opt-in contra MongoDB Atlas. Solo se ejecuta cuando el entorno
-/// declara UNIHOME_RUN_MONGO_INTEGRATION_TESTS=1 y una base autorizada.
+/// Prueba real y opt-in contra MongoDB (Atlas autorizado o MongoDB efímero de CI).
+/// Solo se ejecuta cuando el entorno declara UNIHOME_RUN_MONGO_INTEGRATION_TESTS=1
+/// y una base autorizada.
 /// </summary>
 public sealed class MongoIdentityPersistenceTests
 {

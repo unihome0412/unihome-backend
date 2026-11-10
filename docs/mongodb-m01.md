@@ -140,8 +140,13 @@ autoriza migrar `unihome_desarrollo`.
 
 ## Pruebas y límites
 
-La prueba Atlas opt-in usa la API y repositorios reales, pero captura el correo en
-memoria. Requiere el esquema previamente migrado y no llama a `ApplyAsync`.
+La prueba real opt-in usa la API y repositorios reales, pero captura el correo en
+memoria. Requiere el esquema previamente migrado y no llama a `ApplyAsync`. Puede
+ejecutarse contra un Atlas autorizado o contra el MongoDB efímero de GitHub
+Actions. En CI, el job manual `mongo-db-test` levanta MongoDB Community 8.0.34 en
+un contenedor temporal, valida la URI loopback, aplica solo `M01-001` a
+`unihome_ci_verificacion` y verifica ledger, checksum e índices antes de ejecutar
+las pruebas. El job falla si las pruebas se omiten o si no hay TRX.
 La auditoría de las 20 colecciones externas se ejecuta aparte con la herramienta,
 no es un fixture exigido por la prueba de identidad. La confirmación se realiza mediante dominio/repositorio como precondición;
 **no prueba un endpoint de confirmación**, aún pendiente de contrato.
@@ -152,7 +157,8 @@ y espera el código 11000, además del conflicto REST. Un coordinador de pruebas
 espera a que ambas solicitudes alcancen el CAS antes de liberarlas; las operaciones
 de persistencia y sus filtros no se sustituyen.
 No se ha probado una identidad Atlas independiente sin permisos de DDL; no se
-crearon usuarios ni se modificaron privilegios del clúster.
+crearon usuarios ni se modificaron privilegios del clúster. La ejecución real de
+MongoDB CI se registra en el artefacto `mongodb-ci-results` del workflow.
 
 Los resultados de restore/build/test/format se informan por separado para no
 confundir las pruebas con dobles con la ejecución contra Atlas. Pendientes:
@@ -168,8 +174,13 @@ ledger inmutable, sanitización del parser, rechazo de índices adicionales
 peligrosos y barrera de concurrencia de pruebas; se retiró el DDL de la prueba.
 La repetición Atlas de esta versión quedó **bloqueada por permisos de la herramienta**,
 incluso después de la autorización expresa del usuario. No atribuir el resultado
-Atlas anterior al código final. Ejecutar el comando opt-in del README en el entorno
-local autorizado antes de dar por verificada esta revisión con base real.
+Atlas anterior al código final. La verificación real de esta revisión se completó
+en GitHub Actions con el job manual `mongo-db-test` sobre MongoDB efímero y aislado:
+[ejecución 42570584187](https://github.com/unihome0412/unihome-backend/actions/runs/42570584187),
+commit `9f4b4b5`, MongoDB 8.0.34, base `unihome_ci_verificacion`, M01-001 válida,
+2/2 pruebas aprobadas, 0 fallidas y 0 omitidas. El artefacto `mongodb-ci-results`
+contiene el TRX, la salida de migración/verificación y el resumen. Atlas y la
+identidad de privilegios mínimos siguen fuera del alcance de esta entrega.
 
 Validación local de esta revisión final:
 
@@ -177,7 +188,7 @@ Validación local de esta revisión final:
 |---|---|
 | `dotnet restore UniHome.Backend.slnx --locked-mode` | Correcto |
 | `dotnet build UniHome.Backend.slnx -c Release --no-restore -warnaserror` | 0 advertencias, 0 errores |
-| `dotnet test UniHome.Backend.slnx -c Release --no-build --no-restore` | 173 unitarias + 56 integración correctas; 1 Atlas omitida por opt-in |
+| `dotnet test UniHome.Backend.slnx -c Release --no-build --no-restore` | 308 unitarias y 100 integración correctas; 2 MongoDB omitidas por opt-in local |
 | `dotnet format UniHome.Backend.slnx --verify-no-changes --no-restore` | Correcto, sin cambios |
 | `git diff --check` | Correcto |
 | CLI con URI malformada exclusivamente sintética | Rechazo exit 5, sin URI/credenciales en salida |
@@ -193,3 +204,6 @@ Validación local de esta revisión final:
 | M01-04 | Media, corregida estáticamente | C-10; catálogo de índices | TTL extra elimina datos o unique extra restringe cuentas | Rechazo compartido en API/migrador y pruebas | Revisar excepciones mediante migraciones futuras |
 | E-01 | Evidencia pendiente | C-10; prueba Atlas final | No atribuir resultados antiguos al código final | Reejecutar opt-in fuera del bloqueo de herramientas | Habilitar ejecución local autorizada |
 | E-02 | Evidencia pendiente | C-13; identidad de ejecución | Privilegios mínimos no demostrados con otro usuario Atlas | Probar usuario CRUD/metadatos sin DDL, sin crear usuarios automáticamente | Aprovisionamiento humano autorizado |
+
+E-01 y E-02 se refieren exclusivamente a Atlas. La evidencia del MongoDB efímero de
+CI ya está registrada y no depende de esas autorizaciones.

@@ -15,7 +15,7 @@ Referencia de diseño: grafo de trabajos GitHub Actions compartido el 6 de novie
 | PR Quality Gate | Analiza realmente los resultados; **skipped no es passed** | Todos los runs, aunque fallen anteriores |
 | Hardening Report | Tabla Markdown y artefacto con resultados reales | Todos los runs salvo cancelación |
 
-El análisis **CodeQL existente** sigue ejecutándose de manera independiente en `.github/workflows/codeql.yml`; para proteger `main`, configurar **ambos** estados requeridos (CodeQL y el gate DevSecOps). Las pruebas de integración que necesitan MongoDB Atlas están protegidas con un opt-in en el proyecto y se omiten por defecto: el pipeline registra dicho `skipped` de forma honesta.
+El análisis **CodeQL existente** sigue ejecutándose de manera independiente en `.github/workflows/codeql.yml`; para proteger `main`, configurar **ambos** estados requeridos (CodeQL y el gate DevSecOps). Las pruebas de integración que necesitan MongoDB están protegidas con un opt-in en el proyecto y se omiten por defecto en las pruebas locales: el pipeline registra dicho `skipped` de forma honesta. El job manual de MongoDB CI no acepta una omisión como aprobación.
 
 ## Trabajos visibles pero desactivados por defecto
 
@@ -24,14 +24,14 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Job | Variable de repositorio | Otro requisito | Evento permitido |
 |---|---|---|---|
 | SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
-| Database Test (MongoDB) | `UNIHOME_ENABLE_MONGO_CI=true` | Secret `UNIHOME_CI_MONGO_URI`; base **exclusiva `unihome_ci_verificacion`**, preparada previamente con M01-001; usuario con permisos limitados; acceso por IP del runner | Solo manual |
+| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | Solo instancia efímera local `/health/live`, sin secretos; escaneo **pasivo limitado**, no prueba toda la API | Solo manual |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Primero desarrollar `tests/UniHome.PactTests` con contratos de Mobile; en su ausencia falla al activarse | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | Primero implementar `tools/ci/restler/run-isolated.sh` y un harness 100 % aislado; si falta, **falla** | Solo manual |
 
-**Ninguno de estos trabajos usa `unihome_desarrollo`, crea migraciones, ejecuta deploy o escribe en Azure.** El trabajo MongoDB solo debe habilitarse después de autorización explícita de la base de CI. Los runners de GitHub tienen IPs variables; para Atlas se recomienda un runner de red controlada si no existe acceso seguro. **No abrir Atlas a `0.0.0.0/0`** para simplificar pruebas.
+**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. La migración `M01-001` se aplica únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
 
 ZAP: el escaneo inicial alcanza únicamente `http://127.0.0.1:5088/health/live`. Esto demuestra conexión, no cobertura DAST del flujo autenticado. RESTler / Pact requieren contratos y datos de prueba que aún no están implementados. No activar como simples interruptores para aparentar cobertura.
 
@@ -59,6 +59,36 @@ dotnet stryker --config-file stryker-config.json
 - Reportes: `tests/UniHome.UnitTests/StrykerOutput/<timestamp>/reports/mutation-report.html` y `mutation-report.json`. No se versionan.
 - El job manual `mutation-test` restaura la herramienta desde el manifiesto, ejecuta pruebas unitarias, corre Stryker y publica ambos reportes. Falla si no hay mutaciones evaluadas, si hay errores de ejecución o si faltan los reportes.
 - Línea base verificada localmente: 57 mutantes en el archivo objetivo, 46 evaluados, 44 detectados, 2 sobrevivientes en `ConfigureAwait(false)` (sin efecto observable en el entorno de prueba) y mutation score de 95.65 %.
+
+## MongoDB CI efímero
+
+- Job manual `mongo-db-test`, condicionado por `UNIHOME_ENABLE_MONGO_CI=true`.
+- Servicio de GitHub Actions con MongoDB Community **8.0.34**, fijado por digest
+  `sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142`.
+  No se usa `latest`, Atlas ni Docker local.
+- La URI es `mongodb://127.0.0.1:27017`, directa, sin credenciales. El workflow
+  rechaza hosts no loopback, SRV, credenciales y una base distinta de
+  `unihome_ci_verificacion`. Las pruebas también aplican esta comprobación cuando
+  `UNIHOME_MONGO_CI_LOOPBACK_ONLY=1`.
+- No se configura replica set: las pruebas de identidad y bloqueo usan índices y
+  operaciones atómicas sobre un documento; no requieren transacciones.
+- Se espera la disponibilidad real del contenedor, se aplica únicamente `M01-001`
+  con `UniHome.MongoMigrator` y se verifica el ledger, checksum e índices antes de
+  las pruebas.
+- `MongoIdentityPersistenceTests` y `MongoPromotionLockPersistenceTests` se
+  ejecutan contra MongoDB real; el correo se sustituye por un doble en memoria.
+  No se envían correos.
+- Un script valida el TRX: exige las dos pruebas, rechaza `NotExecuted`, falla si
+  hay cero resultados, si la inicialización no terminó o si el paso de pruebas no
+  fue exitoso. El resumen incluye versión, base, conteos, duración, inicialización
+  y resultado final.
+- Evidencia: `mongodb-ci-results` con el TRX, la salida de migración/verificación
+  y el resumen Markdown. El contenedor se destruye al finalizar el job y la base
+  temporal se elimina explícitamente.
+- Verificación real (9 de noviembre de 2026):
+  [ejecución manual 42570584187](https://github.com/unihome0412/unihome-backend/actions/runs/42570584187),
+  commit `9f4b4b5`, job `mongo-db-test` en verde, TRX con 2 pruebas ejecutadas y
+  aprobadas, 0 fallidas, 0 omitidas, M01-001 válida y limpieza confirmada.
 
 ## Flujo
 
@@ -98,6 +128,6 @@ Las pruebas activadas en un contexto admisible pasan a ser **obligatorias** para
 - Esta entrega se validó sintácticamente (YAML), con pruebas de la lógica del quality gate y comprobación de archivos y referencias. La integración de Stryker.NET se validó localmente con .NET 10 y una ejecución real de mutaciones; el primer run de GitHub Actions sigue siendo la validación del pipeline completo.
 - Semgrep usa reglas externas y una versión de CLI instalada al ejecutar: para un pipeline reproducible de producción habrá que fijar versiones/digests y comprobar la licencia/costos aplicables.
 - Dockle usa un binario oficial descargado de GitHub; fijar y validar su checksum antes de exigirlo en producción.
-- Algunos jobs opcionales (Pact, RESTler y pruebas Mongo) aún requieren su harness/configuración y deben quedar desactivados hasta ser verificados. Stryker.NET ya tiene configuración versionada y línea base local verificada.
+- Pact y RESTler aún requieren su harness/configuración y deben quedar desactivados hasta ser verificados. Stryker.NET ya tiene configuración versionada y línea base local verificada. MongoDB CI fue verificado en la ejecución manual `42570584187`: job `mongo-db-test` en verde, 2/2 pruebas reales, 0 omitidas y artefacto `mongodb-ci-results`; la base temporal y el contenedor se destruyeron al finalizar.
 - Si el CI que actualmente está en GitHub fue modificado **después** del ZIP del 6 de noviembre, no aplicar el paquete a ciegas: reconciliar las diferencias antes.
 - Conservar `.local-sdd/` únicamente en local. `AGENTS.md`, `opencode.json`, `memoria.md` del SDD tampoco deben subir. La documentación técnica de CI en este paquete sí puede versionarse.

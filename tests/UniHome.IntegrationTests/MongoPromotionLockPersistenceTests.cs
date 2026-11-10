@@ -8,12 +8,12 @@ namespace UniHome.IntegrationTests;
 
 /// <summary>
 /// Prueba real y opt-in del bloqueo distribuido de promoción contra MongoDB
-/// Atlas. Solo se ejecuta cuando el entorno declara
-/// UNIHOME_RUN_MONGO_INTEGRATION_TESTS=1, UNIHOME_MIGRATION_ALLOWED_DATABASES
-/// incluye la base elegida y esa base nunca es unihome_desarrollo (rechazada
-/// incondicionalmente por MongoMigrationGuard). Solo toca el documento
-/// "promotion-lock" de la colección "migraciones"; no modifica cuentas ni
-/// sesiones_refresh.
+/// (Atlas autorizado o MongoDB efímero de CI). Solo se ejecuta cuando el entorno
+/// declara UNIHOME_RUN_MONGO_INTEGRATION_TESTS=1,
+/// UNIHOME_MIGRATION_ALLOWED_DATABASES incluye la base elegida y esa base nunca
+/// es unihome_desarrollo (rechazada incondicionalmente por MongoMigrationGuard).
+/// Solo toca el documento "promotion-lock" de la colección "migraciones"; no
+/// modifica cuentas ni sesiones_refresh.
 /// </summary>
 public sealed class MongoPromotionLockPersistenceTests
 {

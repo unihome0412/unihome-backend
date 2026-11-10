@@ -362,42 +362,156 @@ jobs:
           dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
   mongo-db-test:
-    name: Database Test (MongoDB aislado, manual)
+    name: Database Test (MongoDB efímero, manual)
     needs: detect-changes
     if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MONGO_CI == 'true' && github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    services:
+      mongo:
+        # MongoDB Community 8.0.34, fijado por digest para evitar cambios de tag.
+        image: mongo:8.0.34@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+        # El runner Ubuntu 24.04 usa kernel 7.0.x. MongoDB 8.0.34 aplica un
+        # guard de TCMalloc para kernels 6.19–7.0.13; en el runner el kernel ya
+        # contiene la corrección y este ajuste evita el falso bloqueo. Solo se
+        # aplica al contenedor efímero de CI.
+        env:
+          GLIBC_TUNABLES: glibc.pthread.rseq=1
+        ports:
+          - 127.0.0.1:27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+          --health-start-period 10s
     env:
-      MongoDb__ConnectionString: ${{ secrets.UNIHOME_CI_MONGO_URI }}
+      MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
       MongoDb__DatabaseName: unihome_ci_verificacion
+      MongoDb__ServerSelectionTimeoutSeconds: '5'
       UNIHOME_RUN_MONGO_INTEGRATION_TESTS: '1'
       UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_ci_verificacion
+      UNIHOME_MONGO_CI_LOOPBACK_ONLY: '1'
+      MONGO_CI_VERSION: '8.0.34'
+      MONGO_CI_DATABASE: unihome_ci_verificacion
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
-      - name: Exigir conexión y base de CI ya migrada M01-001
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Validar aislamiento de la conexión de CI
         run: |
-          test -n "$MongoDb__ConnectionString" || { echo "::error::Falta UNIHOME_CI_MONGO_URI"; exit 1; }
-          if [ "$MongoDb__DatabaseName" != 'unihome_ci_verificacion' ]; then exit 1; fi
-          echo "La base exclusiva debe existir y tener M01-001. No se aplican migraciones aquí."
-      - run: dotnet restore UniHome.Backend.slnx --locked-mode
-      - name: Pruebas reales de persistencia y lock (escriben en la base CI)
+          set -euo pipefail
+          test "$MongoDb__DatabaseName" = 'unihome_ci_verificacion' || {
+            echo "::error::La base de CI debe ser unihome_ci_verificacion."
+            exit 1
+          }
+          test "$UNIHOME_MIGRATION_ALLOWED_DATABASES" = 'unihome_ci_verificacion' || {
+            echo "::error::La allowlist de migraciones debe contener solo la base de CI."
+            exit 1
+          }
+          python3 - <<'PY'
+          import os
+          from urllib.parse import parse_qs, urlparse
+
+          uri = os.environ["MongoDb__ConnectionString"]
+          parsed = urlparse(uri)
+          if (
+              parsed.scheme != "mongodb"
+              or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+              or parsed.username is not None
+              or parsed.password is not None
+          ):
+              print("::error::La URI de CI debe usar MongoDB directo a loopback y sin credenciales.")
+              raise SystemExit(1)
+          if parse_qs(parsed.query).get("directConnection", [""])[0].lower() != "true":
+              print("::error::La URI de CI debe declarar directConnection=true.")
+              raise SystemExit(1)
+          print("URI MongoDB de CI limitada a loopback y sin credenciales.")
+          PY
+      - name: Exigir MongoDB efímero disponible
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if docker exec "${{ job.services.mongo.id }}" \
+              mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -qx '1'; then
+              echo "MongoDB efímero disponible (intento ${attempt})."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MongoDB efímero no disponible."
+          exit 1
+      - name: Restore
+        run: dotnet restore UniHome.Backend.slnx --locked-mode
+      - name: Build Release
+        run: dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
+      - name: Inicializar base efímera con M01-001
+        id: mongo-migration
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults/mongo
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database unihome_ci_verificacion --confirm \
+            | tee TestResults/mongo/migration-apply.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database unihome_ci_verificacion \
+            | tee TestResults/mongo/migration-verify.txt
+          grep -F 'Registrada: True' TestResults/mongo/migration-verify.txt
+          grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify.txt
+          grep -F 'M01 coinciden: True' TestResults/mongo/migration-verify.txt
+          grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify.txt
+          grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify.txt
+      - name: Pruebas reales contra MongoDB
+        id: mongo-tests
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
-          -c Release --no-restore
+          --configuration Release --no-build --no-restore
           --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests"
           --logger "trx;LogFileName=mongo-ci.trx"
           --results-directory TestResults/mongo
-      - name: Evidencias
+      - name: Validar evidencias y resumir MongoDB
+        if: always()
+        env:
+          MONGO_CI_INITIALIZATION: ${{ steps.mongo-migration.outcome }}
+          MONGO_CI_TEST_OUTCOME: ${{ steps.mongo-tests.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults/mongo
+          python3 tools/ci/mongo_ci_summary.py \
+            --trx TestResults/mongo/mongo-ci.trx \
+            --mongo-version "$MONGO_CI_VERSION" \
+            --database "$MONGO_CI_DATABASE" \
+            --initialization "$MONGO_CI_INITIALIZATION" \
+            --tests-outcome "$MONGO_CI_TEST_OUTCOME" \
+            | tee TestResults/mongo/mongo-ci-summary.md
+      - name: Publicar evidencias MongoDB
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mongodb-ci-results
-          path: TestResults/mongo/**/*.trx
-          if-no-files-found: ignore
+          path: |
+            TestResults/mongo/**/*.trx
+            TestResults/mongo/migration-*.txt
+            TestResults/mongo/mongo-ci-summary.md
+          if-no-files-found: error
           retention-days: 7
+      - name: Destruir base temporal y verificar limpieza
+        if: always()
+        run: |
+          set -euo pipefail
+          docker exec "${{ job.services.mongo.id }}" mongosh --quiet --eval '
+            const database = db.getSiblingDB("unihome_ci_verificacion");
+            database.dropDatabase();
+            if (database.getCollectionNames().length !== 0) {
+              throw new Error("La base temporal no quedó vacía.");
+            }
+          '
+          echo "Base temporal eliminada; el contenedor se destruye al terminar el job."
 
   # Job manual y opcional: no participa en despliegues ni se ejecuta en push/PR.
   mutation-test:

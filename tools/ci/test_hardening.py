@@ -45,6 +45,22 @@ class GateTests(unittest.TestCase):
         _, issues = evaluate(needs, False, {}, "pull_request")
         self.assertEqual([], issues)
 
+    def test_mongo_success_en_manual_cumple(self):
+        needs = self._base_needs()
+        needs["mongo-db-test"] = {"result": "success"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MONGO_CI": "true"}, "workflow_dispatch")
+        self.assertEqual([], issues)
+        self.assertIn("mongo-db-test", required)
+
+    def test_mongo_skipped_en_manual_bloquea(self):
+        needs = self._base_needs()
+        needs["mongo-db-test"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_MONGO_CI": "true"}, "workflow_dispatch")
+        self.assertIn("mongo-db-test", required)
+        self.assertTrue(any("mongo-db-test" in issue for issue in issues))
+
     def test_mutation_success_en_manual_cumple(self):
         needs = {x: {"result": "success"} for x in (
             "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
