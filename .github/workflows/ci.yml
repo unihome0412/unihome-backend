@@ -1526,6 +1526,20 @@ jobs:
       - name: Actualizar revisión y ejecutar recuperación verificada
         run: |
           set -euo pipefail
+
+          is_healthy_running_state() {
+            case "$1" in
+              Running|RunningAtMaxScale) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          is_terminal_bad_running_state() {
+            case "$1" in
+              Failed|Stopped|Degraded|Unknown) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
           previous_image="$(az containerapp show \
             --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
             --query 'properties.template.containers[0].image' -o tsv)"
@@ -1541,6 +1555,21 @@ jobs:
           if [ -z "$previous_image" ] || [ -z "$previous_revision" ] \
             || [ -z "$previous_fqdn" ] || [ "$revision_mode" != "Single" ]; then
             echo "::error::Se requiere imagen/revisión/FQDN y activeRevisionsMode=Single para un rollback seguro."
+            exit 1
+          fi
+          previous_state="$(az containerapp revision show \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$previous_revision" \
+            --query 'properties.runningState' -o tsv 2>/dev/null || true)"
+          previous_health="$(az containerapp revision show \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$previous_revision" \
+            --query 'properties.healthState' -o tsv 2>/dev/null || true)"
+          if ! is_healthy_running_state "$previous_state" \
+            || [ "$previous_health" != "Healthy" ]; then
+            echo "::error::La revisión anterior no está saludable (runningState=${previous_state:-desconocido}, healthState=${previous_health:-desconocido}); no se inicia el despliegue."
             exit 1
           fi
           previous_healthy=false
@@ -1577,6 +1606,38 @@ jobs:
               --image "$previous_image" \
               --revision-suffix "rb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"; then
               echo "::error::Falló el rollback a la imagen anterior."
+              return 1
+            fi
+            local rollback_revision=""
+            local rollback_state=""
+            local rollback_health=""
+            for attempt in $(seq 1 12); do
+              rollback_revision="$(az containerapp show \
+                --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+                --query 'properties.latestRevisionName' -o tsv 2>/dev/null || true)"
+              if [ -n "$rollback_revision" ]; then
+                rollback_state="$(az containerapp revision show \
+                  --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --revision "$rollback_revision" \
+                  --query 'properties.runningState' -o tsv 2>/dev/null || true)"
+                rollback_health="$(az containerapp revision show \
+                  --name "$AZURE_CONTAINER_APP" --resource-group "$AZURE_RESOURCE_GROUP" \
+                  --revision "$rollback_revision" \
+                  --query 'properties.healthState' -o tsv 2>/dev/null || true)"
+                if is_healthy_running_state "$rollback_state" \
+                  && [ "$rollback_health" = "Healthy" ]; then
+                  break
+                fi
+                if is_terminal_bad_running_state "$rollback_state" \
+                  || [ "$rollback_health" = "Unhealthy" ]; then
+                  break
+                fi
+              fi
+              sleep 5
+            done
+            if ! is_healthy_running_state "$rollback_state" \
+              || [ "$rollback_health" != "Healthy" ]; then
+              echo "::error::El rollback no alcanzó una revisión saludable (runningState=${rollback_state:-desconocido}, healthState=${rollback_health:-desconocido})."
               return 1
             fi
             local rollback_fqdn=""
@@ -1634,23 +1695,35 @@ jobs:
           fi
 
           revision_state=""
+          revision_health=""
           for attempt in $(seq 1 30); do
             revision_state="$(az containerapp revision show \
               --name "$AZURE_CONTAINER_APP" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --revision "$new_revision" \
               --query 'properties.runningState' -o tsv 2>/dev/null || true)"
-            if [ "$revision_state" = "Running" ]; then
+            revision_health="$(az containerapp revision show \
+              --name "$AZURE_CONTAINER_APP" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --revision "$new_revision" \
+              --query 'properties.healthState' -o tsv 2>/dev/null || true)"
+            if is_healthy_running_state "$revision_state" \
+              && [ "$revision_health" = "Healthy" ]; then
               break
             fi
-            if [ "$revision_state" = "Failed" ] || [ "$revision_state" = "Stopped" ]; then
+            if is_terminal_bad_running_state "$revision_state" \
+              || [ "$revision_health" = "Unhealthy" ]; then
               break
             fi
-            echo "Revisión $new_revision aún no está Running (estado: ${revision_state:-desconocido})."
+            echo "Revisión $new_revision aún no está saludable (runningState=${revision_state:-desconocido}, healthState=${revision_health:-desconocido})."
             sleep 5
           done
-          if [ "$revision_state" != "Running" ]; then
-            echo "::error::La revisión $new_revision no alcanzó estado Running."
+          if ! is_healthy_running_state "$revision_state"; then
+            echo "::error::La revisión $new_revision no alcanzó un estado Running/RunningAtMaxScale."
+            exit 1
+          fi
+          if [ "$revision_health" != "Healthy" ]; then
+            echo "::error::La revisión $new_revision no alcanzó healthState=Healthy."
             exit 1
           fi
 

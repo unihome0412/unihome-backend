@@ -5,11 +5,14 @@ from pathlib import Path
 
 from azure_cd_guard import (
     DEPLOY_JOB_DEPENDENCIES,
+    HEALTHY_RUNNING_STATES,
+    TERMINAL_UNHEALTHY_RUNNING_STATES,
     cancel_in_progress,
     cancellation_limits,
     concurrency_key,
     deploy_allowed,
     recovery_actions,
+    revision_is_healthy,
     rollback_outcome,
 )
 
@@ -68,12 +71,17 @@ class AzureCdWorkflowTests(unittest.TestCase):
         self.assertIn("digest: \\(sha256:[0-9a-f]*\\)", self.deploy)
         self.assertIn("PREVIOUS_FQDN", self.deploy)
         self.assertIn("properties.runningState", self.deploy)
+        self.assertIn("properties.healthState", self.deploy)
+        self.assertIn("RunningAtMaxScale", self.deploy)
+        self.assertIn("Failed|Stopped|Degraded|Unknown", self.deploy)
         self.assertIn("activeRevisionsMode", self.deploy)
         self.assertIn("trap on_exit EXIT", self.deploy)
         self.assertIn("PREVIOUS_IMAGE", self.deploy)
         self.assertIn("rollback()", self.deploy)
+        self.assertIn("previous_state", self.deploy)
         self.assertIn("previous_healthy", self.deploy)
-        self.assertIn("rollback_healthy", self.deploy)
+        self.assertIn("revision_health", self.deploy)
+        self.assertIn("rollback_health", self.deploy)
         self.assertIn("Rollback verificado", self.deploy)
 
     def test_no_se_declara_inmutable_el_tag(self):
@@ -121,6 +129,42 @@ class DeployGuardTests(unittest.TestCase):
         self.assertFalse(deploy_allowed(
             event_name="workflow_dispatch", ref="refs/heads/feature/ci-cd-azure-prep",
             deploy_input=True, enabled=True, code_changed=True, needs=self.needs).allowed)
+
+
+class RevisionHealthTests(unittest.TestCase):
+    def test_running_y_running_at_max_scale_saludables_solo_con_healthy_y_http(self):
+        self.assertIn("Running", HEALTHY_RUNNING_STATES)
+        self.assertIn("RunningAtMaxScale", HEALTHY_RUNNING_STATES)
+        self.assertTrue(revision_is_healthy(
+            running_state="Running",
+            health_state="Healthy",
+            http_healthy=True))
+        self.assertTrue(revision_is_healthy(
+            running_state="RunningAtMaxScale",
+            health_state="Healthy",
+            http_healthy=True))
+
+    def test_rechaza_estados_no_saludables(self):
+        for state in ("Failed", "Stopped", "Degraded", "Unknown"):
+            self.assertIn(state, TERMINAL_UNHEALTHY_RUNNING_STATES)
+            self.assertFalse(revision_is_healthy(
+                running_state=state,
+                health_state="Healthy",
+                http_healthy=True))
+
+    def test_exige_health_state_y_http(self):
+        self.assertFalse(revision_is_healthy(
+            running_state="Running",
+            health_state="Unhealthy",
+            http_healthy=True))
+        self.assertFalse(revision_is_healthy(
+            running_state="RunningAtMaxScale",
+            health_state="None",
+            http_healthy=True))
+        self.assertFalse(revision_is_healthy(
+            running_state="RunningAtMaxScale",
+            health_state="Healthy",
+            http_healthy=False))
 
 
 class RecoverySimulationTests(unittest.TestCase):
