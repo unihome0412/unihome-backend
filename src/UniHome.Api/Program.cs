@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -343,6 +344,20 @@ builder.Services.AddOpenApi("v1", options =>
             BearerFormat = "JWT",
             Description = "Token de acceso JWT emitido por POST /api/v1/auth/login."
         };
+
+        // El generador nativo describe el enum Gender como integer. El contrato
+        // HTTP, y el consumidor Android, usan los nombres string del enum; se
+        // corrige el componente después de generar los esquemas.
+        if (document.Components.Schemas is { } schemas &&
+            schemas.TryGetValue("Gender", out var rawGender) &&
+            rawGender is OpenApiSchema gender)
+        {
+            gender.Type = JsonSchemaType.String;
+            gender.Format = null;
+            gender.Enum = Enum.GetNames<Gender>()
+                .Select(name => (JsonNode)JsonValue.Create(name)!)
+                .ToList();
+        }
 
         return Task.CompletedTask;
     });
