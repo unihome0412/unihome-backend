@@ -27,13 +27,67 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
-| DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | Solo instancia efímera local `/health/live`, sin secretos; escaneo **pasivo limitado**, no prueba toda la API | Solo manual |
+| DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Primero desarrollar `tests/UniHome.PactTests` con contratos de Mobile; en su ausencia falla al activarse | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | Primero implementar `tools/ci/restler/run-isolated.sh` y un harness 100 % aislado; si falta, **falla** | Solo manual |
 
 **Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. La migración `M01-001` se aplica únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
 
-ZAP: el escaneo inicial alcanza únicamente `http://127.0.0.1:5088/health/live`. Esto demuestra conexión, no cobertura DAST del flujo autenticado. RESTler / Pact requieren contratos y datos de prueba que aún no están implementados. No activar como simples interruptores para aparentar cobertura.
+### DAST ZAP baseline pasivo
+
+El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
+
+- Usa la imagen oficial `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest
+  `sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af`.
+- Levanta una API efímera en `http://127.0.0.1:5088`, un MongoDB Community
+  8.0.34 fijado por digest como servicio del runner y un SMTP de captura local
+  con STARTTLS en `127.0.0.1:587`. La base `unihome_dast` se inicializa con
+  M01-001 y se destruye al final. No usa Atlas, Brevo, Azure, puertos públicos
+  ni credenciales reales. La CA efímera del SMTP no publica CRL/OCSP, por lo
+  que solo en este job se configura `Smtp__CheckCertificateRevocation=false`;
+  el valor predeterminado del código sigue siendo `true` y STARTTLS sigue
+  siendo obligatorio.
+- Crea dos cuentas sintéticas mediante los endpoints reales: registro,
+  confirmación con el código capturado del SMTP, login, refresh, logout y
+  eliminación de cuenta. Las claves JWT/HMAC y la contraseña SMTP son valores
+  sintéticos del runner; los tokens no se publican en artefactos.
+- Descubre las operaciones en `/openapi/v1.json` y envía una petición real por
+  cada método HTTP documentado. También visita `/health/live`, `/health/ready`,
+  Swagger UI y `/`. La tabla `route-coverage.json` registra método, ruta,
+  autenticación requerida, códigos de respuesta y ruta visitada. Una operación
+  nueva en OpenAPI que no tenga tráfico hace fallar el job.
+- Envía el tráfico a través del proxy de ZAP y ejecuta únicamente análisis
+  **pasivo** (`pscan`). No se ejecuta Active Scan ni Full Scan, no se usa `-I`,
+  no se aplican listas de exclusión y no se desactivan reglas pasivas.
+- Genera `zap-report.html`, `zap-report.json`, `zap-report.md` (si el add-on lo
+  permite), `dast-report.md`, `route-coverage.json`, `security-headers.json` y
+  las evidencias de arranque/limpieza. High/Critical hacen fallar el job;
+  Medium produce `WARN`; un fallo técnico o una ruta no visitada produce
+  `ERROR`. El artefacto se publica como `dast-zap-results`.
+- Se exige en `workflow_dispatch` desde `main` o `feature/*` cuando
+  `UNIHOME_ENABLE_ZAP=true`, hay cambios de código y `build-test` aprobó. En
+  PR/push no se exige y el Hardening Report lo muestra como `skipped` no
+  aprobado. El gate de Hardening aplica la misma regla de rama.
+
+**Verificación real (10 de noviembre de 2026):** ejecución manual
+[42772939746](https://github.com/unihome0412/unihome-backend/actions/runs/42772939746),
+commit `01893d3`, job `dast-zap` en verde con estado **PASS**, 7/7 operaciones
+OpenAPI visitadas, 26 mensajes procesados por ZAP, 0 Critical, 0 High, 0 Medium,
+0 Low y 2 informativas (aplicación web moderna y respuesta de sesión). Se
+publicaron `zap-report.html`, `zap-report.json`, `zap-report.md`,
+`dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza; la
+limpieza confirmó API y SMTP detenidos, contenedor ZAP eliminado y base
+`unihome_dast` borrada. `PR Quality Gate` y `Hardening Report` terminaron en
+verde. SonarCloud quedó `skipped` por ser una ejecución manual desde
+`feature/*`, comportamiento esperado y no exigido por el gate.
+
+**Alcance pendiente y riesgos:** el análisis pasivo no demuestra lógica de
+negocio ni autorización a nivel de objeto; la cobertura se limita a las rutas
+documentadas y las rutas de soporte enumeradas. El HTTP de loopback es
+intencional y no representa el despliegue; HSTS/HTTPS no aplica a este runner.
+Las alertas que aparezcan en futuras ejecuciones deben revisarse y aceptarse o
+corregirse por separado. RESTler / Pact siguen requiriendo contratos y datos de
+prueba; no se activan para aparentar cobertura.
 
 ## SonarQube Cloud
 

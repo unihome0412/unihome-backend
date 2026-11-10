@@ -613,53 +613,439 @@ jobs:
           ./dockle --exit-code 1 --exit-level FATAL unihome-ci:${GITHUB_SHA::12}
 
   dast-zap:
-    name: DAST (OWASP ZAP) - instancia efímera local
+    name: DAST (OWASP ZAP) - baseline pasivo aislado
     needs: [detect-changes, build-test]
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_ZAP == 'true' && github.event_name == 'workflow_dispatch' && needs.build-test.result == 'success' }}
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_ZAP == 'true' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feature/')) && needs.build-test.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    services:
+      mongo:
+        # Misma versión efímera fijada por digest que usa MongoDB CI.
+        image: mongo:8.0.34@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+        env:
+          GLIBC_TUNABLES: glibc.pthread.rseq=1
+        ports:
+          - 127.0.0.1:27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+          --health-start-period 10s
+    env:
+      ZAP_IMAGE: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af
+      ZAP_API_KEY: unihome-dast-zap-loopback
+      DAST_TARGET: http://127.0.0.1:5088
+      MONGO_DAST_DATABASE: unihome_dast
+      MONGO_DAST_CONNECTION_STRING: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+      MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+      MongoDb__DatabaseName: unihome_dast
+      MongoDb__ServerSelectionTimeoutSeconds: '5'
+      UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_dast
+      SMTP_DAST_MAILBOX: .dast-mail
+      SMTP_PID_FILE: /tmp/unihome-dast-smtp.pid
+      API_PID_FILE: /tmp/unihome-dast-api.pid
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '10.0.x'
-      - name: Compilar sin configuración real de MongoDB
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Validar aislamiento de API, MongoDB y SMTP
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from urllib.parse import parse_qs, urlparse
+
+          target = os.environ["DAST_TARGET"]
+          database = os.environ["MONGO_DAST_DATABASE"]
+          uri = os.environ["MONGO_DAST_CONNECTION_STRING"]
+          parsed = urlparse(uri)
+          if target != "http://127.0.0.1:5088":
+              raise SystemExit("El objetivo DAST debe ser loopback en el puerto 5088.")
+          if database != "unihome_dast":
+              raise SystemExit("La base DAST debe ser unihome_dast.")
+          if (
+              parsed.scheme != "mongodb"
+              or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+              or parsed.username is not None
+              or parsed.password is not None
+          ):
+              raise SystemExit("La URI DAST debe ser MongoDB directo a loopback y sin credenciales.")
+          if parse_qs(parsed.query).get("directConnection", [""])[0].lower() != "true":
+              raise SystemExit("La URI DAST debe declarar directConnection=true.")
+          print("Objetivo, Mongo y base DAST limitados a loopback.")
+          PY
+          PYTHONPATH=tools/ci python3 - <<'PY'
+          import os
+          import zap_dast
+
+          if os.environ["ZAP_IMAGE"] != zap_dast.ZAP_IMAGE_REF:
+              raise SystemExit("La imagen ZAP del workflow no coincide con el driver.")
+          if os.environ["SMTP_DAST_MAILBOX"] != str(zap_dast.MAILBOX_DIR):
+              raise SystemExit("El buzón SMTP del workflow no coincide con el driver.")
+          print("Imagen ZAP y buzón SMTP coinciden con el driver.")
+          PY
+      - name: Restaurar y compilar API y migrador
         run: |
           dotnet restore UniHome.Backend.slnx --locked-mode
-          dotnet build src/UniHome.Api/UniHome.Api.csproj -c Release --no-restore
-      - name: Iniciar API local sin secretos ni servicios reales
-        env:
-          ASPNETCORE_ENVIRONMENT: Development
-          MongoDb__ConnectionString: ''
-          MongoDb__DatabaseName: ''
-          SMTP__Password: ''
+          dotnet build src/UniHome.Api/UniHome.Api.csproj -c Release --no-restore -warnaserror
+          dotnet build tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj -c Release --no-restore -warnaserror
+      - name: Exigir MongoDB efímero disponible
         run: |
-          nohup dotnet run --project src/UniHome.Api/UniHome.Api.csproj \
-            -c Release --no-build --no-launch-profile \
-            --urls http://127.0.0.1:5088 > /tmp/unihome-api.log 2>&1 &
-          for attempt in $(seq 1 40); do
-            if curl --silent --fail http://127.0.0.1:5088/health/live > /dev/null; then exit 0; fi
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if docker exec "${{ job.services.mongo.id }}" \
+              mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -qx '1'; then
+              echo "MongoDB efímero disponible (intento ${attempt})."
+              exit 0
+            fi
             sleep 2
           done
-          echo "::error::La API local no levantó para ZAP"
-          sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' /tmp/unihome-api.log | tail -30
+          echo "::error::MongoDB efímero no disponible para DAST."
           exit 1
-      - name: ZAP baseline pasivo (solo loopback, sin ataques de escritura)
+      - name: Inicializar base efímera DAST con M01-001
         run: |
-          mkdir -p zap-reports
-          chmod 777 zap-reports
-          docker run --rm --network host \
-            -v "$PWD/zap-reports:/zap/wrk:rw" \
-            ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py -t http://127.0.0.1:5088/health/live \
-            -m 1 -I -r zap.html -J zap.json
-      - name: Evidencia ZAP
+          set -euo pipefail
+          mkdir -p artifacts/dast-zap
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_DAST_DATABASE" --confirm \
+            | tee artifacts/dast-zap/migration-apply.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_DAST_DATABASE" \
+            | tee artifacts/dast-zap/migration-verify.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify.txt
+      - name: Preparar SMTP de captura local y confianza TLS
+        run: |
+          set -euo pipefail
+          SMTP_DIR="$RUNNER_TEMP/unihome-dast-smtp"
+          mkdir -p "$SMTP_DIR" "$SMTP_DAST_MAILBOX"
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 \
+            -keyout "$SMTP_DIR/ca-key.pem" -out "$SMTP_DIR/ca-cert.pem" \
+            -subj "/CN=UniHome DAST Local CA" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign"
+          openssl req -newkey rsa:2048 -sha256 -nodes \
+            -keyout "$SMTP_DIR/server-key.pem" -out "$SMTP_DIR/server.csr" \
+            -subj "/CN=127.0.0.1"
+          openssl x509 -req -in "$SMTP_DIR/server.csr" \
+            -CA "$SMTP_DIR/ca-cert.pem" -CAkey "$SMTP_DIR/ca-key.pem" \
+            -CAcreateserial -out "$SMTP_DIR/server-cert.pem" -days 2 -sha256 \
+            -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
+          cat "$SMTP_DIR/server-cert.pem" "$SMTP_DIR/ca-cert.pem" \
+            > "$SMTP_DIR/server-chain.pem"
+          sudo cp "$SMTP_DIR/ca-cert.pem" \
+            /usr/local/share/ca-certificates/unihome-dast-ca.crt
+          sudo update-ca-certificates
+          sudo sysctl -w net.ipv4.ip_unprivileged_port_start=587
+          python3 -m venv "$RUNNER_TEMP/unihome-dast-venv"
+          "$RUNNER_TEMP/unihome-dast-venv/bin/pip" install \
+            --disable-pip-version-check --no-input aiosmtpd==1.4.6
+      - name: Iniciar SMTP de captura local
+        run: |
+          set -euo pipefail
+          SMTP_DIR="$RUNNER_TEMP/unihome-dast-smtp"
+          nohup "$RUNNER_TEMP/unihome-dast-venv/bin/python" \
+            tools/ci/dast_smtp_capture.py \
+            --host 127.0.0.1 --port 587 \
+            --cert "$SMTP_DIR/server-chain.pem" --key "$SMTP_DIR/server-key.pem" \
+            > "$RUNNER_TEMP/unihome-dast-smtp.log" 2>&1 &
+          echo $! > "$SMTP_PID_FILE"
+          for attempt in $(seq 1 20); do
+            if [ -f "$SMTP_DAST_MAILBOX/.ready" ]; then
+              echo "SMTP de captura disponible (intento ${attempt})."
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$SMTP_PID_FILE")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/unihome-dast-smtp.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/unihome-dast-smtp.log"
+          exit 1
+      - name: Verificar STARTTLS del SMTP local
+        run: |
+          set -euo pipefail
+          SMTP_DIR="$RUNNER_TEMP/unihome-dast-smtp"
+          timeout 15 openssl s_client -starttls smtp \
+            -connect 127.0.0.1:587 -servername localhost \
+            -CAfile "$SMTP_DIR/ca-cert.pem" -verify_return_error -brief \
+            < /dev/null > artifacts/dast-zap/smtp-tls-check.txt 2>&1
+          grep -E 'Verification: OK|Verify return code: 0' artifacts/dast-zap/smtp-tls-check.txt
+      - name: Verificar conexión TLS con MailKit
+        env:
+          SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_DIR: /etc/ssl/certs
+        run: |
+          set -euo pipefail
+          PROBE="$RUNNER_TEMP/unihome-smtp-probe"
+          rm -rf "$PROBE"
+          dotnet new console --name UniHome.SmtpProbe --output "$PROBE" \
+            --framework net10.0 --no-restore > /dev/null
+          cat > "$PROBE/UniHome.SmtpProbe.csproj" <<'XML'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <OutputType>Exe</OutputType>
+              <TargetFramework>net10.0</TargetFramework>
+              <ImplicitUsings>enable</ImplicitUsings>
+              <Nullable>enable</Nullable>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="MailKit" Version="4.18.2" />
+            </ItemGroup>
+          </Project>
+          XML
+          cat > "$PROBE/Program.cs" <<'CS'
+          using System.Net.Security;
+          using System.Security.Cryptography.X509Certificates;
+          using MailKit.Net.Smtp;
+          using MailKit.Security;
+
+          Console.WriteLine($"SSL_CERT_FILE={Environment.GetEnvironmentVariable("SSL_CERT_FILE")}");
+          Console.WriteLine($"SSL_CERT_DIR={Environment.GetEnvironmentVariable("SSL_CERT_DIR")}");
+
+          static void PrintChain(X509Chain? chain)
+          {
+              if (chain is null)
+              {
+                  return;
+              }
+
+              foreach (var status in chain.ChainStatus)
+              {
+                  Console.WriteLine($"chain_status={status.Status}: {status.StatusInformation.Trim()}");
+              }
+
+              foreach (var element in chain.ChainElements)
+              {
+                  Console.WriteLine(
+                      $"chain_cert={element.Certificate.Subject} issuer={element.Certificate.Issuer}");
+              }
+          }
+
+          async Task TryConnect(bool trustAll)
+          {
+              using var client = new SmtpClient
+              {
+                  CheckCertificateRevocation = false
+              };
+              client.ServerCertificateValidationCallback = (_, _, chain, errors) =>
+              {
+                  Console.WriteLine($"callback_trustAll={trustAll} errors={errors}");
+                  PrintChain(chain);
+                  return trustAll || errors == SslPolicyErrors.None;
+              };
+
+              try
+              {
+                  await client.ConnectAsync("127.0.0.1", 587, SecureSocketOptions.StartTls);
+                  Console.WriteLine($"connect_trustAll={trustAll} result=OK");
+                  await client.DisconnectAsync(true);
+              }
+              catch (Exception exception)
+              {
+                  Console.WriteLine(
+                      $"connect_trustAll={trustAll} exception={exception.GetType().Name}: {exception.Message}");
+                  if (exception.InnerException is not null)
+                  {
+                      Console.WriteLine(
+                          $"inner={exception.InnerException.GetType().Name}: {exception.InnerException.Message}");
+                  }
+              }
+          }
+
+          await TryConnect(false);
+          await TryConnect(true);
+          CS
+          dotnet run --project "$PROBE" --configuration Release \
+            > artifacts/dast-zap/smtp-mailkit-probe.txt 2>&1
+      - name: Iniciar API efímera con MongoDB y SMTP de captura
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          Api__EnableSwagger: 'true'
+          MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+          MongoDb__DatabaseName: unihome_dast
+          MongoDb__ServerSelectionTimeoutSeconds: '5'
+          Jwt__SigningKey: 'dast-synthetic-jwt-signing-key-not-a-production-secret-0123456789'
+          VerificationCode__HmacSecret: 'dast-synthetic-hmac-secret-not-a-production-secret-0123456789'
+          Smtp__Host: 127.0.0.1
+          Smtp__Port: '587'
+          Smtp__UseStartTls: 'true'
+          Smtp__CheckCertificateRevocation: 'false'
+          Smtp__Username: unihome-dast
+          Smtp__Password: synthetic-not-a-secret
+          Smtp__FromEmail: no-reply@unihome.test
+          Smtp__FromName: UniHome DAST
+          Smtp__TimeoutSeconds: '15'
+          SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_DIR: /etc/ssl/certs
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dast-zap
+          API_DLL="$GITHUB_WORKSPACE/src/UniHome.Api/bin/Release/net10.0/UniHome.Api.dll"
+          test -f "$API_DLL"
+          (
+            cd "$(dirname "$API_DLL")"
+            nohup dotnet UniHome.Api.dll --urls "$DAST_TARGET" \
+              > "$GITHUB_WORKSPACE/artifacts/dast-zap/api.log" 2>&1 &
+            echo $! > "$API_PID_FILE"
+          )
+          live_code=""
+          for attempt in $(seq 1 60); do
+            live_code=$(curl -sS -o artifacts/dast-zap/health-live.json \
+              -w '%{http_code}' "$DAST_TARGET/health/live" || true)
+            if [ "$live_code" = "200" ]; then break; fi
+            if ! kill -0 "$(cat "$API_PID_FILE")" 2>/dev/null; then
+              sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+                artifacts/dast-zap/api.log | tail -40
+              echo "::error::La API DAST terminó antes de responder /health/live."
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$live_code" != "200" ]; then
+            echo "::error::La API DAST no respondió /health/live con HTTP 200."
+            sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+              artifacts/dast-zap/api.log | tail -40
+            exit 1
+          fi
+          ready_code=$(curl -sS -o artifacts/dast-zap/health-ready.json \
+            -w '%{http_code}' "$DAST_TARGET/health/ready" || true)
+          if [ "$ready_code" != "200" ]; then
+            echo "::error::La API DAST no respondió /health/ready con HTTP 200; MongoDB no está listo."
+            cat artifacts/dast-zap/health-ready.json || true
+            exit 1
+          fi
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "target=$DAST_TARGET"
+            echo "mongo_database=$MONGO_DAST_DATABASE"
+            echo "health_live_http=$live_code"
+            echo "health_ready_http=$ready_code"
+            echo "api_pid=$(cat "$API_PID_FILE")"
+            echo "smtp_capture=127.0.0.1:587"
+          } > artifacts/dast-zap/startup-summary.txt
+          sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g; s#(Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+            artifacts/dast-zap/api.log | tail -40 >> artifacts/dast-zap/startup-summary.txt
+      - name: Iniciar ZAP 2.17.0 fijado por versión y digest
+        run: |
+          set -euo pipefail
+          docker pull "$ZAP_IMAGE"
+          docker rm -f unihome-zap >/dev/null 2>&1 || true
+          docker run --detach --name unihome-zap --network host \
+            "$ZAP_IMAGE" \
+            zap.sh -daemon -host 0.0.0.0 -port 8090 \
+            -config api.key="$ZAP_API_KEY" \
+            -config api.addrs.addr.name='.*' \
+            -config api.addrs.addr.regex=true
+          for attempt in $(seq 1 60); do
+            if curl -fsS \
+              "http://127.0.0.1:8090/JSON/core/view/version/?apikey=$ZAP_API_KEY" \
+              -o artifacts/dast-zap/zap-version.json; then
+              echo "ZAP disponible (intento ${attempt})."
+              exit 0
+            fi
+            if ! docker inspect unihome-zap >/dev/null 2>&1; then
+              echo "::error::El contenedor ZAP terminó durante el arranque."
+              docker logs unihome-zap > artifacts/dast-zap/zap-startup.log 2>&1 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "::error::ZAP no respondió por la API local en el tiempo esperado."
+          docker logs unihome-zap > artifacts/dast-zap/zap-startup.log 2>&1 || true
+          exit 1
+      - name: Ejecutar baseline pasivo, rutas reales y reportes
+        run: |
+          set -euo pipefail
+          python3 tools/ci/zap_dast.py \
+            --target "$DAST_TARGET" \
+            --proxy http://127.0.0.1:8090 \
+            --zap-api http://127.0.0.1:8090 \
+            --zap-api-key "$ZAP_API_KEY" \
+            | tee artifacts/dast-zap/dast-console.txt
+          test -s artifacts/dast-zap/zap-report.html
+          test -s artifacts/dast-zap/zap-report.json
+          test -s artifacts/dast-zap/dast-report.md
+          test -s artifacts/dast-zap/route-coverage.json
+      - name: Detener servicios y verificar limpieza
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/dast-zap
+          SUMMARY=artifacts/dast-zap/shutdown-summary.txt
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$SUMMARY"
+          if [ -f "$API_PID_FILE" ]; then
+            api_pid=$(cat "$API_PID_FILE")
+            if kill -0 "$api_pid" 2>/dev/null; then
+              kill "$api_pid" 2>/dev/null || true
+              for attempt in $(seq 1 20); do
+                if ! kill -0 "$api_pid" 2>/dev/null; then break; fi
+                sleep 1
+              done
+              if kill -0 "$api_pid" 2>/dev/null; then
+                echo "api_stopped=false" >> "$SUMMARY"
+                exit 1
+              fi
+            fi
+            echo "api_stopped=true" >> "$SUMMARY"
+          else
+            echo "api_stopped=not_started" >> "$SUMMARY"
+          fi
+          if [ -f "$SMTP_PID_FILE" ]; then
+            smtp_pid=$(cat "$SMTP_PID_FILE")
+            if kill -0 "$smtp_pid" 2>/dev/null; then
+              kill "$smtp_pid" 2>/dev/null || true
+              sleep 1
+            fi
+            if kill -0 "$smtp_pid" 2>/dev/null; then
+              echo "smtp_stopped=false" >> "$SUMMARY"
+              exit 1
+            fi
+            echo "smtp_stopped=true" >> "$SUMMARY"
+          else
+            echo "smtp_stopped=not_started" >> "$SUMMARY"
+          fi
+          if [ -f "$RUNNER_TEMP/unihome-dast-smtp.log" ]; then
+            cp "$RUNNER_TEMP/unihome-dast-smtp.log" artifacts/dast-zap/smtp.log
+          fi
+          SMTP_DIR="$RUNNER_TEMP/unihome-dast-smtp"
+          if [ -f "$SMTP_DIR/ca-cert.pem" ]; then
+            openssl x509 -in "$SMTP_DIR/ca-cert.pem" -noout -text \
+              > artifacts/dast-zap/smtp-ca.txt 2>&1 || true
+          fi
+          if docker inspect unihome-zap >/dev/null 2>&1; then
+            docker rm -f unihome-zap >> "$SUMMARY" 2>&1
+            echo "zap_container_removed=true" >> "$SUMMARY"
+          else
+            echo "zap_container_removed=not_started" >> "$SUMMARY"
+          fi
+          if docker exec "${{ job.services.mongo.id }}" mongosh --quiet --eval '
+            const database = db.getSiblingDB("unihome_dast");
+            database.dropDatabase();
+            if (database.getCollectionNames().length !== 0) {
+              throw new Error("La base DAST no quedó vacía.");
+            }
+          ' >> "$SUMMARY" 2>&1; then
+            echo "mongo_database_dropped=true" >> "$SUMMARY"
+          else
+            echo "mongo_database_dropped=false" >> "$SUMMARY"
+            exit 1
+          fi
+      - name: Publicar evidencia DAST
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: zap-baseline-report
-          path: zap-reports/*
-          if-no-files-found: ignore
+          name: dast-zap-results
+          path: artifacts/dast-zap/**
+          if-no-files-found: error
           retention-days: 7
 
   restler-fuzzing:

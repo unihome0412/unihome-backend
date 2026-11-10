@@ -95,6 +95,67 @@ class GateTests(unittest.TestCase):
             needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "pull_request")
         self.assertEqual([], issues)
 
+    def test_dast_manual_feature_success_cumple(self):
+        needs = self._base_needs()
+        needs["dast-zap"] = {"result": "success"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_ZAP": "true"},
+            "workflow_dispatch", "refs/heads/feature/ci-dast-zap")
+        self.assertEqual([], issues)
+        self.assertIn("dast-zap", required)
+
+    def test_dast_manual_feature_skipped_bloquea(self):
+        needs = self._base_needs()
+        needs["dast-zap"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_ZAP": "true"},
+            "workflow_dispatch", "refs/heads/feature/ci-dast-zap")
+        self.assertIn("dast-zap", required)
+        self.assertTrue(any("dast-zap" in issue for issue in issues))
+
+    def test_dast_pr_skipped_no_bloquea(self):
+        needs = self._base_needs()
+        needs["dast-zap"] = {"result": "skipped"}
+        _, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_ZAP": "true"},
+            "pull_request", "refs/pull/15/merge")
+        self.assertEqual([], issues)
+
+    def test_dast_push_skipped_no_bloquea(self):
+        needs = self._base_needs()
+        needs["dast-zap"] = {"result": "skipped"}
+        _, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_ZAP": "true"},
+            "push", "refs/heads/main")
+        self.assertEqual([], issues)
+
+    def test_dast_manual_main_skipped_bloquea(self):
+        needs = self._base_needs()
+        needs["dast-zap"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_ZAP": "true"},
+            "workflow_dispatch", "refs/heads/main")
+        self.assertIn("dast-zap", required)
+        self.assertTrue(any("dast-zap" in issue for issue in issues))
+
+    def test_dast_manual_rama_no_habilitada_no_exige(self):
+        needs = self._base_needs()
+        needs["dast-zap"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_ZAP": "true"},
+            "workflow_dispatch", "refs/heads/docs/ci")
+        self.assertNotIn("dast-zap", required)
+        self.assertEqual([], issues)
+
+    def test_dast_manual_sin_cambios_no_exige(self):
+        needs = {x: {"result": "success"} for x in (
+            "detect-changes", "dependency-scan", "secret-scan")}
+        required, issues = evaluate(
+            needs, False, {"UNIHOME_ENABLE_ZAP": "true"},
+            "workflow_dispatch", "refs/heads/feature/ci-dast-zap")
+        self.assertNotIn("dast-zap", required)
+        self.assertEqual([], issues)
+
     @staticmethod
     def _base_needs():
         return {x: {"result": "success"} for x in (
@@ -189,6 +250,51 @@ class GateTests(unittest.TestCase):
             "sonarcloud-sast: esperado success; encontrado skipped",
             stderr.getvalue(),
         )
+
+    def test_main_dast_omitido_en_feature_bloquea(self):
+        needs = self._base_needs()
+        needs["dast-zap"] = {"result": "skipped"}
+        env = {
+            "NEEDS_JSON": json.dumps(needs),
+            "CODE_CHANGED": "true",
+            "EVENT_NAME": "workflow_dispatch",
+            "EVENT_REF": "refs/heads/feature/ci-dast-zap",
+            "UNIHOME_ENABLE_ZAP": "true",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(sys, "argv", ["hardening.py", "--gate"]),
+            redirect_stdout(StringIO()),
+            redirect_stderr(StringIO()) as stderr,
+        ):
+            result = main()
+        self.assertEqual(1, result)
+        self.assertIn(
+            "dast-zap: esperado success; encontrado skipped",
+            stderr.getvalue(),
+        )
+
+    def test_main_dast_exitoso_muestra_evento_y_rama(self):
+        needs = self._base_needs()
+        needs["dast-zap"] = {"result": "success"}
+        env = {
+            "NEEDS_JSON": json.dumps(needs),
+            "CODE_CHANGED": "true",
+            "EVENT_NAME": "workflow_dispatch",
+            "EVENT_REF": "refs/heads/feature/ci-dast-zap",
+            "UNIHOME_ENABLE_ZAP": "true",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(sys, "argv", ["hardening.py", "--gate"]),
+            redirect_stdout(StringIO()) as stdout,
+            redirect_stderr(StringIO()),
+        ):
+            result = main()
+        self.assertEqual(0, result)
+        report = stdout.getvalue()
+        self.assertIn("workflow_dispatch / refs/heads/feature/ci-dast-zap", report)
+        self.assertIn("DAST ZAP manual: **obligatorio**", report)
 
 if __name__ == '__main__':
     unittest.main()

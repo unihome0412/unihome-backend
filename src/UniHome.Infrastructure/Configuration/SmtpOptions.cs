@@ -22,6 +22,12 @@ public sealed class SmtpOptions
 
     public bool UseStartTls { get; set; } = true;
 
+    /// <summary>
+    /// Mantiene la comprobación de revocación de MailKit. Solo se desactiva en
+    /// el doble SMTP local del job DAST, cuya CA efímera no publica CRL/OCSP.
+    /// </summary>
+    public bool CheckCertificateRevocation { get; set; } = true;
+
     public string? Username { get; set; }
 
     public string? Password { get; set; }

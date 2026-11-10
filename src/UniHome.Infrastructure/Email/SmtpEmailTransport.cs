@@ -53,6 +53,7 @@ public sealed class SmtpEmailTransport
 
         using var client = _clientFactory.Create();
         client.Timeout = options.TimeoutMilliseconds;
+        client.CheckCertificateRevocation = options.CheckCertificateRevocation;
 
         var connected = false;
 

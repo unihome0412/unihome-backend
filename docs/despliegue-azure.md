@@ -68,6 +68,7 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Smtp__Host` | No | `SmtpOptions` (`Smtp`) | Solo si se configura envío de correo |
 | `Smtp__Port` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host`; debe ser `587` (STARTTLS) |
 | `Smtp__UseStartTls` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host`; debe ser `true` |
+| `Smtp__CheckCertificateRevocation` | No | `SmtpOptions` (`Smtp`) | No; predeterminado `true`. Nunca usar `false` en Azure; solo para el SMTP efímero del DAST local sin CRL/OCSP |
 | `Smtp__Username` | Sí | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `Smtp__Password` | Sí | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `Smtp__FromEmail` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |

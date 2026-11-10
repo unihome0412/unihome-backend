@@ -12,6 +12,8 @@ internal sealed class FakeSmtpClient : ISmtpClient
 
     public int Timeout { get; set; }
 
+    public bool CheckCertificateRevocation { get; set; } = true;
+
     public string? Host { get; private set; }
 
     public int Port { get; private set; }

@@ -194,6 +194,10 @@ solo lectura; si falta una garantía crítica, la API no opera esa colección.
 
 - Errores homogéneos con `ProblemDetails`, incluyendo `traceId` y `errors` en validaciones.
 - Excepciones no controladas: `500` genérico, sin stack trace.
+- Todas las respuestas incluyen `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy` y una CSP; las rutas de autenticación
+  y cuentas añaden `Cache-Control: no-store`. La CSP de Swagger UI permite sus
+  recursos propios e inline; el resto de la API usa `default-src 'none'`.
 - OpenAPI nativo de .NET 10 disponible solo en desarrollo: `GET /openapi/v1.json`.
   Incluye el esquema Bearer y marca `logout` como operación autenticada.
 - Registro: `400` por validación, `409` por correo duplicado (provisional, DEC-09
@@ -238,6 +242,37 @@ La ejecución manual de verificación
 ([42570584187](https://github.com/unihome0412/unihome-backend/actions/runs/42570584187),
 commit `9f4b4b5`) dejó 2/2 pruebas reales aprobadas, 0 omitidas y la limpieza
 temporal confirmada.
+
+El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
+**baseline pasivo real** de OWASP ZAP con la imagen oficial
+`ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
+`127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001 y un SMTP de
+captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
+operación documentada y publica `zap-report.html`, `zap-report.json`,
+`dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el
+artefacto `dast-zap-results`. No usa Active Scan, `-I`, exclusiones,
+`continue-on-error`, Atlas, Brevo, Azure ni secretos reales.
+
+```powershell
+gh variable set UNIHOME_ENABLE_ZAP --body true
+gh workflow run ci.yml --ref feature/ci-dast-zap
+gh run list --workflow ci.yml --limit 5
+gh run download <run-id> -n dast-zap-results -D artifacts/dast-zap
+```
+
+La ejecución real de verificación
+([42772939746](https://github.com/unihome0412/unihome-backend/actions/runs/42772939746),
+commit `01893d3`) terminó con `dast-zap` en verde y estado **PASS**: 7/7 rutas
+OpenAPI visitadas, 26 mensajes procesados, 0 Critical/High/Medium/Low y 2
+informativas. El artefacto `dast-zap-results` contiene HTML/JSON/Markdown y la
+limpieza confirmó API/SMTP detenidos, contenedor ZAP eliminado y base efímera
+borrada. `PR Quality Gate` y `Hardening Report` terminaron en verde.
+
+El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
+cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que
+aparezcan en futuras ejecuciones deben revisarse; el escaneo pasivo no demuestra
+lógica de negocio ni autorización a nivel de objeto.
 
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
 ejecutarla localmente en una base de verificación aislada, primero revisar y aplicar

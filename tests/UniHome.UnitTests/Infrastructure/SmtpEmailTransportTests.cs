@@ -52,6 +52,25 @@ public sealed class SmtpEmailTransportTests
     }
 
     [Fact]
+    public async Task SendAsync_PropagaLaPoliticaDeRevocacionConfigurada()
+    {
+        var factory = new FakeSmtpClientFactory();
+        var options = ValidOptions();
+        options.CheckCertificateRevocation = false;
+        var transport = CreateTransport(
+            factory,
+            new RecordingLogger<SmtpEmailTransport>(),
+            options);
+        using var message = CreateMessage();
+
+        var result = await transport.SendAsync(message);
+
+        Assert.Equal(SmtpSendStatus.Accepted, result.Status);
+        var client = Assert.Single(factory.Clients);
+        Assert.False(client.CheckCertificateRevocation);
+    }
+
+    [Fact]
     public async Task SendAsync_SiLaConexionNoEsSegura_NoAutenticaNiEnvia()
     {
         var client = new FakeSmtpClient { Secure = false };
