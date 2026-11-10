@@ -716,14 +716,18 @@ jobs:
           mkdir -p "$SMTP_DIR" "$SMTP_DAST_MAILBOX"
           openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 \
             -keyout "$SMTP_DIR/ca-key.pem" -out "$SMTP_DIR/ca-cert.pem" \
-            -subj "/CN=UniHome DAST Local CA"
+            -subj "/CN=UniHome DAST Local CA" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign"
           openssl req -newkey rsa:2048 -sha256 -nodes \
             -keyout "$SMTP_DIR/server-key.pem" -out "$SMTP_DIR/server.csr" \
-            -subj "/CN=localhost"
+            -subj "/CN=127.0.0.1"
           openssl x509 -req -in "$SMTP_DIR/server.csr" \
             -CA "$SMTP_DIR/ca-cert.pem" -CAkey "$SMTP_DIR/ca-key.pem" \
             -CAcreateserial -out "$SMTP_DIR/server-cert.pem" -days 2 -sha256 \
-            -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\n")
+            -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
+          cat "$SMTP_DIR/server-cert.pem" "$SMTP_DIR/ca-cert.pem" \
+            > "$SMTP_DIR/server-chain.pem"
           sudo cp "$SMTP_DIR/ca-cert.pem" \
             /usr/local/share/ca-certificates/unihome-dast-ca.crt
           sudo update-ca-certificates
@@ -738,7 +742,7 @@ jobs:
           nohup "$RUNNER_TEMP/unihome-dast-venv/bin/python" \
             tools/ci/dast_smtp_capture.py \
             --host 127.0.0.1 --port 587 \
-            --cert "$SMTP_DIR/server-cert.pem" --key "$SMTP_DIR/server-key.pem" \
+            --cert "$SMTP_DIR/server-chain.pem" --key "$SMTP_DIR/server-key.pem" \
             --output "$SMTP_DAST_MAILBOX" \
             > "$RUNNER_TEMP/unihome-dast-smtp.log" 2>&1 &
           echo $! > "$SMTP_PID_FILE"
@@ -755,6 +759,15 @@ jobs:
           done
           cat "$RUNNER_TEMP/unihome-dast-smtp.log"
           exit 1
+      - name: Verificar STARTTLS del SMTP local
+        run: |
+          set -euo pipefail
+          SMTP_DIR="$RUNNER_TEMP/unihome-dast-smtp"
+          timeout 15 openssl s_client -starttls smtp \
+            -connect 127.0.0.1:587 -servername localhost \
+            -CAfile "$SMTP_DIR/ca-cert.pem" -verify_return_error -brief \
+            < /dev/null > artifacts/dast-zap/smtp-tls-check.txt 2>&1
+          grep -E 'Verification: OK|Verify return code: 0' artifacts/dast-zap/smtp-tls-check.txt
       - name: Iniciar API efímera con MongoDB y SMTP de captura
         env:
           ASPNETCORE_ENVIRONMENT: Development
@@ -772,7 +785,8 @@ jobs:
           Smtp__FromEmail: no-reply@unihome.test
           Smtp__FromName: UniHome DAST
           Smtp__TimeoutSeconds: '15'
-          SSL_CERT_FILE: ${{ runner.temp }}/unihome-dast-smtp/ca-cert.pem
+          SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_DIR: /etc/ssl/certs
         run: |
           set -euo pipefail
           mkdir -p artifacts/dast-zap
@@ -904,6 +918,14 @@ jobs:
             echo "smtp_stopped=true" >> "$SUMMARY"
           else
             echo "smtp_stopped=not_started" >> "$SUMMARY"
+          fi
+          if [ -f "$RUNNER_TEMP/unihome-dast-smtp.log" ]; then
+            cp "$RUNNER_TEMP/unihome-dast-smtp.log" artifacts/dast-zap/smtp.log
+          fi
+          SMTP_DIR="$RUNNER_TEMP/unihome-dast-smtp"
+          if [ -f "$SMTP_DIR/ca-cert.pem" ]; then
+            openssl x509 -in "$SMTP_DIR/ca-cert.pem" -noout -text \
+              > artifacts/dast-zap/smtp-ca.txt 2>&1 || true
           fi
           if docker inspect unihome-zap >/dev/null 2>&1; then
             docker rm -f unihome-zap >> "$SUMMARY" 2>&1
