@@ -387,6 +387,8 @@ class ZapDastTests(unittest.TestCase):
     def test_riesgo_y_confianza_desconocidos(self):
         self.assertEqual("Informational", zap_dast._risk_label({"riskcode": "9"}))
         self.assertEqual("n/d", zap_dast._confidence_label({}))
+        self.assertEqual("High", zap_dast._confidence_label({"confidence": "3"}))
+        self.assertEqual("Medium", zap_dast._confidence_label({"confidence": "2"}))
 
     def test_reporte_con_sitio_unico_y_alerta_invalida(self):
         scan = parse_zap_report({"site": {

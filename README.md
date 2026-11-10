@@ -194,6 +194,10 @@ solo lectura; si falta una garantía crítica, la API no opera esa colección.
 
 - Errores homogéneos con `ProblemDetails`, incluyendo `traceId` y `errors` en validaciones.
 - Excepciones no controladas: `500` genérico, sin stack trace.
+- Todas las respuestas incluyen `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy` y una CSP; las rutas de autenticación
+  y cuentas añaden `Cache-Control: no-store`. La CSP de Swagger UI permite sus
+  recursos propios e inline; el resto de la API usa `default-src 'none'`.
 - OpenAPI nativo de .NET 10 disponible solo en desarrollo: `GET /openapi/v1.json`.
   Incluye el esquema Bearer y marca `logout` como operación autenticada.
 - Registro: `400` por validación, `409` por correo duplicado (provisional, DEC-09

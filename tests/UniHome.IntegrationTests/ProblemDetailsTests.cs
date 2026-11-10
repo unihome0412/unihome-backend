@@ -74,6 +74,7 @@ public sealed class ProblemDetailsTests : IClassFixture<UniHomeApiFactory>
 
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
 
         var body = await response.Content.ReadAsStringAsync();
         using var document = JsonDocument.Parse(body);

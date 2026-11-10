@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 
 namespace UniHome.IntegrationTests;
@@ -19,6 +20,13 @@ public sealed class HealthEndpointsTests : IClassFixture<UniHomeApiFactory>
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal("DENY", response.Headers.GetValues("X-Frame-Options").Single());
+        Assert.Equal("no-referrer", response.Headers.GetValues("Referrer-Policy").Single());
+        Assert.Contains(
+            "default-src 'none'",
+            response.Headers.GetValues("Content-Security-Policy").Single(),
+            StringComparison.Ordinal);
 
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = document.RootElement;
@@ -52,6 +60,20 @@ public sealed class HealthEndpointsTests : IClassFixture<UniHomeApiFactory>
 
         Assert.DoesNotContain("mongodb://", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("mongodb+srv://", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Auth_DebeIncluirNoStoreYSinCookies()
+    {
+        using var content = new StringContent("{}", Encoding.UTF8, "application/json");
+        using var response = await _client.PostAsync("/api/v1/auth/login", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(
+            "no-store",
+            response.Headers.GetValues("Cache-Control").Single(),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.False(response.Headers.Contains("Set-Cookie"));
     }
 
     private static Dictionary<string, JsonElement> ParseChecks(JsonElement root) =>

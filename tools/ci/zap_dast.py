@@ -37,6 +37,13 @@ PRIVACY_VERSION = "2026-01"
 EXPECTED_ZAP_VERSION = "2.17.0"
 RISK_ORDER = ("Critical", "High", "Medium", "Low", "Informational")
 RISK_BY_CODE = {"3": "High", "2": "Medium", "1": "Low", "0": "Informational"}
+CONFIDENCE_BY_CODE = {
+    "0": "False Positive",
+    "1": "Low",
+    "2": "Medium",
+    "3": "High",
+    "4": "Confirmed",
+}
 HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
 AUTHENTICATED_OPERATIONS = {
     ("POST", "/api/v1/auth/logout"),
@@ -416,6 +423,8 @@ def _risk_label(alert: dict[str, Any]) -> str:
 
 def _confidence_label(alert: dict[str, Any]) -> str:
     confidence = str(alert.get("confidence") or "").strip()
+    if confidence in CONFIDENCE_BY_CODE:
+        return CONFIDENCE_BY_CODE[confidence]
     if confidence:
         return confidence
     riskdesc = str(alert.get("riskdesc") or "")
@@ -481,8 +490,13 @@ def security_findings(records: list[ResponseRecord]) -> list[dict[str, str]]:
         if record.path in {"/health/live", "/openapi/v1.json",
                            "/api/v1/auth/registro", "/api/v1/auth/login"}
     ]
+    reported: set[tuple[str, str, str]] = set()
     for record in representative:
         for header, expected in SECURITY_HEADERS.items():
+            key = (header, record.method, record.path)
+            if key in reported:
+                continue
+            reported.add(key)
             value = record.headers.get(header)
             if value is None:
                 findings.append({
@@ -499,15 +513,17 @@ def security_findings(records: list[ResponseRecord]) -> list[dict[str, str]]:
                     "finding": f"valor inesperado en {record.method} {record.path}: {value}",
                 })
 
+    cache_paths: set[str] = set()
     for record in records:
-        if record.path not in SENSITIVE_CACHE_PATHS:
+        if record.path not in SENSITIVE_CACHE_PATHS or record.path in cache_paths:
             continue
         cache = record.headers.get("cache-control", "")
         if "no-store" not in cache.lower():
+            cache_paths.add(record.path)
             findings.append({
                 "severity": "WARN",
                 "header": "cache-control",
-                "finding": f"sin no-store en {record.method} {record.path}",
+                "finding": f"sin no-store en {record.path}",
             })
 
     cookies = [

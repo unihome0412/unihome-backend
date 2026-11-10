@@ -370,6 +370,37 @@ builder.Services.AddOpenApi("v1", options =>
 
 var app = builder.Build();
 
+// Cabeceras de endurecimiento aplicadas a todas las respuestas, incluidas las
+// generadas por el manejador de errores (OnStarting se ejecuta al iniciar el
+// envío). La CSP estricta es para respuestas de API; Swagger UI necesita una
+// política que permita sus recursos propios e inline.
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        headers["X-Content-Type-Options"] = "nosniff";
+        headers["X-Frame-Options"] = "DENY";
+        headers["Referrer-Policy"] = "no-referrer";
+        headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+
+        var path = context.Request.Path;
+        headers["Content-Security-Policy"] = path.StartsWithSegments("/swagger") || path == "/"
+            ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
+            : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
+
+        if (path.StartsWithSegments("/api/v1/auth") ||
+            path.StartsWithSegments("/api/v1/cuentas"))
+        {
+            headers.CacheControl = "no-store";
+        }
+
+        return Task.CompletedTask;
+    });
+
+    await next();
+});
+
 var jwtSettings = app.Services.GetRequiredService<IOptions<JwtOptions>>().Value;
 
 if (jwtSettings.EphemeralSigningKey)
