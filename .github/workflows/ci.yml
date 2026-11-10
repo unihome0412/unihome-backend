@@ -776,7 +776,8 @@ jobs:
           set -euo pipefail
           PROBE="$RUNNER_TEMP/unihome-smtp-probe"
           rm -rf "$PROBE"
-          dotnet new console --output "$PROBE" --framework net10.0 --no-restore > /dev/null
+          dotnet new console --name UniHome.SmtpProbe --output "$PROBE" \
+            --framework net10.0 --no-restore > /dev/null
           cat > "$PROBE/UniHome.SmtpProbe.csproj" <<'XML'
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup>
