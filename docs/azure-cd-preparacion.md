@@ -1,8 +1,9 @@
 # Preparación de CD hacia Azure Container Apps
 
 **Fecha de auditoría:** 2026-11-10. **Estado:** preparado, **no desplegado**.
-Esta auditoría no autenticó Azure, no creó recursos, no publicó imágenes, no
-cambió permisos y no reinició Container Apps.
+**El flujo de despliegue todavía no se ha probado en Azure.** Esta auditoría no
+autenticó Azure, no creó recursos, no publicó imágenes, no cambió permisos y no
+reinició Container Apps.
 
 ## Evidencia de preflight
 
@@ -74,16 +75,60 @@ asignar `AcrPull` a la identidad administrada.
 
 ## Flujo CD preparado
 
-1. Descarga la imagen `ci-container-image` construida y auditada por Dockle.
+1. Descarga la imagen `ci-container-image` construida y auditada por Dockle,
+   usando `actions/download-artifact` fijado por SHA de v4.3.0; es compatible
+   con el artefacto v4 que publica `actions/upload-artifact` v4.6.2 (ambos usan
+   el protocolo de artefactos v4).
 2. Autentica con OIDC.
-3. Publica `acrunihomedev.azurecr.io/unihome-api:<GITHUB_SHA>`.
-4. Captura la imagen y revisión anteriores.
+3. Publica `acrunihomedev.azurecr.io/unihome-api:<GITHUB_SHA>` completo.
+4. Captura la imagen, revisión y FQDN anteriores, exige
+   `activeRevisionsMode=Single` y que la revisión anterior esté sana antes de
+   actualizar.
 5. Actualiza `unihome-api` con una revisión `sha-<run-id>`.
-6. Consulta el FQDN y prueba `/health/live` y `/health/ready` por HTTPS.
-7. Si los health checks fallan, restaura la imagen anterior y falla el job.
-8. Publica `azure-cd-evidence` con imagen, revisión y resultado.
+6. Espera el estado `Running` de la revisión nueva y consulta su FQDN.
+7. Prueba `/health/live` y `/health/ready` por HTTPS.
+8. Ante fallo de query, estado o health, restaura la imagen anterior y falla.
+9. Publica `azure-cd-evidence` con tag SHA, digest, revisión y resultado.
 
 No se ejecutó ninguno de estos pasos en Azure.
+
+### Concurrencia
+
+El workflow separa los grupos de concurrencia:
+
+- CI: grupo `ci` para PR, push y dispatch sin input; conserva la cancelación
+  de ejecuciones CI obsoletas.
+- CD manual: el input verdadero usa el grupo `cd` y `cancel-in-progress: false`.
+- El job `deploy-azure` tiene además su propio grupo
+  `azure-dev-deploy-<ref>` con cancelación deshabilitada.
+
+Así, un push a `main` no puede cancelar un despliegue en progreso. Dos deploys
+manuales se serializan; el segundo espera.
+
+### Rollback y límites
+
+- Se exige `activeRevisionsMode=Single` y que la revisión anterior responda
+  health checks (con reintentos acotados) antes de actualizar.
+- Se captura `PREVIOUS_IMAGE`, `PREVIOUS_REVISION` y `PREVIOUS_FQDN`.
+- La revisión nueva debe alcanzar `runningState=Running`; si no, se revierte.
+- Cualquier fallo de query FQDN, estado o health dentro del paso dispara el trap
+  `EXIT` y restaura la imagen anterior.
+- Tras restaurar, se consulta el FQDN de rollback y se repiten health checks;
+  si tampoco pasan, el job falla y conserva el error. No se declara éxito.
+- **Límite:** una cancelación externa del job, terminación del runner o corte
+  de red puede impedir que se ejecute el trap. En ese caso la revisión debe
+  revisarse y recuperarse manualmente con autorización; no se promete rollback
+  atómico ante cancelaciones externas.
+
+### Trazabilidad de imagen
+
+- El tag usa el SHA completo del commit.
+- El digest se captura del resultado de `docker push` o de `RepoDigests` y se
+  publica en la evidencia. Si no se puede capturar, el job falla.
+- **ACR no garantiza por sí solo que un tag sea inmutable.** No se afirma
+  inmutabilidad ni se activa tag locking/immutable tags: hacerlo requiere
+  autorización y cambio de configuración en Azure. La retención/limpieza de
+  imágenes también requiere una decisión posterior.
 
 ## FinOps
 

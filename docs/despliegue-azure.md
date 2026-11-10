@@ -236,6 +236,11 @@ Remove-Item app.yaml
 
 ## Redesplegar una nueva versión de la imagen
 
+Los ejemplos `v1`/`v2` son históricos. El CD preparado usa el SHA completo del
+commit como tag y registra el digest; no afirma que el tag sea inmutable ni
+activa tag locking de ACR, porque eso requiere una decisión y autorización de
+Azure. Ver [`azure-cd-preparacion.md`](azure-cd-preparacion.md).
+
 ```powershell
 az acr login --name acrunihomedev
 docker build -t acrunihomedev.azurecr.io/unihome-api:v3 .

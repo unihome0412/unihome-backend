@@ -336,9 +336,11 @@ y elimina únicamente sus documentos de prueba. No envía correos reales.
 
 ## Preparación de Azure CD
 
-El job `deploy-azure` está preparado para publicar una imagen etiquetada por SHA
-en `acrunihomedev`, actualizar `unihome-api` y verificar `/health/live` y
-`/health/ready` con rollback por imagen anterior. **No se ha desplegado**.
+El job `deploy-azure` está preparado para publicar una imagen etiquetada por
+SHA completo con digest registrado en `acrunihomedev`, actualizar
+`unihome-api`, exigir estado `Running`, verificar `/health/live` y
+`/health/ready` y hacer rollback por imagen anterior. CI y CD tienen grupos de
+concurrencia separados y los deploys se serializan. **No se ha desplegado**.
 
 Permanece desactivado salvo que se cumplan simultáneamente:
 

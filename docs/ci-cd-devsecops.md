@@ -234,8 +234,11 @@ El job `deploy-azure` existe pero está desactivado por defecto. Solo puede
 ejecutarse en `workflow_dispatch` desde `main`, con el input explícito
 `deploy_to_azure=true`, `UNIHOME_ENABLE_AZURE_CD=true`, environment `azure-dev`
 y todos los gates previos en verde. Autentica por OIDC, publica la imagen ya
-auditada por Dockle con etiqueta SHA, actualiza Container Apps, verifica
-`/health/live` y `/health/ready` y revierte a la imagen anterior si falla.
+auditada por Dockle con etiqueta SHA y digest registrado, actualiza Container
+Apps, exige estado `Running`, verifica `/health/live` y `/health/ready` y
+revierte a la imagen anterior si falla. CI y CD usan grupos de concurrencia
+separados; un push no cancela un deploy en progreso. ACR no se declara inmutable:
+el tag por SHA y el digest son evidencia, no una garantía de bloqueo de tags.
 
 La auditoría del 2026-11-10 no pudo confirmar recursos por falta de sesión de
 Azure CLI; la URL pública respondió `200`, el environment tiene branch policy
