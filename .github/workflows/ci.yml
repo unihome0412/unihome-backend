@@ -638,6 +638,9 @@ jobs:
       DAST_TARGET: http://127.0.0.1:5088
       MONGO_DAST_DATABASE: unihome_dast
       MONGO_DAST_CONNECTION_STRING: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+      MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+      MongoDb__DatabaseName: unihome_dast
+      MongoDb__ServerSelectionTimeoutSeconds: '5'
       UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_dast
       SMTP_DAST_MAILBOX: /tmp/unihome-dast-mail
       SMTP_PID_FILE: /tmp/unihome-dast-smtp.pid
