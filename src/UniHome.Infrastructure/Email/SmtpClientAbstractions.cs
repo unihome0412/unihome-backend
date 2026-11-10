@@ -49,6 +49,8 @@ public interface ISmtpClient : IDisposable
 
     int Timeout { get; set; }
 
+    bool CheckCertificateRevocation { get; set; }
+
     Task ConnectStartTlsAsync(string host, int port, CancellationToken cancellationToken);
 
     Task AuthenticateAsync(string username, string password, CancellationToken cancellationToken);
@@ -78,6 +80,12 @@ internal sealed class MailKitSmtpClient : ISmtpClient
     {
         get => _client.Timeout;
         set => _client.Timeout = value;
+    }
+
+    public bool CheckCertificateRevocation
+    {
+        get => _client.CheckCertificateRevocation;
+        set => _client.CheckCertificateRevocation = value;
     }
 
     public Task ConnectStartTlsAsync(string host, int port, CancellationToken cancellationToken) =>

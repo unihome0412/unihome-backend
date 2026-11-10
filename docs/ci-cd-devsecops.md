@@ -43,7 +43,10 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
   8.0.34 fijado por digest como servicio del runner y un SMTP de captura local
   con STARTTLS en `127.0.0.1:587`. La base `unihome_dast` se inicializa con
   M01-001 y se destruye al final. No usa Atlas, Brevo, Azure, puertos públicos
-  ni credenciales reales.
+  ni credenciales reales. La CA efímera del SMTP no publica CRL/OCSP, por lo
+  que solo en este job se configura `Smtp__CheckCertificateRevocation=false`;
+  el valor predeterminado del código sigue siendo `true` y STARTTLS sigue
+  siendo obligatorio.
 - Crea dos cuentas sintéticas mediante los endpoints reales: registro,
   confirmación con el código capturado del SMTP, login, refresh, logout y
   eliminación de cuenta. Las claves JWT/HMAC y la contraseña SMTP son valores

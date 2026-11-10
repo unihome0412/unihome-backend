@@ -768,7 +768,7 @@ jobs:
             -CAfile "$SMTP_DIR/ca-cert.pem" -verify_return_error -brief \
             < /dev/null > artifacts/dast-zap/smtp-tls-check.txt 2>&1
           grep -E 'Verification: OK|Verify return code: 0' artifacts/dast-zap/smtp-tls-check.txt
-      - name: Diagnosticar confianza TLS del SMTP con MailKit
+      - name: Verificar conexión TLS con MailKit
         env:
           SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
           SSL_CERT_DIR: /etc/ssl/certs
@@ -821,7 +821,10 @@ jobs:
 
           async Task TryConnect(bool trustAll)
           {
-              using var client = new SmtpClient();
+              using var client = new SmtpClient
+              {
+                  CheckCertificateRevocation = false
+              };
               client.ServerCertificateValidationCallback = (_, _, chain, errors) =>
               {
                   Console.WriteLine($"callback_trustAll={trustAll} errors={errors}");
@@ -864,6 +867,7 @@ jobs:
           Smtp__Host: 127.0.0.1
           Smtp__Port: '587'
           Smtp__UseStartTls: 'true'
+          Smtp__CheckCertificateRevocation: 'false'
           Smtp__Username: unihome-dast
           Smtp__Password: synthetic-not-a-secret
           Smtp__FromEmail: no-reply@unihome.test
