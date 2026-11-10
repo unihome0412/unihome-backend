@@ -276,25 +276,49 @@ az group delete --name rg-unihome-dev --yes --no-wait
   fuera de alcance de esta tarea).
 - `ACR Tasks` sigue bloqueado en esta suscripción; si se necesita build remoto
   más adelante, abrir un caso de soporte de Azure.
-- **Escalado a 2 réplicas y estado compartido (propuesta ADR-006):** El despliegue
-  actual opera con 1 réplica (0.25 vCPU / 0.5 GiB). La propuesta ADR-006 plantea
-  2 réplicas con estado compartido en Redis exclusivamente para rate limiting
-  distribuido (BE-SEC-009); el momento exacto de pasar a 2 réplicas se definirá
-  con el equipo y el profesor según el crédito de Azure disponible. Variables planeadas (aún no existen en el código ni se configuran en Azure): `Redis__ConnectionString` y `Auth__RateLimit__IpHashSalt`, ambas sensibles; se agregarán a la tabla de variables cuando se implementen.
+- **Escalado a 2 réplicas y estado compartido (propuesta ADR-006):**
+  - **Estado actual del despliegue (Verificado):** El despliegue en producción opera actualmente con **1 sola réplica** (`minReplicas = 1`, `maxReplicas = 1`, 0.25 vCPU / 0.5 GiB). Ni Redis ni las 2 réplicas están desplegados en la nube. La arquitectura distribuida es una mejora planeada sujeta a aprobación del equipo.
+  - **Objetivo de la propuesta:** Operar 2 réplicas compartiendo estado en Redis exclusivamente para rate limiting distribuido (BE-SEC-009) y evitar la evasión de límites de autenticación por balanceo de carga.
+  - **MongoDB como única fuente de verdad:** MongoDB Atlas permanece como la única fuente de verdad inmutable para la suspensión de cuentas (M13), eliminación de cuentas (EP-M01-09 / `DeleteAccountService.cs:69`), revocación de sesiones (`RefreshToken`) y el estado persistente de las cuentas. El caché de estado de cuenta en Redis queda expresamente pospuesto; Redis no es ni será fuente de verdad para identidades ni permisos.
+  - **Rate limiting distribuido y atomicidad:** Los contadores compartidos operan mediante script Lua atómico (1 comando por intento) con TTL de expiración estricto para cada ventana temporal. Las peticiones se identifican mediante hash criptográfico SHA-256 de la IP del cliente junto con una sal dedicada (`Auth:RateLimit:IpHashSalt`), asegurando privacidad y defensa contra spoofing (con `ForwardLimit = 1`).
+  - **Comportamiento ante fallos de Redis y modo degradado:**
+    - Se contemplan cinco condiciones de falla: (1) Redis no disponible, (2) caída de conexión, (3) agotamiento de cuota de comandos o ancho de banda, (4) latencia elevada en Upstash (se aplicará timeout preventivo estricto de comando, p. ej. 250 ms), y (5) fallo de ejecución del script Lua.
+    - **Aclaración crítica sobre límites:** Un fallback local en memoria RAM **NO** mantiene un límite global; si el tráfico se reparte entre 2 réplicas, cada réplica contabiliza con contadores independientes, lo que en la práctica duplica el límite admisible total o penaliza asimétricamente a usuarios bajo redes NAT.
+    - **Política de seguridad diferenciada:** Para endpoints críticos de autenticación (Login, Registro, Refresh, Confirmar correo), se debe elegir formalmente entre:
+      * *Opción A (Fail-Closed):* Rechazar peticiones de autenticación con error controlado ante caída de Redis para preservar la protección estricta contra fuerza bruta.
+      * *Opción B (Fail-Open / Degradación local):* Permitir el servicio degradando a contadores locales en memoria por réplica (asumiendo que el límite global no se garantiza).
+      * *Estado de la decisión:* **[DECISIÓN PENDIENTE DE VALIDACIÓN DEL EQUIPO POR JESUI Y BRIDGET]**. No se asumirá una decisión preaprobada hasta contar con el consenso del equipo.
+  - **Variables y seguridad de secretos:** Las variables planeadas `Redis__ConnectionString` y `Auth__RateLimit__IpHashSalt` son de carácter estrictamente confidencial. Se configurarán únicamente como secretos en Azure Container Apps y GitHub Secrets / Environments; queda prohibido almacenar credenciales reales o ejemplos en el repositorio, archivos de configuración o registros de ejecución.
 
-## Presupuesto y límites gratuitos (planeado)
+## Presupuesto, costos y límites gratuitos
 
-*Fecha de consulta y fuentes: 2026-11-09.*
+*Fecha de consulta y fuentes oficiales: 2026-11-09 y 2026-11-10.*
 
-- **Upstash Redis plan gratuito:** 500,000 comandos al mes, 250 MB de almacenamiento, 10 GB de transferencia de datos, 1 base de datos, sin ACLs ni cifrado en reposo. No requiere ingresar tarjeta bancaria para operar en el nivel gratuito; la tarjeta solo se solicita al pasar a un plan de pago (fuente: https://upstash.com/pricing/redis.md).
-- **Azure Container Apps plan Consumption:** Cuota gratuita mensual por suscripción de 180,000 vCPU-segundos, 360,000 GiB-segundos y 2 millones de peticiones (fuente: https://learn.microsoft.com/en-us/azure/container-apps/billing). El despliegue actual opera con 1 réplica (0.25 vCPU / 0.5 GiB).
+- **Upstash Redis plan gratuito:** 500,000 comandos al mes, **250 MB** de almacenamiento (indicado oficialmente como 250 MB en la documentación y precios de Upstash: https://upstash.com/pricing/redis, a menudo referido como 256 MB en especificaciones binarias), 10 GB de transferencia de datos mensual, 1 sola base de datos, sin listas de control de acceso (ACLs) ni cifrado en reposo. No requiere ingresar tarjeta bancaria para operar en el nivel gratuito.
+- **Presupuesto mensual en Azure (rg-unihome-dev):** Se encuentra configurado un presupuesto formal en Azure Cost Management denominado `unihome-dev-budget` por un monto de **US$25.00 mensuales**, con alertas automáticas configuradas al 50% (US$12.50), 80% (US$20.00) y 100% (US$25.00) notificadas al correo del proyecto `unihome0412@gmail.com`. El gasto actual verificado es de **US$0.00**.
+- **Separación estricta de presupuestos y costos:**
+  1. El presupuesto mensual de US$25 de Azure supervisa únicamente los recursos desplegados en el Resource Group de Azure (`rg-unihome-dev`) y **NO** cubre, limita ni supervisa los consumos de Upstash Redis en su nube independiente.
+  2. El presupuesto de Azure no es un tope de gasto para Upstash ni garantiza la ausencia de cobros si se sobrepasan los límites del proveedor externo.
+  3. Para Upstash, la garantía preventiva de costo cero consiste en **no registrar tarjeta de crédito** en la plataforma, forzando la detención del servicio en lugar de cobros por exceso.
+- **Auditoría de consumo antes de escalar:** Operar 2 réplicas permanentes 24/7 en Azure Container Apps consume 1,296,000 vCPU-segundos/mes, superando la cuota mensual gratuita de 180,000 vCPU-segundos del plan Consumption. Por tanto, antes de activar 2 réplicas continuas se debe auditar el crédito restante de la suscripción (que vence el 3 de diciembre de 2026).
 - **Estimación de comandos de Redis para rate limiting:**
-  - Supuesto de tráfico de desarrollo/evaluación: entre 100 y 500 intentos de autenticación diarios (~3,000 a 15,000 comandos mensuales considerando 1 invocación de script Lua por intento).
+  - Supuesto de tráfico de evaluación: entre 100 y 500 intentos de autenticación diarios (~3,000 a 15,000 comandos mensuales con 1 invocación Lua atómica por intento).
   - Proyección: ~15,000 comandos al mes representan aproximadamente el 3% del cupo mensual de 500,000 comandos de Upstash.
-  - [NO VERIFICADO] Cuántos comandos contabiliza internamente Upstash por ejecución de script Lua (`EVALSHA` / `EVAL`).
-  - [NO VERIFICADO] Comportamiento exacto de Upstash al superar el tope mensual gratuito (rechazo de comandos con código de error, limitación de tasa o suspensión temporal de la base hasta el siguiente ciclo de facturación).
-- **Controles preventivos para costo cero:**
-  1. No agregar tarjeta de crédito en la cuenta de Upstash.
-  2. Planear una alerta de presupuesto en Azure Cost Management para monitoreo preventivo.
-  3. El crédito de la suscripción de Azure vence el 3 de diciembre de 2026 y los servicios se pausan al vencer (evitando cobros no previstos).
-  4. Los flujos de CI (GitHub Actions) y pruebas de integración/seguridad locales utilizan un contenedor efímero `redis:7.4-alpine` en el runner y nunca consumen la cuota de Upstash en la nube.
+  - [NO VERIFICADO]: Cuántos comandos contabiliza internamente Upstash por ejecución de script Lua (`EVALSHA` / `EVAL`).
+  - [NO VERIFICADO]: Comportamiento exacto de Upstash al superar el tope mensual gratuito (rechazo de comandos con código de error, limitación de tasa o suspensión temporal de la base hasta el siguiente ciclo de facturación).
+
+## Estado real de las pruebas CI/CD
+
+Para asegurar la transparencia en los pipelines de GitHub Actions, se diferencia formalmente entre pruebas con evidencia real de ejecución y pruebas planeadas:
+
+- **Pruebas implementadas y verificadas (con ejecuciones exitosas en GitHub Actions):**
+  1. *Build, formato y pruebas unitarias (.NET 10):* Ejecución obligatoria en push y PRs con paso limpio.
+  2. *Análisis estático de seguridad (SAST) y dependencias:* Semgrep, Gitleaks, Dependabot / dotnet list package, CodeQL y SonarCloud.
+  3. *Database Test (MongoDB efímero):* Job `mongo-db-test` con contenedor `mongo:8.0.34` fijado por digest en el runner de CI, base aislada `unihome_ci_verificacion` y validación de pruebas TRX mediante `tools/ci/mongo_ci_summary.py` (verificado en verde en Run #121).
+  4. *Contract Test (OpenAPI):* 10/10 pruebas en `OpenApiGenderContractTests.cs` verificadas.
+  5. *DAST pasivo (OWASP ZAP):* Job `dast-zap` ejecutando `zaproxy:2.17.0` con API Kestrel local, MongoDB y SMTP mock local (`tools/ci/zap_dast.py`, verificado en verde en Run #121).
+  6. *RESTler Fuzzing:* Job `restler-fuzzing` con Microsoft RESTler v9.3.1 en modo fuzz-lean aislado sobre 7 operaciones de OpenAPI (verificado en verde en Run #121 con 2,054 peticiones y 0 errores 500).
+- **Pruebas planeadas o pendientes (sin ejecución real o bloqueadas):**
+  1. *Pact Contract Testing:* El proyecto proveedor `UniHome.PactTests` está compilado, pero la suite está bloqueada e inactiva (`vars.UNIHOME_ENABLE_PACT`) debido a que la carpeta `pacts/` no contiene contratos JSON reales por parte del equipo del cliente Android (`unihome-mobile`).
+  2. *Pruebas de concurrencia y consistencia de rate limiting entre 2 instancias:* **Trabajo planeado**. Requieren levantar en CI dos instancias simultáneas de la API conectadas al mismo Redis efímero para validar que el límite global es compartido y atómico.
+  3. *Pruebas de integración de Redis:* **Trabajo planeado**. No existe actualmente contenedor ni suite de pruebas de Redis en los pipelines activos.

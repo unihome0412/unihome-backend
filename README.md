@@ -119,11 +119,13 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   segundos por IP; `RefreshPermitLimit` / `RefreshWindowSeconds` valen 20 por 60
   segundos; `ConfirmEmailPermitLimit` / `ConfirmEmailWindowSeconds` valen 10 por 60;
   `ResendPermitLimit` / `ResendWindowSeconds` valen 5 por 60. Son umbrales
-  provisionales pendientes de aprobación. El limitador es en memoria y asume una sola
-  instancia del proceso (BE-SEC-009); para escalar horizontalmente a 2 réplicas se
-  diseñó la propuesta ADR-006 (estado compartido acotado con Redis en Upstash para
-  rate limiting distribuido (BE-SEC-009), actualmente planeada y pendiente de
-  implementación).
+  provisionales pendientes de aprobación. El limitador actual es estrictamente en memoria
+  y asume una sola instancia del proceso (BE-SEC-009); MongoDB Atlas continúa siendo la única fuente
+  de verdad para el estado de cuentas, suspensiones y revocación de sesiones. Para un futuro escalado
+  a 2 réplicas se diseñó la propuesta documental ADR-006 (rate limiting distribuido atómico con Redis
+  en Upstash, actualmente planeada, no implementada en código y no desplegada en producción).
+  El comportamiento seguro ante caídas de Redis (fail-closed vs. degradación local) y las pruebas
+  de concurrencia entre dos réplicas constituyen trabajo planeado pendiente de validación por el equipo.
 - Límite "por cuenta" de intentos de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
   (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como
