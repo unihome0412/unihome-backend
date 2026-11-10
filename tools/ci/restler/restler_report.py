@@ -143,15 +143,27 @@ def collect_bugs(root: Path) -> list[dict[str, Any]]:
     return bugs
 
 
-def count_requests(root: Path) -> int:
-    total = 0
+def _evidence_texts(root: Path) -> Iterable[str]:
     for path in list(find_files(root, "*.txt")) + list(find_files(root, "*.log")):
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            yield path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        total += len(re.findall(r"(?m)^.*Sending:", text))
-    return total
+
+
+def count_requests(root: Path) -> int:
+    return sum(
+        len(re.findall(r"(?m)^.*Sending:", text))
+        for text in _evidence_texts(root)
+    )
+
+
+def count_sequences(root: Path) -> int:
+    sequences: set[str] = set()
+    for text in _evidence_texts(root):
+        sequences.update(re.findall(
+            r"(?im)^.*x-restler-sequence-id:\s*([0-9a-f-]{8,})", text))
+    return len(sequences)
 
 
 def compact_coverage(
@@ -263,11 +275,15 @@ def copy_evidence_tree(
 def render_markdown(
     *,
     status: str,
+    compile_exit: int | None,
+    test_exit: int | None,
+    fuzz_exit: int | None,
     rows: list[dict[str, Any]],
     technical_errors: list[str],
     http_codes: set[int],
     bugs: list[dict[str, Any]],
     requests: int,
+    sequences: int,
     transformation: dict[str, Any] | None,
 ) -> str:
     lines = [
@@ -279,13 +295,20 @@ def render_markdown(
         "- **Límites:** `max_combinations=3`, `max_sequence_length=2`, "
         "`max_request_execution_time=20s`, presupuesto de shell acotado.",
         "- **Checkers:** conjunto pasivo por defecto de RESTler; no se desactivan.",
+        f"- **Compile:** {'success' if compile_exit == 0 else 'ERROR'} "
+        f"(exit `{compile_exit}`).",
+        f"- **Test/Smoke:** {'success' if test_exit == 0 else 'ERROR'} "
+        f"(exit `{test_exit}`).",
+        f"- **Fuzz-lean:** {'success' if fuzz_exit == 0 else 'ERROR'} "
+        f"(exit `{fuzz_exit}`).",
         "",
         "## Cobertura real",
         "",
         f"- Operaciones OpenAPI: **{len(rows)}**.",
         f"- Operaciones intentadas: **{sum(1 for row in rows if row['attempted'])}**.",
-        f"- Operaciones con respuesta 2xx válida: **{sum(1 for row in rows if row['valid'])}**.",
+        f"- Operaciones con al menos una respuesta 2xx: **{sum(1 for row in rows if row['valid'])}**.",
         f"- Solicitudes observadas en logs: **{requests}**.",
+        f"- Secuencias RESTler observadas: **{sequences}**.",
         "",
         "| Método | Ruta | Auth | Test | Fuzz-lean | Válida | HTTP |",
         "|---|---|---:|---|---|---:|---|",
@@ -365,6 +388,7 @@ def main() -> int:
     http_codes = collect_http_codes(WORK_DIR)
     bugs = collect_bugs(WORK_DIR)
     requests = count_requests(WORK_DIR)
+    sequences = count_sequences(WORK_DIR)
     secrets = collect_state_secrets(STATE_DIR)
 
     technical_errors: list[str] = []
@@ -412,6 +436,7 @@ def main() -> int:
         "http_5xx": sorted(code for code in http_codes if code >= 500),
         "bugs": bugs,
         "requests_observed": requests,
+        "sequences_observed": sequences,
         "openapi_transformation": transformation,
         "technical_errors": technical_errors,
     }
@@ -429,11 +454,15 @@ def main() -> int:
 
     markdown = render_markdown(
         status=status,
+        compile_exit=compile_exit,
+        test_exit=test_exit,
+        fuzz_exit=fuzz_exit,
         rows=rows,
         technical_errors=technical_errors,
         http_codes=http_codes,
         bugs=bugs,
         requests=requests,
+        sequences=sequences,
         transformation=transformation if isinstance(transformation, dict) else None,
     )
     (ARTIFACTS_DIR / "restler-summary.md").write_text(markdown, encoding="utf-8")
@@ -445,7 +474,11 @@ def main() -> int:
     for name in ("compile-console.txt", "test-console.txt", "fuzz-lean-console.txt"):
         copy_sanitized(WORK_DIR / name, ARTIFACTS_DIR / "logs" / name, secrets)
     (ARTIFACTS_DIR / "request-logs.json").write_text(
-        json.dumps({"requests_observed": requests, "files": copied}, ensure_ascii=False, indent=2),
+        json.dumps({
+            "requests_observed": requests,
+            "sequences_observed": sequences,
+            "files": copied,
+        }, ensure_ascii=False, indent=2),
         encoding="utf-8")
 
     for file in ARTIFACTS_DIR.rglob("*"):
