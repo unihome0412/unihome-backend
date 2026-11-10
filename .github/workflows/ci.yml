@@ -1206,6 +1206,10 @@ jobs:
           MongoDb__ServerSelectionTimeoutSeconds: '5'
           Jwt__SigningKey: 'restler-synthetic-jwt-signing-key-not-a-production-secret-0123456789'
           VerificationCode__HmacSecret: 'restler-synthetic-hmac-secret-not-a-production-secret-0123456789'
+          Auth__RateLimit__LoginPermitLimit: '10000'
+          Auth__RateLimit__RefreshPermitLimit: '10000'
+          Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
+          Auth__RateLimit__ResendPermitLimit: '10000'
           Smtp__Host: 127.0.0.1
           Smtp__Port: '587'
           Smtp__UseStartTls: 'true'

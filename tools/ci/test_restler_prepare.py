@@ -75,8 +75,8 @@ class RestlerPrepareTests(unittest.TestCase):
                 token_password="token-password",
                 per_resource={"/api/v1/auth/login": root / "login.json"},
             )
-        self.assertEqual(4, settings["max_combinations"])
-        self.assertEqual(3, settings["max_sequence_length"])
+        self.assertEqual(3, settings["max_combinations"])
+        self.assertEqual(2, settings["max_sequence_length"])
         self.assertEqual(20, settings["max_request_execution_time"])
         self.assertTrue(settings["save_results_in_fixed_dirname"])
         self.assertEqual(

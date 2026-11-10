@@ -107,9 +107,11 @@ en el runner. No se usa una imagen móvil ni un servicio remoto.
   métodos sean idénticos. No se elimina ningún endpoint ni se oculta un error
   del contrato.
 - Ejecuta **Compile**, **Test/Smoke** y **Fuzz-lean**. No se usa `fuzz` ni
-  fuzzing exhaustivo. Límites: `max_combinations=4`, `max_sequence_length=3`,
+  fuzzing exhaustivo. Límites: `max_combinations=3`, `max_sequence_length=2`,
   `max_request_execution_time=20s`, timeout de shell por etapa, sin checkers
-  desactivados.
+  desactivados. En la instancia efímera se elevan los rate limits de
+  autenticación para que el fuzzer no quede bloqueado por 429; la autenticación
+  y los endpoints siguen siendo los reales.
 - Los diccionarios por endpoint aportan valores válidos a registro, confirmación,
   reenvío, login, refresh y eliminación; la autenticación de rutas protegidas se
   realiza con tokens Bearer emitidos por la API real.

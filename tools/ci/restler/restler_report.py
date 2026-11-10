@@ -276,7 +276,7 @@ def render_markdown(
         f"- **Estado:** **{status}**",
         f"- **RESTler:** `{RESTLER_TAG}` (`{RESTLER_COMMIT}`)",
         "- **Modo:** Compile + Test / Smoke + Fuzz-lean; sin fuzzing exhaustivo.",
-        "- **Límites:** `max_combinations=4`, `max_sequence_length=3`, "
+        "- **Límites:** `max_combinations=3`, `max_sequence_length=2`, "
         "`max_request_execution_time=20s`, presupuesto de shell acotado.",
         "- **Checkers:** conjunto pasivo por defecto de RESTler; no se desactivan.",
         "",

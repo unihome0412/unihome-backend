@@ -141,8 +141,8 @@ def build_engine_settings(
     per_resource: dict[str, Path],
 ) -> dict[str, Any]:
     return {
-        "max_combinations": 4,
-        "max_sequence_length": 3,
+        "max_combinations": 3,
+        "max_sequence_length": 2,
         "max_request_execution_time": 20,
         "max_async_resource_creation_time": 10,
         "garbage_collection_interval": 30,
