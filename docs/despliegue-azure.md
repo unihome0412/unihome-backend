@@ -278,6 +278,23 @@ az group delete --name rg-unihome-dev --yes --no-wait
   más adelante, abrir un caso de soporte de Azure.
 - **Escalado a 2 réplicas y estado compartido (propuesta ADR-006):** El despliegue
   actual opera con 1 réplica (0.25 vCPU / 0.5 GiB). La propuesta ADR-006 plantea
-  2 réplicas con estado compartido en Redis para coordinar el rate limit y el
-  caché de cuenta (BE-SEC-008); el momento exacto de pasar a 2 réplicas se definirá
+  2 réplicas con estado compartido en Redis exclusivamente para rate limiting
+  distribuido (BE-SEC-009); el momento exacto de pasar a 2 réplicas se definirá
   con el equipo y el profesor según el crédito de Azure disponible. Variables planeadas (aún no existen en el código ni se configuran en Azure): `Redis__ConnectionString` y `Auth__RateLimit__IpHashSalt`, ambas sensibles; se agregarán a la tabla de variables cuando se implementen.
+
+## Presupuesto y límites gratuitos (planeado)
+
+*Fecha de consulta y fuentes: 2026-11-09.*
+
+- **Upstash Redis plan gratuito:** 500,000 comandos al mes, 250 MB de almacenamiento, 10 GB de transferencia de datos, 1 base de datos, sin ACLs ni cifrado en reposo. No requiere ingresar tarjeta bancaria para operar en el nivel gratuito; la tarjeta solo se solicita al pasar a un plan de pago (fuente: https://upstash.com/pricing/redis.md).
+- **Azure Container Apps plan Consumption:** Cuota gratuita mensual por suscripción de 180,000 vCPU-segundos, 360,000 GiB-segundos y 2 millones de peticiones (fuente: https://learn.microsoft.com/en-us/azure/container-apps/billing). El despliegue actual opera con 1 réplica (0.25 vCPU / 0.5 GiB).
+- **Estimación de comandos de Redis para rate limiting:**
+  - Supuesto de tráfico de desarrollo/evaluación: entre 100 y 500 intentos de autenticación diarios (~3,000 a 15,000 comandos mensuales considerando 1 invocación de script Lua por intento).
+  - Proyección: ~15,000 comandos al mes representan aproximadamente el 3% del cupo mensual de 500,000 comandos de Upstash.
+  - [NO VERIFICADO] Cuántos comandos contabiliza internamente Upstash por ejecución de script Lua (`EVALSHA` / `EVAL`).
+  - [NO VERIFICADO] Comportamiento exacto de Upstash al superar el tope mensual gratuito (rechazo de comandos con código de error, limitación de tasa o suspensión temporal de la base hasta el siguiente ciclo de facturación).
+- **Controles preventivos para costo cero:**
+  1. No agregar tarjeta de crédito en la cuenta de Upstash.
+  2. Planear una alerta de presupuesto en Azure Cost Management para monitoreo preventivo.
+  3. El crédito de la suscripción de Azure vence el 3 de diciembre de 2026 y los servicios se pausan al vencer (evitando cobros no previstos).
+  4. Los flujos de CI (GitHub Actions) y pruebas de integración/seguridad locales utilizan un contenedor efímero `redis:7.4-alpine` en el runner y nunca consumen la cuota de Upstash en la nube.

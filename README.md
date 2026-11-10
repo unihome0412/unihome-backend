@@ -122,7 +122,7 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   provisionales pendientes de aprobación. El limitador es en memoria y asume una sola
   instancia del proceso (BE-SEC-009); para escalar horizontalmente a 2 réplicas se
   diseñó la propuesta ADR-006 (estado compartido acotado con Redis en Upstash para
-  rate limit y caché de cuenta BE-SEC-008, actualmente planeada y pendiente de
+  rate limiting distribuido (BE-SEC-009), actualmente planeada y pendiente de
   implementación).
 - Límite "por cuenta" de intentos de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
