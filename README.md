@@ -334,6 +334,26 @@ confirma el correo mediante dominio/repositorio con el código capturado en memo
 prueba login, rotación sincronizada contra el CAS real y logout,
 y elimina únicamente sus documentos de prueba. No envía correos reales.
 
+## Preparación de Azure CD
+
+El job `deploy-azure` está preparado para publicar una imagen etiquetada por SHA
+en `acrunihomedev`, actualizar `unihome-api` y verificar `/health/live` y
+`/health/ready` con rollback por imagen anterior. **No se ha desplegado**.
+
+Permanece desactivado salvo que se cumplan simultáneamente:
+
+- `workflow_dispatch` desde `main`;
+- input `deploy_to_azure=true`;
+- variable `UNIHOME_ENABLE_AZURE_CD=true`;
+- environment `azure-dev` con branch policy `main` y aprobación humana;
+- Build, contrato OpenAPI, Docker/Dockle, PR Quality Gate y Hardening en verde.
+
+La configuración OIDC, permisos faltantes, estado de recursos, riesgos y
+estimación FinOps están en
+[`docs/azure-cd-preparacion.md`](docs/azure-cd-preparacion.md). El entorno
+`azure-dev` existe, pero en la auditoría no tenía required reviewers; no se
+declara listo para el primer despliegue hasta completar esos pasos.
+
 ## Pendiente de M01 y decisiones abiertas
 
 - Recuperación de contraseña (EP-M01-06/07).
