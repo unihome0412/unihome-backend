@@ -28,7 +28,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
-| Pact | `UNIHOME_ENABLE_PACT=true` | Primero desarrollar `tests/UniHome.PactTests` con contratos de Mobile; en su ausencia falla al activarse | Solo manual |
+| Pact | `UNIHOME_ENABLE_PACT=true` | Verificador de proveedor PactNet 5.0.1 con API Kestrel aislada; requiere contratos JSON reales del consumidor Android en `pacts/`; sin ellos **falla** y permanece desactivado | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
 
 **Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. La migración `M01-001` se aplica únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
@@ -135,13 +135,51 @@ menos una respuesta 2xx, 2.054 solicitudes y 16 secuencias observadas, 0 HTTP
 409 y 413 son parte del fuzzing esperado y no se contaron como pruebas válidas;
 registro y refresh obtuvieron 2xx en Test y variantes no exitosas en Fuzz-lean.
 
+### Contrato OpenAPI de Gender
+
+El contrato HTTP de M01 usa `JsonStringEnumConverter(allowIntegerValues: false)`:
+`Gender` se envía como `"Mujer"`, `"Hombre"` o `"PrefiereNoDecir"` y los enteros
+se rechazan. El generador nativo de OpenAPI 3.1.1 describía el componente como
+`integer`; el documento ahora lo corrige a `type: string` con `enum` de nombres.
+`OpenApiGenderContractTests` comprueba el documento generado y contrasta una
+solicitud real con string (201) y con entero (400). No cambia el comportamiento
+HTTP ni se modificó el DTO para ocultar la discrepancia. Verificación real:
+[42850339456](https://github.com/unihome0412/unihome-backend/actions/runs/42850339456),
+`contract-test` con 10/10 pruebas OpenAPI aprobadas; el resto de controles
+manuales (DAST, RESTler, MongoDB CI, Stryker, Docker/Dockle, Hardening y PR
+Quality Gate) también terminó en verde.
+
+### Pact de proveedor (pendiente de contratos reales)
+
+- El repositorio móvil `unihome-mobile` (commit inspeccionado
+  `6355763da7d9659412fd117a1d22aca73be53a84`) no contiene contratos Pact al
+  momento de esta entrega; su README no publica pruebas de consumidor ni
+  artefactos Pact.
+- `tests/UniHome.PactTests` prepara la verificación del proveedor con PactNet
+  `5.0.1`. No está incluido en `UniHome.Backend.slnx` para que el build/test
+  normal no dependa de una entrega inexistente.
+- El verificador usa PactNet contra una API UniHome en ejecución sobre
+  Kestrel/TCP (no `WebApplicationFactory`/TestServer) y verifica archivos Pact
+  reales del consumidor Android.
+- Entradas: `PACT_CONTRACTS_DIR` (por defecto `pacts`) con JSON Pact generados
+  por las pruebas del cliente HTTP Android, no derivados de OpenAPI;
+  `PACT_PROVIDER_BASE_URL` (por defecto loopback `5088`) y, si se usan
+  `providerStates`, `PACT_PROVIDER_STATE_URL`.
+- El job `pact-contract` sigue condicionado a `UNIHOME_ENABLE_PACT=true` y
+  `workflow_dispatch`. Exige contratos reales y una API aislada disponible; si
+  falta cualquiera de los dos, falla explícitamente y no se convierte en
+  `success`. Los demás jobs no dependen de Pact. El arranque de la instancia
+  aislada del proveedor se incorporará junto con la entrega real de contratos.
+- Formato, origen y mecanismo de entrega: [`pacts/README.md`](../pacts/README.md).
+  Estado actual: **no hay contratos reales y Pact no está aprobado**.
+
 ## SonarQube Cloud
 
 - **PR interno hacia `main`**: se ejecuta análisis real de Pull Request. `SonarScanner for .NET` detecta automáticamente los metadatos desde el evento de GitHub Actions; no se pasan `sonar.branch.name` ni parámetros de rama manuales. El checkout usa `fetch-depth: 0`.
 - **Push a `main` y `workflow_dispatch` desde `main`**: se ejecuta análisis de la rama principal.
 - **`workflow_dispatch` desde una rama feature**: Sonar no se ejecuta y el gate no lo exige, porque el plan Free no admite análisis de ramas no principales. Stryker puede seguir ejecutándose en su evento manual.
 - **PR desde fork**: el job no se ejecuta porque GitHub no expone `SONAR_TOKEN` a esos PR; el gate falla cerrado si Sonar está habilitado y el job quedó `skipped`. No se usa `pull_request_target`.
-- **Cobertura para el Quality Gate**: el job de Sonar ejecuta las pruebas unitarias .NET con `XPlat Code Coverage` (Cobertura) y las pruebas Python de `tools/ci` con `coverage.py`. Los reportes se pasan al scanner; no se desactiva la condición de cobertura nueva.
+- **Cobertura para el Quality Gate**: el job de Sonar ejecuta las pruebas unitarias y de integración .NET con `XPlat Code Coverage` (Cobertura), además de las pruebas Python de `tools/ci` con `coverage.py`. Los reportes se pasan al scanner; no se desactiva la condición de cobertura nueva.
 - Se mantiene `sonar.qualitygate.wait=true`: si el Quality Gate real falla, el job de Sonar falla y bloquea el PR.
 
 ## Mutation testing (Stryker.NET)
@@ -228,6 +266,6 @@ Las pruebas activadas en un contexto admisible pasan a ser **obligatorias** para
 - Esta entrega se validó sintácticamente (YAML), con pruebas de la lógica del quality gate y comprobación de archivos y referencias. La integración de Stryker.NET se validó localmente con .NET 10 y una ejecución real de mutaciones; el primer run de GitHub Actions sigue siendo la validación del pipeline completo.
 - Semgrep usa reglas externas y una versión de CLI instalada al ejecutar: para un pipeline reproducible de producción habrá que fijar versiones/digests y comprobar la licencia/costos aplicables.
 - Dockle usa un binario oficial descargado de GitHub; fijar y validar su checksum antes de exigirlo en producción.
-- Pact y RESTler aún requieren su harness/configuración y deben quedar desactivados hasta ser verificados. Stryker.NET ya tiene configuración versionada y línea base local verificada. MongoDB CI fue verificado en la ejecución manual `42570584187`: job `mongo-db-test` en verde, 2/2 pruebas reales, 0 omitidas y artefacto `mongodb-ci-results`; la base temporal y el contenedor se destruyeron al finalizar.
+- Pact tiene soporte de proveedor preparado, pero no hay contratos reales del consumidor Android; el job debe permanecer desactivado y no se declara aprobado. RESTler ya fue verificado con ejecución real. Stryker.NET tiene configuración versionada y línea base local verificada. MongoDB CI fue verificado en la ejecución manual `42570584187`: job `mongo-db-test` en verde, 2/2 pruebas reales, 0 omitidas y artefacto `mongodb-ci-results`; la base temporal y el contenedor se destruyeron al finalizar.
 - Si el CI que actualmente está en GitHub fue modificado **después** del ZIP del 6 de noviembre, no aplicar el paquete a ciegas: reconciliar las diferencias antes.
 - Conservar `.local-sdd/` únicamente en local. `AGENTS.md`, `opencode.json`, `memoria.md` del SDD tampoco deben subir. La documentación técnica de CI en este paquete sí puede versionarse.

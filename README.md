@@ -200,6 +200,12 @@ solo lectura; si falta una garantía crítica, la API no opera esa colección.
   recursos propios e inline; el resto de la API usa `default-src 'none'`.
 - OpenAPI nativo de .NET 10 disponible solo en desarrollo: `GET /openapi/v1.json`.
   Incluye el esquema Bearer y marca `logout` como operación autenticada.
+- `Gender` se documenta como enum string (`Mujer`, `Hombre`,
+  `PrefiereNoDecir`), igual que el JSON real; los enteros se rechazan. La
+  corrección se aplica al documento OpenAPI sin cambiar el contrato HTTP.
+  Verificación: ejecución manual
+  [42850339456](https://github.com/unihome0412/unihome-backend/actions/runs/42850339456),
+  `contract-test` con 10/10 pruebas OpenAPI aprobadas.
 - Registro: `400` por validación, `409` por correo duplicado (provisional, DEC-09
   pendiente), `413` por cuerpo excesivo y `503` si MongoDB no está disponible.
 - Login: `400` por datos inválidos, `401` genérico, `403` por cuenta no confirmada o
@@ -301,6 +307,14 @@ commit `fe22365`) terminó con `restler-fuzzing` en verde y estado **PASS**:
 Compile/Test/Fuzz-lean correctos, 7/7 operaciones intentadas y con al menos una
 respuesta 2xx, 2.054 solicitudes, 16 secuencias, 0 HTTP 5xx y 0 bug buckets.
 La limpieza confirmó API/SMTP detenidos y base `unihome_restler` borrada.
+
+La verificación Pact del proveedor está preparada en `tests/UniHome.PactTests`
+con PactNet 5.0.1, pero **no hay contratos reales del consumidor Android** en el
+repositorio `unihome-mobile` ni en este repositorio. El job `pact-contract`
+permanece desactivado mediante `UNIHOME_ENABLE_PACT`; si se activa sin contratos,
+falla explícitamente y no se considera aprobado. El formato, origen y entrega de
+los contratos se documentan en [`pacts/README.md`](pacts/README.md); no se generan
+contratos desde OpenAPI ni se inventan interacciones.
 
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
 ejecutarla localmente en una base de verificación aislada, primero revisar y aplicar
