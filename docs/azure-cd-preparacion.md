@@ -76,9 +76,11 @@ asignar `AcrPull` a la identidad administrada.
 ## Flujo CD preparado
 
 1. Descarga la imagen `ci-container-image` construida y auditada por Dockle,
-   usando `actions/download-artifact` fijado por SHA de v4.3.0; es compatible
-   con el artefacto v4 que publica `actions/upload-artifact` v4.6.2 (ambos usan
-   el protocolo de artefactos v4).
+   usando `actions/download-artifact` fijado por SHA
+   `d3f86a106a0bac45b974a628896c90dbdf5c8093` (v4.3.0, verificado contra el
+   tag); es compatible con el artefacto v4 que publica
+   `actions/upload-artifact` `ea165f8d65b6e75b540449e92b4886f43607fa02`
+   (v4.6.2; ambos usan el protocolo de artefactos v4).
 2. Autentica con OIDC.
 3. Publica `acrunihomedev.azurecr.io/unihome-api:<GITHUB_SHA>` completo.
 4. Captura la imagen, revisión y FQDN anteriores, exige
@@ -181,18 +183,29 @@ lo confirma.
 ## Validaciones realizadas
 
 - `actionlint .github/workflows/ci.yml`: correcto.
-- YAML parse: correcto.
-- `dotnet build UniHome.Backend.slnx -c Release --no-restore -warnaserror`: correcto.
-- Pruebas unitarias/integración pertinentes: correctas; 2 integraciones omitidas
-  por el opt-in de MongoDB real.
+- YAML parse: correcto (`17` jobs).
+- `python -m unittest discover -s tools/ci -p "test_*.py"`: **111 pruebas
+  correctas**, incluidas 17 pruebas del contrato CD y 100 % de cobertura de
+  `tools/ci/azure_cd_guard.py`.
+- `dotnet build UniHome.Backend.slnx -c Release --no-restore -warnaserror`:
+  0 advertencias, 0 errores.
+- `dotnet format --verify-no-changes`: correcto.
+- Pruebas .NET: unitarias 309/309 correctas; integración 103 correctas y 2
+  omitidas por el opt-in de MongoDB real (las omitidas no se presentan como
+  aprobadas).
 - `git diff --check`: correcto.
 - No se ejecutó `azure/login`, `docker push`, `az containerapp update` ni
-  ninguna operación de escritura.
-- Ejecución manual de verificación
-  [42856630200](https://github.com/unihome0412/unihome-backend/actions/runs/42856630200):
-  workflow completo **success**; `deploy-azure` **skipped** por
-  `deploy_to_azure=false` y `UNIHOME_ENABLE_AZURE_CD` ausente. PR #18 con todos
-  los checks aplicables en verde.
+  ninguna operación de escritura en Azure.
+- PR #18, head `8cad47f01b2d2280014cf788ef683d62b7622ec6`:
+  [run 42864050099](https://github.com/unihome0412/unihome-backend/actions/runs/42864050099)
+  **success**; `deploy-azure` **skipped**. CodeQL
+  [run 42864050256](https://github.com/unihome0412/unihome-backend/actions/runs/42864050256)
+  **success**; PR **CLEAN** y **MERGEABLE**, sin merge.
+- `workflow_dispatch` de verificación con `deploy_to_azure=false`:
+  [run 42864581083](https://github.com/unihome0412/unihome-backend/actions/runs/42864581083)
+  **success**; `deploy-azure` **skipped**. El Hardening Report registró
+  `skipped` como no aprobado y el Quality Gate pasó.
+- **No se probó un despliegue real en Azure.**
 
 ## Pasos exactos para autorizar el primer despliegue
 

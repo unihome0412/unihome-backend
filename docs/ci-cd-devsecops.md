@@ -246,8 +246,10 @@ Azure CLI; la URL pública respondió `200`, el environment tiene branch policy
 Permisos OIDC propuestos, riesgos, FinOps y los pasos de autorización están en
 [`azure-cd-preparacion.md`](azure-cd-preparacion.md). No se creó ni modificó
 ningún recurso Azure, no se publicaron imágenes y no se reiniciaron revisiones.
-La ejecución manual `42856630200` terminó en verde y mostró `deploy-azure` como
-`skipped`; la PR #18 no tiene ningún check de despliegue ejecutado.
+Las ejecuciones manuales `42864581083` (input `false`) y PR `42864050099`
+terminaron en verde y mostraron `deploy-azure` como `skipped`; la PR #18 no
+tiene ningún check de despliegue ejecutado. El flujo CD todavía **no se probó
+en Azure**.
 
 ## Flujo
 
