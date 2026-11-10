@@ -262,8 +262,8 @@ gh run download <run-id> -n dast-zap-results -D artifacts/dast-zap
 ```
 
 La ejecución real de verificación
-([42771007673](https://github.com/unihome0412/unihome-backend/actions/runs/42771007673),
-commit `cbc9351`) terminó con `dast-zap` en verde y estado **PASS**: 7/7 rutas
+([42772939746](https://github.com/unihome0412/unihome-backend/actions/runs/42772939746),
+commit `01893d3`) terminó con `dast-zap` en verde y estado **PASS**: 7/7 rutas
 OpenAPI visitadas, 26 mensajes procesados, 0 Critical/High/Medium/Low y 2
 informativas. El artefacto `dast-zap-results` contiene HTML/JSON/Markdown y la
 limpieza confirmó API/SMTP detenidos, contenedor ZAP eliminado y base efímera

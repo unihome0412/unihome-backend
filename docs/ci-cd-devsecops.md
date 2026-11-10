@@ -70,8 +70,8 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
   aprobado. El gate de Hardening aplica la misma regla de rama.
 
 **Verificación real (10 de noviembre de 2026):** ejecución manual
-[42771007673](https://github.com/unihome0412/unihome-backend/actions/runs/42771007673),
-commit `cbc9351`, job `dast-zap` en verde con estado **PASS**, 7/7 operaciones
+[42772939746](https://github.com/unihome0412/unihome-backend/actions/runs/42772939746),
+commit `01893d3`, job `dast-zap` en verde con estado **PASS**, 7/7 operaciones
 OpenAPI visitadas, 26 mensajes procesados por ZAP, 0 Critical, 0 High, 0 Medium,
 0 Low y 2 informativas (aplicación web moderna y respuesta de sesión). Se
 publicaron `zap-report.html`, `zap-report.json`, `zap-report.md`,
