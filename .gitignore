@@ -13,3 +13,7 @@ coverage/
 StrykerOutput/
 __pycache__/
 *.pyc
+.restler-state/
+.restler-work/
+.dast-mail/
+artifacts/

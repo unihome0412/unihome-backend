@@ -25,6 +25,7 @@ OPTIONAL = {
 # En PR/push nunca se exige; en una rama de documentación no se bloquea el gate.
 OPTIONAL_REF_PATTERNS = {
     "dast-zap": ("refs/heads/main", "refs/heads/feature/"),
+    "restler-fuzzing": ("refs/heads/main", "refs/heads/feature/"),
 }
 
 
@@ -77,6 +78,8 @@ def make_report(
         "- `skipped` NO equivale a una prueba aprobada.",
         f"- DAST ZAP manual: **{'obligatorio' if 'dast-zap' in required else 'no exigido'}** "
         "(solo `workflow_dispatch` con `UNIHOME_ENABLE_ZAP=true` desde `main` o `feature/*`).",
+        f"- RESTler manual: **{'obligatorio' if 'restler-fuzzing' in required else 'no exigido'}** "
+        "(solo `workflow_dispatch` con `UNIHOME_ENABLE_RESTLER=true` desde `main` o `feature/*`).",
         "",
         "| Job | Resultado | Obligatorio en esta ejecución |",
         "|---|---|---|",

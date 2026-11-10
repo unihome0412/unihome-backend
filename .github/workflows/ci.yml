@@ -1049,20 +1049,314 @@ jobs:
           retention-days: 7
 
   restler-fuzzing:
-    name: RESTler Fuzzing (pendiente de harness aislado)
+    name: RESTler Fuzzing - API efímera aislada
     needs: [detect-changes, contract-test]
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_RESTLER == 'true' && github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_RESTLER == 'true' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feature/')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
+    services:
+      mongo:
+        image: mongo:8.0.34@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+        env:
+          GLIBC_TUNABLES: glibc.pthread.rseq=1
+        ports:
+          - 127.0.0.1:27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+          --health-start-period 10s
+    env:
+      RESTLER_TAG: v9.3.1
+      RESTLER_COMMIT: eaacd92733771d35e90acfb2040fe37d4e5d09b1
+      RESTLER_BIN: /tmp/restler-bin
+      RESTLER_TARGET: http://127.0.0.1:5088
+      MONGO_RESTLER_DATABASE: unihome_restler
+      MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+      MongoDb__DatabaseName: unihome_restler
+      MongoDb__ServerSelectionTimeoutSeconds: '5'
+      UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_restler
+      SMTP_DAST_MAILBOX: .dast-mail
+      SMTP_PID_FILE: /tmp/unihome-restler-smtp.pid
+      API_PID_FILE: /tmp/unihome-restler-api.pid
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: No ejecutar fuzzing contra Azure ni contra bases compartidas
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: |
+            10.0.x
+            8.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Validar aislamiento de API, MongoDB y RESTler
         run: |
-          if [ ! -f tools/ci/restler/run-isolated.sh ]; then
-            echo "::error::Falta harness RESTler con API efímera, contratos OpenAPI y datos aislados. No se ejecuta fuzzing remoto."
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from urllib.parse import parse_qs, urlparse
+
+          target = os.environ["RESTLER_TARGET"]
+          database = os.environ["MONGO_RESTLER_DATABASE"]
+          uri = os.environ["MongoDb__ConnectionString"]
+          parsed = urlparse(uri)
+          if target != "http://127.0.0.1:5088":
+              raise SystemExit("El objetivo RESTler debe ser loopback en el puerto 5088.")
+          if database != "unihome_restler":
+              raise SystemExit("La base RESTler debe ser unihome_restler.")
+          if (
+              parsed.scheme != "mongodb"
+              or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+              or parsed.username is not None
+              or parsed.password is not None
+          ):
+              raise SystemExit("La URI RESTler debe ser MongoDB directo a loopback y sin credenciales.")
+          if parse_qs(parsed.query).get("directConnection", [""])[0].lower() != "true":
+              raise SystemExit("La URI RESTler debe declarar directConnection=true.")
+          print("Objetivo RESTler y MongoDB limitados a loopback.")
+          PY
+          test "$RESTLER_TAG" = "v9.3.1"
+          test "$RESTLER_COMMIT" = "eaacd92733771d35e90acfb2040fe37d4e5d09b1"
+      - name: Restaurar y compilar API y migrador
+        run: |
+          dotnet restore UniHome.Backend.slnx --locked-mode
+          dotnet build src/UniHome.Api/UniHome.Api.csproj -c Release --no-restore -warnaserror
+          dotnet build tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj -c Release --no-restore -warnaserror
+      - name: Exigir MongoDB efímero disponible
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if docker exec "${{ job.services.mongo.id }}" \
+              mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -qx '1'; then
+              echo "MongoDB efímero disponible (intento ${attempt})."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::MongoDB efímero no disponible para RESTler."
+          exit 1
+      - name: Inicializar base efímera RESTler con M01-001
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/restler
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_RESTLER_DATABASE" --confirm \
+            | tee artifacts/restler/migration-apply.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_RESTLER_DATABASE" \
+            | tee artifacts/restler/migration-verify.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify.txt
+      - name: Preparar SMTP de captura local y confianza TLS
+        run: |
+          set -euo pipefail
+          SMTP_DIR="$RUNNER_TEMP/unihome-restler-smtp"
+          mkdir -p "$SMTP_DIR" "$SMTP_DAST_MAILBOX"
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 \
+            -keyout "$SMTP_DIR/ca-key.pem" -out "$SMTP_DIR/ca-cert.pem" \
+            -subj "/CN=UniHome RESTler Local CA" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign"
+          openssl req -newkey rsa:2048 -sha256 -nodes \
+            -keyout "$SMTP_DIR/server-key.pem" -out "$SMTP_DIR/server.csr" \
+            -subj "/CN=127.0.0.1"
+          openssl x509 -req -in "$SMTP_DIR/server.csr" \
+            -CA "$SMTP_DIR/ca-cert.pem" -CAkey "$SMTP_DIR/ca-key.pem" \
+            -CAcreateserial -out "$SMTP_DIR/server-cert.pem" -days 2 -sha256 \
+            -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
+          cat "$SMTP_DIR/server-cert.pem" "$SMTP_DIR/ca-cert.pem" \
+            > "$SMTP_DIR/server-chain.pem"
+          sudo cp "$SMTP_DIR/ca-cert.pem" \
+            /usr/local/share/ca-certificates/unihome-restler-ca.crt
+          sudo update-ca-certificates
+          sudo sysctl -w net.ipv4.ip_unprivileged_port_start=587
+          python3 -m venv "$RUNNER_TEMP/unihome-restler-venv"
+          "$RUNNER_TEMP/unihome-restler-venv/bin/pip" install \
+            --disable-pip-version-check --no-input aiosmtpd==1.4.6
+      - name: Iniciar SMTP de captura local
+        run: |
+          set -euo pipefail
+          SMTP_DIR="$RUNNER_TEMP/unihome-restler-smtp"
+          nohup "$RUNNER_TEMP/unihome-restler-venv/bin/python" \
+            tools/ci/dast_smtp_capture.py \
+            --host 127.0.0.1 --port 587 \
+            --cert "$SMTP_DIR/server-chain.pem" --key "$SMTP_DIR/server-key.pem" \
+            > "$RUNNER_TEMP/unihome-restler-smtp.log" 2>&1 &
+          echo $! > "$SMTP_PID_FILE"
+          for attempt in $(seq 1 20); do
+            if [ -f "$SMTP_DAST_MAILBOX/.ready" ]; then
+              echo "SMTP de captura disponible (intento ${attempt})."
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$SMTP_PID_FILE")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/unihome-restler-smtp.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/unihome-restler-smtp.log"
+          exit 1
+      - name: Iniciar API efímera para RESTler
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          Api__EnableSwagger: 'true'
+          MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+          MongoDb__DatabaseName: unihome_restler
+          MongoDb__ServerSelectionTimeoutSeconds: '5'
+          Jwt__SigningKey: 'restler-synthetic-jwt-signing-key-not-a-production-secret-0123456789'
+          VerificationCode__HmacSecret: 'restler-synthetic-hmac-secret-not-a-production-secret-0123456789'
+          Auth__RateLimit__LoginPermitLimit: '10000'
+          Auth__RateLimit__RefreshPermitLimit: '10000'
+          Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
+          Auth__RateLimit__ResendPermitLimit: '10000'
+          Smtp__Host: 127.0.0.1
+          Smtp__Port: '587'
+          Smtp__UseStartTls: 'true'
+          Smtp__CheckCertificateRevocation: 'false'
+          Smtp__Username: unihome-restler
+          Smtp__Password: synthetic-not-a-secret
+          Smtp__FromEmail: no-reply@unihome.test
+          Smtp__FromName: UniHome RESTler
+          Smtp__TimeoutSeconds: '15'
+          SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_DIR: /etc/ssl/certs
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/restler
+          API_DLL="$GITHUB_WORKSPACE/src/UniHome.Api/bin/Release/net10.0/UniHome.Api.dll"
+          test -f "$API_DLL"
+          (
+            cd "$(dirname "$API_DLL")"
+            nohup dotnet UniHome.Api.dll --urls "$RESTLER_TARGET" \
+              > "$GITHUB_WORKSPACE/artifacts/restler/api.log" 2>&1 &
+            echo $! > "$API_PID_FILE"
+          )
+          live_code=""
+          for attempt in $(seq 1 60); do
+            live_code=$(curl -sS -o artifacts/restler/health-live.json \
+              -w '%{http_code}' "$RESTLER_TARGET/health/live" || true)
+            if [ "$live_code" = "200" ]; then break; fi
+            if ! kill -0 "$(cat "$API_PID_FILE")" 2>/dev/null; then
+              sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+                artifacts/restler/api.log | tail -40
+              echo "::error::La API RESTler terminó antes de responder /health/live."
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$live_code" != "200" ]; then
+            echo "::error::La API RESTler no respondió /health/live con HTTP 200."
+            sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+              artifacts/restler/api.log | tail -40
             exit 1
           fi
-          bash tools/ci/restler/run-isolated.sh
+          ready_code=$(curl -sS -o artifacts/restler/health-ready.json \
+            -w '%{http_code}' "$RESTLER_TARGET/health/ready" || true)
+          if [ "$ready_code" != "200" ]; then
+            echo "::error::La API RESTler no respondió /health/ready con HTTP 200."
+            cat artifacts/restler/health-ready.json || true
+            exit 1
+          fi
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "target=$RESTLER_TARGET"
+            echo "mongo_database=$MONGO_RESTLER_DATABASE"
+            echo "health_live_http=$live_code"
+            echo "health_ready_http=$ready_code"
+            echo "api_pid=$(cat "$API_PID_FILE")"
+            echo "smtp_capture=127.0.0.1:587"
+          } > artifacts/restler/startup-summary.txt
+          sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g; s#(Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+            artifacts/restler/api.log | tail -40 >> artifacts/restler/startup-summary.txt
+      - name: Compilar RESTler v9.3.1 fijado por commit
+        run: |
+          set -euo pipefail
+          SRC="$RUNNER_TEMP/restler-src"
+          rm -rf "$SRC" "$RESTLER_BIN"
+          git clone --depth 1 --branch "$RESTLER_TAG" \
+            https://github.com/microsoft/restler-fuzzer.git "$SRC"
+          test "$(git -C "$SRC" rev-parse HEAD)" = "$RESTLER_COMMIT"
+          python3 "$SRC/build-restler.py" --dest_dir "$RESTLER_BIN" \
+            > artifacts/restler/restler-build.txt 2>&1
+          test -f "$RESTLER_BIN/restler/Restler.dll"
+          {
+            echo "tag=$RESTLER_TAG"
+            echo "commit=$RESTLER_COMMIT"
+            echo "binary=$RESTLER_BIN/restler/Restler.dll"
+          } > artifacts/restler/restler-version.txt
+      - name: Ejecutar Compile, Test y Fuzz-lean aislados
+        env:
+          RESTLER_BIN: /tmp/restler-bin
+          PYTHON: python3
+        run: |
+          set -euo pipefail
+          bash tools/ci/restler/run-isolated.sh \
+            | tee artifacts/restler/restler-console.txt
+      - name: Detener servicios y verificar limpieza
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/restler
+          SUMMARY=artifacts/restler/shutdown-summary.txt
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$SUMMARY"
+          if [ -f "$API_PID_FILE" ]; then
+            api_pid=$(cat "$API_PID_FILE")
+            if kill -0 "$api_pid" 2>/dev/null; then
+              kill "$api_pid" 2>/dev/null || true
+              for attempt in $(seq 1 20); do
+                if ! kill -0 "$api_pid" 2>/dev/null; then break; fi
+                sleep 1
+              done
+              if kill -0 "$api_pid" 2>/dev/null; then
+                echo "api_stopped=false" >> "$SUMMARY"
+                exit 1
+              fi
+            fi
+            echo "api_stopped=true" >> "$SUMMARY"
+          else
+            echo "api_stopped=not_started" >> "$SUMMARY"
+          fi
+          if [ -f "$SMTP_PID_FILE" ]; then
+            smtp_pid=$(cat "$SMTP_PID_FILE")
+            if kill -0 "$smtp_pid" 2>/dev/null; then
+              kill "$smtp_pid" 2>/dev/null || true
+              sleep 1
+            fi
+            if kill -0 "$smtp_pid" 2>/dev/null; then
+              echo "smtp_stopped=false" >> "$SUMMARY"
+              exit 1
+            fi
+            echo "smtp_stopped=true" >> "$SUMMARY"
+          else
+            echo "smtp_stopped=not_started" >> "$SUMMARY"
+          fi
+          if [ -f "$RUNNER_TEMP/unihome-restler-smtp.log" ]; then
+            cp "$RUNNER_TEMP/unihome-restler-smtp.log" artifacts/restler/smtp.log
+          fi
+          if docker exec "${{ job.services.mongo.id }}" mongosh --quiet --eval '
+            const database = db.getSiblingDB("unihome_restler");
+            database.dropDatabase();
+            if (database.getCollectionNames().length !== 0) {
+              throw new Error("La base RESTler no quedó vacía.");
+            }
+          ' >> "$SUMMARY" 2>&1; then
+            echo "mongo_database_dropped=true" >> "$SUMMARY"
+          else
+            echo "mongo_database_dropped=false" >> "$SUMMARY"
+            exit 1
+          fi
+          rm -rf .restler-state
+      - name: Publicar evidencia RESTler
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: restler-fuzzing-results
+          path: artifacts/restler/**
+          if-no-files-found: error
+          retention-days: 7
 
   pr-quality-gate:
     name: PR Quality Gate (controles obligatorios)

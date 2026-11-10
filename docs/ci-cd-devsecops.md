@@ -29,7 +29,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Primero desarrollar `tests/UniHome.PactTests` con contratos de Mobile; en su ausencia falla al activarse | Solo manual |
-| RESTler | `UNIHOME_ENABLE_RESTLER=true` | Primero implementar `tools/ci/restler/run-isolated.sh` y un harness 100 % aislado; si falta, **falla** | Solo manual |
+| RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
 
 **Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. La migración `M01-001` se aplica únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
 
@@ -88,6 +88,52 @@ intencional y no representa el despliegue; HSTS/HTTPS no aplica a este runner.
 Las alertas que aparezcan en futuras ejecuciones deben revisarse y aceptarse o
 corregirse por separado. RESTler / Pact siguen requiriendo contratos y datos de
 prueba; no se activan para aparentar cobertura.
+
+### RESTler fuzzing aislado
+
+El job `restler-fuzzing` usa Microsoft RESTler **v9.3.1**, commit
+`eaacd92733771d35e90acfb2040fe37d4e5d09b1`, clonado y compilado desde la fuente
+en el runner. No se usa una imagen móvil ni un servicio remoto.
+
+- Reutiliza la API ASP.NET Core en `127.0.0.1:5088`, MongoDB 8.0.34 efímero con
+  M01-001 y el SMTP de captura local con STARTTLS en `127.0.0.1:587`.
+- Prepara dos cuentas sintéticas: una confirmada para login/refresh y otra
+  pendiente de confirmar para ejercer el endpoint con un código real capturado
+  del SMTP. El token provider de RESTler crea una cuenta nueva y hace
+  registro, confirmación y login reales en cada refresco.
+- El OpenAPI 3.1 original se conserva. Para compatibilidad con RESTler se genera
+  una copia OpenAPI 3.0.3 que solo convierte tipos union `null` a `nullable`;
+  `openapi-transformation.json` registra cada cambio y verifica que las rutas y
+  métodos sean idénticos. No se elimina ningún endpoint ni se oculta un error
+  del contrato.
+- Ejecuta **Compile**, **Test/Smoke** y **Fuzz-lean**. No se usa `fuzz` ni
+  fuzzing exhaustivo. Límites: `max_combinations=3`, `max_sequence_length=2`,
+  `max_request_execution_time=20s`, timeout de shell por etapa, sin checkers
+  desactivados. En la instancia efímera se elevan los rate limits de
+  autenticación para que el fuzzer no quede bloqueado por 429; la autenticación
+  y los endpoints siguen siendo los reales.
+- Los diccionarios por endpoint aportan valores válidos a registro, confirmación,
+  reenvío, login, refresh y eliminación; la autenticación de rutas protegidas se
+  realiza con tokens Bearer emitidos por la API real.
+- Los artefactos incluyen compilación, gramática/config, cobertura `speccov`,
+  `testing_summary`, solicitudes y secuencias, `runSummary`/`errorBuckets`,
+  bug buckets, replay logs saneados y resumen Markdown. Se excluyen del
+  artefacto los diccionarios privados y los settings con secretos.
+- El job falla si Compile/Test/FuzzLean no producen resultados, si falta una
+  operación OpenAPI, si un endpoint autenticado no se ejerce o si aparece un
+  HTTP 5xx/bug bucket. Un 401/403 no se considera vulnerabilidad por sí mismo,
+  pero tampoco se cuenta como prueba funcional válida.
+
+**Verificación real (10 de noviembre de 2026):** ejecución manual
+[42794026111](https://github.com/unihome0412/unihome-backend/actions/runs/42794026111),
+commit `fe22365`, job `restler-fuzzing` en verde con estado **PASS**:
+Compile/Test/Fuzz-lean exit `0`, 7/7 operaciones OpenAPI intentadas y con al
+menos una respuesta 2xx, 2.054 solicitudes y 16 secuencias observadas, 0 HTTP
+5xx y 0 bug buckets. Códigos observados: 200, 201, 202, 204, 400, 401, 409 y
+413. La limpieza confirmó API/SMTP detenidos y base `unihome_restler` borrada.
+`PR Quality Gate` y `Hardening Report` terminaron en verde. Las respuestas 401,
+409 y 413 son parte del fuzzing esperado y no se contaron como pruebas válidas;
+registro y refresh obtuvieron 2xx en Test y variantes no exitosas en Fuzz-lean.
 
 ## SonarQube Cloud
 
