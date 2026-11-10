@@ -382,6 +382,12 @@ jobs:
             -c Release --no-build --no-restore \
             --collect:"XPlat Code Coverage" \
             --results-directory TestResults/sonar
+          # La cobertura del host/OpenAPI se ejerce en pruebas de integración;
+          # se incluye el ensamblado de la API en el mismo reporte del gate.
+          dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj \
+            -c Release --no-build --no-restore \
+            --collect:"XPlat Code Coverage" \
+            --results-directory TestResults/sonar
           python3 -m pip install --disable-pip-version-check --only-binary :all: --no-deps coverage==7.17.2
           python3 -m coverage run --source=tools/ci -m unittest discover -s tools/ci -p 'test_*.py'
           mkdir -p coverage

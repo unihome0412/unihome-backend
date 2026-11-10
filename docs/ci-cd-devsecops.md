@@ -173,7 +173,7 @@ HTTP ni se modificó el DTO para ocultar la discrepancia.
 - **Push a `main` y `workflow_dispatch` desde `main`**: se ejecuta análisis de la rama principal.
 - **`workflow_dispatch` desde una rama feature**: Sonar no se ejecuta y el gate no lo exige, porque el plan Free no admite análisis de ramas no principales. Stryker puede seguir ejecutándose en su evento manual.
 - **PR desde fork**: el job no se ejecuta porque GitHub no expone `SONAR_TOKEN` a esos PR; el gate falla cerrado si Sonar está habilitado y el job quedó `skipped`. No se usa `pull_request_target`.
-- **Cobertura para el Quality Gate**: el job de Sonar ejecuta las pruebas unitarias .NET con `XPlat Code Coverage` (Cobertura) y las pruebas Python de `tools/ci` con `coverage.py`. Los reportes se pasan al scanner; no se desactiva la condición de cobertura nueva.
+- **Cobertura para el Quality Gate**: el job de Sonar ejecuta las pruebas unitarias y de integración .NET con `XPlat Code Coverage` (Cobertura), además de las pruebas Python de `tools/ci` con `coverage.py`. Los reportes se pasan al scanner; no se desactiva la condición de cobertura nueva.
 - Se mantiene `sonar.qualitygate.wait=true`: si el Quality Gate real falla, el job de Sonar falla y bloquea el PR.
 
 ## Mutation testing (Stryker.NET)
