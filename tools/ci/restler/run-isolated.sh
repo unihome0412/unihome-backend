@@ -42,9 +42,12 @@ run_restler() {
   local duration="$2"
   shift 2
   local code=0
-  timeout --signal=INT --kill-after=30s "$duration" \
-    dotnet "$RESTLER_DLL" "$@" > "$WORK/${name}-console.txt" 2>&1 || code=$?
-  printf '%s\n' "$code" > "$WORK/${name}-exit-code.txt"
+  (
+    cd "$WORK"
+    timeout --signal=INT --kill-after=30s "$duration" \
+      dotnet "$RESTLER_DLL" "$@" > "$WORK/${name}-console.txt" 2>&1 || code=$?
+    printf '%s\n' "$code" > "$WORK/${name}-exit-code.txt"
+  )
   return 0
 }
 
