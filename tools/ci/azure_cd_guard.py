@@ -19,6 +19,25 @@ DEPLOY_JOB_DEPENDENCIES = (
     "hardening-report",
 )
 
+HEALTHY_RUNNING_STATES = frozenset({"Running", "RunningAtMaxScale"})
+TERMINAL_UNHEALTHY_RUNNING_STATES = frozenset(
+    {"Failed", "Stopped", "Degraded", "Unknown"}
+)
+
+
+def revision_is_healthy(
+    *,
+    running_state: str,
+    health_state: str,
+    http_healthy: bool,
+) -> bool:
+    """A revision is healthy only with an accepted state, Healthy and HTTP 200."""
+    return (
+        running_state in HEALTHY_RUNNING_STATES
+        and health_state == "Healthy"
+        and http_healthy
+    )
+
 
 @dataclass(frozen=True)
 class DeployDecision:

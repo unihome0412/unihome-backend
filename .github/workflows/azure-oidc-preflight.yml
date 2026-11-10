@@ -107,6 +107,26 @@ jobs:
             acr_detail="No se pudieron consultar metadatos de ACR."
           fi
 
+          acr_auth="SKIP"
+          acr_auth_detail="No ejecutada."
+          acr_auth_log="$(mktemp)"
+          if az acr login --name acrunihomedev --expose-token \
+            >/dev/null 2>"$acr_auth_log"; then
+            acr_auth="PASS"
+            acr_auth_detail="Autenticación ACR correcta mediante ARM; no se ejecutó push."
+          else
+            if grep -Eiq 'AuthorizationFailed|does not have authorization|Forbidden' "$acr_auth_log"; then
+              acr_auth="RBAC_DENIED"
+              acr_auth_detail="La identidad no pudo autenticarse al ACR; se requiere un Gate RBAC separado."
+            else
+              acr_auth="ERROR"
+              acr_auth_detail="Error de red o de CLI durante la autenticación ACR."
+            fi
+            result="FAIL"
+            cause="ACR authentication: $acr_auth."
+          fi
+          rm -f "$acr_auth_log"
+
           {
             echo "## Azure OIDC Preflight"
             echo ""
@@ -118,6 +138,12 @@ jobs:
             echo "- \`unihome-api\`: lectura correcta"
             echo "- Revisiones: lectura correcta"
             echo "- ACR: **$acr_result** — $acr_detail"
+            echo "- ACR auth: **$acr_auth** — $acr_auth_detail"
+            if [ "$result" = "PASS" ]; then
+              echo "- Causa: n/a"
+            else
+              echo "- Causa: $cause"
+            fi
             echo "- Escrituras: **ninguna**"
             echo "- Imágenes/publicaciones: **ninguna**"
             echo "- CD/despliegue: **no ejecutado**"
@@ -125,6 +151,11 @@ jobs:
 
           printf 'OIDC_PREFLIGHT_RESULT=%s\n' "$result"
           printf 'ACR_PREFLIGHT_RESULT=%s\n' "$acr_result"
+          printf 'ACR_AUTH_RESULT=%s\n' "$acr_auth"
+          if [ "$result" != "PASS" ]; then
+            echo "::error::$cause"
+            exit 1
+          fi
           printf '%s\n' "$app_json"
           printf '%s\n' "$revisions_json"
           if [ "$acr_result" = "PASS" ]; then

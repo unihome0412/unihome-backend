@@ -56,6 +56,7 @@ class AzureOidcPreflightContractTests(unittest.TestCase):
             "az containerapp show",
             "az containerapp revision list",
             "az acr show",
+            "az acr login --name acrunihomedev --expose-token",
         )
         for command in required_reads:
             self.assertIn(command, self.text)
@@ -68,9 +69,11 @@ class AzureOidcPreflightContractTests(unittest.TestCase):
             "az containerapp create",
             "az containerapp delete",
             "az containerapp revision restart",
-            "az acr login",
             "az acr build",
             "az acr import",
+            "az acr login --password",
+            "az acr login --username",
+            "az acr login --resource-group",
             "az role assignment create",
             "az group create",
             "az group delete",
@@ -94,7 +97,19 @@ class AzureOidcPreflightContractTests(unittest.TestCase):
         self.assertIn("AuthorizationFailed", self.text)
         self.assertIn("RBAC", self.text)
         self.assertIn("RBAC_LIMITED", self.text)
+        self.assertIn("ACR auth", self.text)
+        self.assertIn("ACR_AUTH_RESULT", self.text)
+        self.assertIn("Causa: $cause", self.text)
         self.assertIn("no ejecutado", self.text)
+
+    def test_acr_auth_es_aislada_sin_docker_ni_tokens(self):
+        self.assertIn("az acr login --name acrunihomedev --expose-token", self.text)
+        self.assertIn(">/dev/null 2>\"$acr_auth_log\"", self.text)
+        self.assertIn('ACR_AUTH_RESULT=%s', self.text)
+        self.assertNotIn("docker login", self.text.lower())
+        self.assertNotIn("docker push", self.text.lower())
+        self.assertNotIn("--password", self.text.lower())
+        self.assertNotIn("--username", self.text.lower())
 
     def test_concurrencia_separada_y_sin_cancelacion(self):
         self.assertIn("group: azure-oidc-preflight-", self.text)
