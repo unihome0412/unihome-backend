@@ -143,6 +143,11 @@ lo confirma.
 - `git diff --check`: correcto.
 - No se ejecutó `azure/login`, `docker push`, `az containerapp update` ni
   ninguna operación de escritura.
+- Ejecución manual de verificación
+  [42856630200](https://github.com/unihome0412/unihome-backend/actions/runs/42856630200):
+  workflow completo **success**; `deploy-azure` **skipped** por
+  `deploy_to_azure=false` y `UNIHOME_ENABLE_AZURE_CD` ausente. PR #18 con todos
+  los checks aplicables en verde.
 
 ## Pasos exactos para autorizar el primer despliegue
 
