@@ -386,7 +386,7 @@ app.Use(async (context, next) =>
 
         var path = context.Request.Path;
         headers["Content-Security-Policy"] = path.StartsWithSegments("/swagger") || path == "/"
-            ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
+            ? "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
             : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'";
 
         if (path.StartsWithSegments("/api/v1/auth") ||
