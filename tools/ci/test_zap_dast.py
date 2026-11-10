@@ -411,8 +411,7 @@ class ZapDastTests(unittest.TestCase):
             "zap_dast.py", "--target", "http://127.0.0.1:5088",
             "--proxy", "http://127.0.0.1:8090",
             "--zap-api", "http://127.0.0.1:8090",
-            "--zap-api-key", "key", "--zap-image", "image",
-            "--mailbox", "mail", "--output", "out",
+            "--zap-api-key", "key",
         ]):
             args = zap_dast.parse_args()
         self.assertEqual("key", args.zap_api_key)
@@ -436,13 +435,12 @@ class ZapDastTests(unittest.TestCase):
                 proxy="http://127.0.0.1:8090",
                 zap_api="http://127.0.0.1:8090",
                 zap_api_key="key",
-                zap_image="imagen@sha256:abc",
-                mailbox=str(mailbox),
-                output=str(output),
             )
             with (
                 patch.object(zap_dast, "HttpClient", FakeHttpClient),
                 patch.object(zap_dast, "ZapApi", FakeZapApi),
+                patch.object(zap_dast, "OUTPUT_DIR", output),
+                patch.object(zap_dast, "MAILBOX_DIR", mailbox),
                 patch.object(zap_dast, "wait_for_verification_code",
                              return_value="123456"),
             ):
@@ -465,9 +463,6 @@ class ZapDastTests(unittest.TestCase):
                 proxy="http://127.0.0.1:8090",
                 zap_api="http://127.0.0.1:8090",
                 zap_api_key="key",
-                zap_image="imagen@sha256:abc",
-                mailbox=str(mailbox),
-                output=str(output),
             )
 
             class HighZap(FakeZapApi):
@@ -481,6 +476,8 @@ class ZapDastTests(unittest.TestCase):
             with (
                 patch.object(zap_dast, "HttpClient", FakeHttpClient),
                 patch.object(zap_dast, "ZapApi", HighZap),
+                patch.object(zap_dast, "OUTPUT_DIR", output),
+                patch.object(zap_dast, "MAILBOX_DIR", mailbox),
                 patch.object(zap_dast, "wait_for_verification_code",
                              return_value="123456"),
             ):
@@ -499,9 +496,6 @@ class ZapDastTests(unittest.TestCase):
                 proxy="http://127.0.0.1:8090",
                 zap_api="http://127.0.0.1:8090",
                 zap_api_key="key",
-                zap_image="imagen@sha256:abc",
-                mailbox=str(mailbox),
-                output=str(output),
             )
 
             class OldZap(FakeZapApi):
@@ -511,6 +505,8 @@ class ZapDastTests(unittest.TestCase):
             with (
                 patch.object(zap_dast, "HttpClient", FakeHttpClient),
                 patch.object(zap_dast, "ZapApi", OldZap),
+                patch.object(zap_dast, "OUTPUT_DIR", output),
+                patch.object(zap_dast, "MAILBOX_DIR", mailbox),
                 patch.object(zap_dast, "wait_for_verification_code",
                              return_value="123456"),
             ):
@@ -522,15 +518,13 @@ class ZapDastTests(unittest.TestCase):
 
     def test_error_tecnico_genera_reporte_error(self):
         with tempfile.TemporaryDirectory() as directory:
-            args = SimpleNamespace(
-                target="http://127.0.0.1:5088",
-                zap_image="imagen@sha256:abc",
-                output=directory,
-            )
-            write_error_report(args, DastError("sin reporte"))
-            report = (Path(directory) / "dast-report.md").read_text(encoding="utf-8")
+            output = Path(directory)
+            args = SimpleNamespace(target="http://127.0.0.1:5088")
+            with patch.object(zap_dast, "OUTPUT_DIR", output):
+                write_error_report(args, DastError("sin reporte"))
+            report = (output / "dast-report.md").read_text(encoding="utf-8")
             self.assertIn("**ERROR**", report)
-            self.assertTrue((Path(directory) / "dast-error.txt").exists())
+            self.assertTrue((output / "dast-error.txt").exists())
 
 
 if __name__ == "__main__":

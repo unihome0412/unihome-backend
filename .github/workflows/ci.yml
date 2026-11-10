@@ -678,6 +678,16 @@ jobs:
               raise SystemExit("La URI DAST debe declarar directConnection=true.")
           print("Objetivo, Mongo y base DAST limitados a loopback.")
           PY
+          PYTHONPATH=tools/ci python3 - <<'PY'
+          import os
+          import zap_dast
+
+          if os.environ["ZAP_IMAGE"] != zap_dast.ZAP_IMAGE_REF:
+              raise SystemExit("La imagen ZAP del workflow no coincide con el driver.")
+          if os.environ["SMTP_DAST_MAILBOX"] != str(zap_dast.MAILBOX_DIR):
+              raise SystemExit("El buzón SMTP del workflow no coincide con el driver.")
+          print("Imagen ZAP y buzón SMTP coinciden con el driver.")
+          PY
       - name: Restaurar y compilar API y migrador
         run: |
           dotnet restore UniHome.Backend.slnx --locked-mode
@@ -959,9 +969,6 @@ jobs:
             --proxy http://127.0.0.1:8090 \
             --zap-api http://127.0.0.1:8090 \
             --zap-api-key "$ZAP_API_KEY" \
-            --zap-image "$ZAP_IMAGE" \
-            --mailbox "$SMTP_DAST_MAILBOX" \
-            --output artifacts/dast-zap \
             | tee artifacts/dast-zap/dast-console.txt
           test -s artifacts/dast-zap/zap-report.html
           test -s artifacts/dast-zap/zap-report.json

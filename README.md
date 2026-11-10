@@ -261,10 +261,18 @@ gh run list --workflow ci.yml --limit 5
 gh run download <run-id> -n dast-zap-results -D artifacts/dast-zap
 ```
 
+La ejecución real de verificación
+([42771007673](https://github.com/unihome0412/unihome-backend/actions/runs/42771007673),
+commit `cbc9351`) terminó con `dast-zap` en verde y estado **PASS**: 7/7 rutas
+OpenAPI visitadas, 26 mensajes procesados, 0 Critical/High/Medium/Low y 2
+informativas. El artefacto `dast-zap-results` contiene HTML/JSON/Markdown y la
+limpieza confirmó API/SMTP detenidos, contenedor ZAP eliminado y base efímera
+borrada. `PR Quality Gate` y `Hardening Report` terminaron en verde.
+
 El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
-cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas y
-las cabeceras ausentes deben revisarse; el escaneo pasivo no demuestra lógica
-de negocio ni autorización a nivel de objeto.
+cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que
+aparezcan en futuras ejecuciones deben revisarse; el escaneo pasivo no demuestra
+lógica de negocio ni autorización a nivel de objeto.
 
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
 ejecutarla localmente en una base de verificación aislada, primero revisar y aplicar

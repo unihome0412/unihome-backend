@@ -35,6 +35,12 @@ from typing import Any
 PASSWORD = "ClaveSegura1"
 PRIVACY_VERSION = "2026-01"
 EXPECTED_ZAP_VERSION = "2.17.0"
+ZAP_IMAGE_REF = (
+    "ghcr.io/zaproxy/zaproxy:2.17.0@sha256:"
+    "9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af"
+)
+OUTPUT_DIR = Path("artifacts/dast-zap")
+MAILBOX_DIR = Path("/tmp/unihome-dast-mail")
 RISK_ORDER = ("Critical", "High", "Medium", "Low", "Informational")
 RISK_BY_CODE = {"3": "High", "2": "Medium", "1": "Low", "0": "Informational"}
 CONFIDENCE_BY_CODE = {
@@ -732,9 +738,9 @@ def _json_body(payload: bytes) -> dict[str, Any]:
 
 def run_scan(args: argparse.Namespace) -> int:
     target = args.target.rstrip("/")
-    output = Path(args.output)
+    output = Path(OUTPUT_DIR)
     output.mkdir(parents=True, exist_ok=True)
-    mailbox = Path(args.mailbox)
+    mailbox = Path(MAILBOX_DIR)
     generated_at = datetime.now(timezone.utc).isoformat()
     technical_errors: list[str] = []
     health: dict[str, Any] = {}
@@ -850,7 +856,7 @@ def run_scan(args: argparse.Namespace) -> int:
         "target": target,
         "generated_at": generated_at,
         "zap_version": version,
-        "zap_image": args.zap_image,
+        "zap_image": ZAP_IMAGE_REF,
         "messages_scanned": messages,
         "records_to_scan": records,
         "health": health,
@@ -867,7 +873,7 @@ def run_scan(args: argparse.Namespace) -> int:
     _write_json(output / "dast-summary.json", summary)
     _write_json(output / "zap-evidence.json", {
         "version": version,
-        "image": args.zap_image,
+        "image": ZAP_IMAGE_REF,
         "messages": messages,
         "recordsToScan": records,
     })
@@ -875,7 +881,7 @@ def run_scan(args: argparse.Namespace) -> int:
         status=status,
         target=target,
         zap_version=version,
-        zap_image=args.zap_image,
+        zap_image=ZAP_IMAGE_REF,
         generated_at=generated_at,
         health=health,
         coverage=coverage,
@@ -904,14 +910,14 @@ def run_scan(args: argparse.Namespace) -> int:
 
 
 def write_error_report(args: argparse.Namespace, error: Exception) -> None:
-    output = Path(args.output)
+    output = Path(OUTPUT_DIR)
     output.mkdir(parents=True, exist_ok=True)
     markdown = "\n".join([
         "# UniHome DAST — OWASP ZAP Baseline pasivo",
         "",
         "- **Estado:** **ERROR**",
         f"- **Objetivo:** `{args.target}`",
-        f"- **Imagen:** `{args.zap_image}`",
+        f"- **Imagen:** `{ZAP_IMAGE_REF}`",
         "",
         "## Error técnico",
         "",
@@ -935,9 +941,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--proxy", required=True)
     parser.add_argument("--zap-api", required=True)
     parser.add_argument("--zap-api-key", required=True)
-    parser.add_argument("--zap-image", required=True)
-    parser.add_argument("--mailbox", required=True)
-    parser.add_argument("--output", required=True)
     return parser.parse_args()
 
 

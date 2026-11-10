@@ -69,11 +69,23 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
   PR/push no se exige y el Hardening Report lo muestra como `skipped` no
   aprobado. El gate de Hardening aplica la misma regla de rama.
 
+**Verificación real (10 de noviembre de 2026):** ejecución manual
+[42771007673](https://github.com/unihome0412/unihome-backend/actions/runs/42771007673),
+commit `cbc9351`, job `dast-zap` en verde con estado **PASS**, 7/7 operaciones
+OpenAPI visitadas, 26 mensajes procesados por ZAP, 0 Critical, 0 High, 0 Medium,
+0 Low y 2 informativas (aplicación web moderna y respuesta de sesión). Se
+publicaron `zap-report.html`, `zap-report.json`, `zap-report.md`,
+`dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza; la
+limpieza confirmó API y SMTP detenidos, contenedor ZAP eliminado y base
+`unihome_dast` borrada. `PR Quality Gate` y `Hardening Report` terminaron en
+verde. SonarCloud quedó `skipped` por ser una ejecución manual desde
+`feature/*`, comportamiento esperado y no exigido por el gate.
+
 **Alcance pendiente y riesgos:** el análisis pasivo no demuestra lógica de
 negocio ni autorización a nivel de objeto; la cobertura se limita a las rutas
 documentadas y las rutas de soporte enumeradas. El HTTP de loopback es
 intencional y no representa el despliegue; HSTS/HTTPS no aplica a este runner.
-Las alertas Medium y las cabeceras ausentes deben revisarse y aceptarse o
+Las alertas que aparezcan en futuras ejecuciones deben revisarse y aceptarse o
 corregirse por separado. RESTler / Pact siguen requiriendo contratos y datos de
 prueba; no se activan para aparentar cobertura.
 
