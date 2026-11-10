@@ -124,7 +124,16 @@ en el runner. No se usa una imagen móvil ni un servicio remoto.
   HTTP 5xx/bug bucket. Un 401/403 no se considera vulnerabilidad por sí mismo,
   pero tampoco se cuenta como prueba funcional válida.
 
-**Verificación real:** pendiente de la ejecución manual del job.
+**Verificación real (10 de noviembre de 2026):** ejecución manual
+[42794026111](https://github.com/unihome0412/unihome-backend/actions/runs/42794026111),
+commit `fe22365`, job `restler-fuzzing` en verde con estado **PASS**:
+Compile/Test/Fuzz-lean exit `0`, 7/7 operaciones OpenAPI intentadas y con al
+menos una respuesta 2xx, 2.054 solicitudes y 16 secuencias observadas, 0 HTTP
+5xx y 0 bug buckets. Códigos observados: 200, 201, 202, 204, 400, 401, 409 y
+413. La limpieza confirmó API/SMTP detenidos y base `unihome_restler` borrada.
+`PR Quality Gate` y `Hardening Report` terminaron en verde. Las respuestas 401,
+409 y 413 son parte del fuzzing esperado y no se contaron como pruebas válidas;
+registro y refresh obtuvieron 2xx en Test y variantes no exitosas en Fuzz-lean.
 
 ## SonarQube Cloud
 

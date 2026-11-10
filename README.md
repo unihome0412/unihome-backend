@@ -295,8 +295,12 @@ gh workflow run ci.yml --ref feature/ci-restler
 gh run download <run-id> -n restler-fuzzing-results -D artifacts/restler
 ```
 
-La prueba real y sus recuentos se registrarán aquí después de la ejecución
-manual verificada; no se declara RESTler completado hasta ese momento.
+La ejecución real de verificación
+([42794026111](https://github.com/unihome0412/unihome-backend/actions/runs/42794026111),
+commit `fe22365`) terminó con `restler-fuzzing` en verde y estado **PASS**:
+Compile/Test/Fuzz-lean correctos, 7/7 operaciones intentadas y con al menos una
+respuesta 2xx, 2.054 solicitudes, 16 secuencias, 0 HTTP 5xx y 0 bug buckets.
+La limpieza confirmó API/SMTP detenidos y base `unihome_restler` borrada.
 
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
 ejecutarla localmente en una base de verificación aislada, primero revisar y aplicar
