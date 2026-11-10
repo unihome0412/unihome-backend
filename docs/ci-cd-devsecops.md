@@ -143,12 +143,18 @@ se rechazan. El generador nativo de OpenAPI 3.1.1 describía el componente como
 `integer`; el documento ahora lo corrige a `type: string` con `enum` de nombres.
 `OpenApiGenderContractTests` comprueba el documento generado y contrasta una
 solicitud real con string (201) y con entero (400). No cambia el comportamiento
-HTTP ni se modificó el DTO para ocultar la discrepancia.
+HTTP ni se modificó el DTO para ocultar la discrepancia. Verificación real:
+[42850339456](https://github.com/unihome0412/unihome-backend/actions/runs/42850339456),
+`contract-test` con 10/10 pruebas OpenAPI aprobadas; el resto de controles
+manuales (DAST, RESTler, MongoDB CI, Stryker, Docker/Dockle, Hardening y PR
+Quality Gate) también terminó en verde.
 
 ### Pact de proveedor (pendiente de contratos reales)
 
-- El repositorio móvil `unihome-mobile` no contiene contratos Pact al momento de
-  esta entrega; su README no publica pruebas de consumidor ni artefactos Pact.
+- El repositorio móvil `unihome-mobile` (commit inspeccionado
+  `6355763da7d9659412fd117a1d22aca73be53a84`) no contiene contratos Pact al
+  momento de esta entrega; su README no publica pruebas de consumidor ni
+  artefactos Pact.
 - `tests/UniHome.PactTests` prepara la verificación del proveedor con PactNet
   `5.0.1`. No está incluido en `UniHome.Backend.slnx` para que el build/test
   normal no dependa de una entrega inexistente.

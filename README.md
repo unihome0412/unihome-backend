@@ -203,6 +203,9 @@ solo lectura; si falta una garantía crítica, la API no opera esa colección.
 - `Gender` se documenta como enum string (`Mujer`, `Hombre`,
   `PrefiereNoDecir`), igual que el JSON real; los enteros se rechazan. La
   corrección se aplica al documento OpenAPI sin cambiar el contrato HTTP.
+  Verificación: ejecución manual
+  [42850339456](https://github.com/unihome0412/unihome-backend/actions/runs/42850339456),
+  `contract-test` con 10/10 pruebas OpenAPI aprobadas.
 - Registro: `400` por validación, `409` por correo duplicado (provisional, DEC-09
   pendiente), `413` por cuerpo excesivo y `503` si MongoDB no está disponible.
 - Login: `400` por datos inválidos, `401` genérico, `403` por cuenta no confirmada o
