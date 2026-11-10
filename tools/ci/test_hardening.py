@@ -156,6 +156,32 @@ class GateTests(unittest.TestCase):
         self.assertNotIn("dast-zap", required)
         self.assertEqual([], issues)
 
+    def test_restler_manual_feature_skipped_bloquea(self):
+        needs = self._base_needs()
+        needs["restler-fuzzing"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_RESTLER": "true"},
+            "workflow_dispatch", "refs/heads/feature/ci-restler")
+        self.assertIn("restler-fuzzing", required)
+        self.assertTrue(any("restler-fuzzing" in issue for issue in issues))
+
+    def test_restler_pr_skipped_no_bloquea(self):
+        needs = self._base_needs()
+        needs["restler-fuzzing"] = {"result": "skipped"}
+        _, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_RESTLER": "true"},
+            "pull_request", "refs/pull/16/merge")
+        self.assertEqual([], issues)
+
+    def test_restler_manual_success_cumple(self):
+        needs = self._base_needs()
+        needs["restler-fuzzing"] = {"result": "success"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_RESTLER": "true"},
+            "workflow_dispatch", "refs/heads/main")
+        self.assertEqual([], issues)
+        self.assertIn("restler-fuzzing", required)
+
     @staticmethod
     def _base_needs():
         return {x: {"result": "success"} for x in (

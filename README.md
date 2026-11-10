@@ -274,6 +274,30 @@ cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que
 aparezcan en futuras ejecuciones deben revisarse; el escaneo pasivo no demuestra
 lógica de negocio ni autorización a nivel de objeto.
 
+El job manual `restler-fuzzing` (variable `UNIHOME_ENABLE_RESTLER=true`) usa
+Microsoft RESTler **v9.3.1** fijado por commit
+`eaacd92733771d35e90acfb2040fe37d4e5d09b1`. Compila desde fuente, ejecuta
+**Compile**, **Test/Smoke** y **Fuzz-lean** contra la misma estrategia de API
+efímera: loopback, MongoDB 8.0.34 con M01-001, SMTP de captura y cuentas
+sintéticas. No usa fuzzing exhaustivo, Atlas, Brevo, Azure ni secretos reales.
+
+El OpenAPI 3.1 se conserva; se genera una copia compatible 3.0.3 solo para
+RESTler, con reporte de transformación y verificación de que no cambian rutas ni
+métodos. El artefacto `restler-fuzzing-results` incluye compilación, gramática,
+cobertura `speccov`, Test/Fuzz-lean, solicitudes, secuencias, errores HTTP, bug
+buckets, replay logs saneados y `restler-summary.md`. El job falla con HTTP 5xx,
+bug buckets, resultados faltantes u operaciones OpenAPI no intentadas; un 401/403
+no se cuenta como prueba funcional válida.
+
+```powershell
+gh variable set UNIHOME_ENABLE_RESTLER --body true
+gh workflow run ci.yml --ref feature/ci-restler
+gh run download <run-id> -n restler-fuzzing-results -D artifacts/restler
+```
+
+La prueba real y sus recuentos se registrarán aquí después de la ejecución
+manual verificada; no se declara RESTler completado hasta ese momento.
+
 La prueba real de identidad contra MongoDB está deshabilitada por defecto. Para
 ejecutarla localmente en una base de verificación aislada, primero revisar y aplicar
 la migración con la herramienta separada. La prueba no aplica DDL y puede utilizar
