@@ -8,6 +8,7 @@ using UniHome.Api.Errors;
 using UniHome.Application.Identity.ConfirmEmail;
 using UniHome.Application.Identity.Login;
 using UniHome.Application.Identity.Logout;
+using UniHome.Application.Identity.PasswordRecovery;
 using UniHome.Application.Identity.RefreshSessions;
 using UniHome.Application.Identity.RegisterAccount;
 
@@ -25,6 +26,8 @@ public sealed class AuthController : ControllerBase
     private readonly LogoutService _logout;
     private readonly ConfirmEmailService _confirmEmail;
     private readonly ResendConfirmationService _resendConfirmation;
+    private readonly RequestPasswordResetService _requestPasswordReset;
+    private readonly ConfirmPasswordResetService _confirmPasswordReset;
 
     public AuthController(
         RegisterAccountService registerAccount,
@@ -32,7 +35,9 @@ public sealed class AuthController : ControllerBase
         RefreshSessionService refreshSession,
         LogoutService logout,
         ConfirmEmailService confirmEmail,
-        ResendConfirmationService resendConfirmation)
+        ResendConfirmationService resendConfirmation,
+        RequestPasswordResetService requestPasswordReset,
+        ConfirmPasswordResetService confirmPasswordReset)
     {
         _registerAccount = registerAccount;
         _login = login;
@@ -40,6 +45,8 @@ public sealed class AuthController : ControllerBase
         _logout = logout;
         _confirmEmail = confirmEmail;
         _resendConfirmation = resendConfirmation;
+        _requestPasswordReset = requestPasswordReset;
+        _confirmPasswordReset = confirmPasswordReset;
     }
 
     /// <summary>
@@ -278,6 +285,91 @@ public sealed class AuthController : ControllerBase
         return CreateProblemResult(
             StatusCodes.Status401Unauthorized,
             "La sesión no es válida o expiró.");
+    }
+
+    /// <summary>
+    /// EP-M01-06 (HU-006): solicita recuperación. Responde el mismo mensaje exista
+    /// o no la cuenta; solo envía el enlace a cuentas activas con correo confirmado.
+    /// </summary>
+    [HttpPost("recuperacion/solicitud")]
+    [AllowAnonymous]
+    [EnableRateLimiting(AuthRateLimitPolicies.PasswordResetRequest)]
+    [RequestSizeLimit(MaxAuthRequestBytes)]
+    [ProducesResponseType(typeof(RecuperacionSolicitudResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> RequestPasswordReset(
+        [FromBody] RecuperacionSolicitudRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (Request.ContentLength is > MaxAuthRequestBytes)
+        {
+            return CreateProblemResult(
+                StatusCodes.Status413PayloadTooLarge,
+                "La solicitud excede el tamaño permitido.");
+        }
+
+        var result = await _requestPasswordReset
+            .RequestAsync(new RequestPasswordResetCommand(request.Correo), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (result.Status == RequestPasswordResetStatus.ValidationFailed)
+        {
+            return CreateValidationResult(result.ValidationErrors);
+        }
+
+        SetNoStore();
+        return Ok(new RecuperacionSolicitudResponse(
+            RecuperacionSolicitudResponse.MensajeGenerico));
+    }
+
+    /// <summary>
+    /// EP-M01-07 (HU-006): consume un enlace de un solo uso, responde 400 si es
+    /// inválido y 410 si venció o agotó los intentos. Al completarse cambia la
+    /// contraseña y revoca todas las sesiones de refresh de la cuenta.
+    /// </summary>
+    [HttpPost("recuperacion/confirmacion")]
+    [AllowAnonymous]
+    [EnableRateLimiting(AuthRateLimitPolicies.PasswordResetConfirm)]
+    [RequestSizeLimit(MaxAuthRequestBytes)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status410Gone)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ConfirmPasswordReset(
+        [FromBody] RecuperacionConfirmacionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (Request.ContentLength is > MaxAuthRequestBytes)
+        {
+            return CreateProblemResult(
+                StatusCodes.Status413PayloadTooLarge,
+                "La solicitud excede el tamaño permitido.");
+        }
+
+        var result = await _confirmPasswordReset
+            .ConfirmAsync(
+                new ConfirmPasswordResetCommand(request.Token, request.NuevaContrasena),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        SetNoStore();
+
+        return result.Status switch
+        {
+            ConfirmPasswordResetStatus.Success => Ok(),
+            ConfirmPasswordResetStatus.ValidationFailed => CreateValidationResult(result.ValidationErrors),
+            ConfirmPasswordResetStatus.ExpiredToken => CreateProblemResult(
+                StatusCodes.Status410Gone,
+                "El enlace venció o se agotaron los intentos. Solicita uno nuevo."),
+            _ => CreateProblemResult(
+                StatusCodes.Status400BadRequest,
+                "El enlace de recuperación no es válido.")
+        };
     }
 
     /// <summary>

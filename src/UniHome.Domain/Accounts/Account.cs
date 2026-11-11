@@ -53,7 +53,7 @@ public sealed class Account
 
     public Gender Gender { get; }
 
-    public string PasswordHash { get; }
+    public string PasswordHash { get; private set; }
 
     public PrivacyAcceptance PrivacyAcceptance { get; }
 
@@ -274,6 +274,22 @@ public sealed class Account
         EmailConfirmedAt = now;
 
         return EmailConfirmationResult.Confirmed;
+    }
+
+    /// <summary>
+    /// HU-006: sustituye el hash de contraseña. La validación de la política y la
+    /// revocación de sesiones corresponden a Application/Infrastructure.
+    /// </summary>
+    public void ChangePassword(string passwordHash)
+    {
+        if (string.IsNullOrWhiteSpace(passwordHash))
+        {
+            throw new ArgumentException(
+                "El hash de contraseña es obligatorio.",
+                nameof(passwordHash));
+        }
+
+        PasswordHash = passwordHash;
     }
 
     /// <summary>

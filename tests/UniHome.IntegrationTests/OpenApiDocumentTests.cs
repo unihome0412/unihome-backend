@@ -71,5 +71,19 @@ public sealed class OpenApiDocumentTests : IClassFixture<SwaggerEnabledApiFactor
             .GetProperty("post");
 
         Assert.False(resend.TryGetProperty("security", out _));
+
+        var resetRequest = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/auth/recuperacion/solicitud")
+            .GetProperty("post");
+
+        Assert.False(resetRequest.TryGetProperty("security", out _));
+
+        var resetConfirm = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/auth/recuperacion/confirmacion")
+            .GetProperty("post");
+
+        Assert.False(resetConfirm.TryGetProperty("security", out _));
     }
 }

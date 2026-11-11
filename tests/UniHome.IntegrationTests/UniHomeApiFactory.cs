@@ -41,7 +41,11 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
     public InMemoryRefreshSessionRepository Sessions { get; } = new();
 
+    public InMemoryPasswordResetRepository PasswordResets { get; } = new();
+
     public CapturingVerificationEmailSender EmailSender { get; } = new();
+
+    public CapturingPasswordResetEmailSender PasswordResetEmailSender { get; } = new();
 
     public CapturingLoggerProvider Logs { get; } = new();
 
@@ -73,7 +77,11 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
                 ["Auth:RateLimit:ConfirmEmailPermitLimit"] = "1000",
                 ["Auth:RateLimit:ConfirmEmailWindowSeconds"] = "60",
                 ["Auth:RateLimit:ResendPermitLimit"] = "1000",
-                ["Auth:RateLimit:ResendWindowSeconds"] = "60"
+                ["Auth:RateLimit:ResendWindowSeconds"] = "60",
+                ["Auth:RateLimit:PasswordResetRequestPermitLimit"] = "1000",
+                ["Auth:RateLimit:PasswordResetRequestWindowSeconds"] = "60",
+                ["Auth:RateLimit:PasswordResetConfirmPermitLimit"] = "1000",
+                ["Auth:RateLimit:PasswordResetConfirmWindowSeconds"] = "60"
             });
         });
 
@@ -92,8 +100,14 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IRefreshSessionRepository>();
             services.AddSingleton<IRefreshSessionRepository>(Sessions);
 
+            services.RemoveAll<IPasswordResetRepository>();
+            services.AddSingleton<IPasswordResetRepository>(PasswordResets);
+
             services.RemoveAll<IVerificationEmailSender>();
             services.AddSingleton<IVerificationEmailSender>(EmailSender);
+
+            services.RemoveAll<IPasswordResetEmailSender>();
+            services.AddSingleton<IPasswordResetEmailSender>(PasswordResetEmailSender);
 
             services
                 .AddControllers()

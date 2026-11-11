@@ -9,6 +9,7 @@ using UniHome.Infrastructure.Email;
 using UniHome.Infrastructure.Identity;
 using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Accounts;
+using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Sessions;
 using UniHome.Infrastructure.Redis;
 
@@ -35,6 +36,10 @@ public static class DependencyInjection
         services
             .AddOptions<VerificationCodeOptions>()
             .Bind(configuration.GetSection(VerificationCodeOptions.SectionName));
+
+        services
+            .AddOptions<PasswordRecoveryOptions>()
+            .Bind(configuration.GetSection(PasswordRecoveryOptions.SectionName));
 
         services
             .AddOptions<JwtOptions>()
@@ -107,20 +112,24 @@ public static class DependencyInjection
         // M01: puertos de identidad y sus adaptadores.
         services.AddSingleton<IAccountRepository, MongoAccountRepository>();
         services.AddSingleton<IRefreshSessionRepository, MongoRefreshSessionRepository>();
+        services.AddSingleton<IPasswordResetRepository, MongoPasswordResetRepository>();
         services.AddSingleton<IPasswordHasher, AspNetCorePasswordHasher>();
         services.AddSingleton<IDummyPasswordHashProvider, DummyPasswordHashProvider>();
         services.AddSingleton<ISystemClock, SystemClock>();
         services.AddSingleton<IVerificationCodeGenerator, RandomVerificationCodeGenerator>();
         services.AddSingleton<IVerificationCodeProtector, HmacVerificationCodeProtector>();
+        services.AddSingleton<IPasswordResetTokenGenerator, SecurePasswordResetTokenGenerator>();
 
         if (smtpConfigured)
         {
             services.AddSingleton<IVerificationEmailSender>(serviceProvider =>
                 serviceProvider.GetRequiredService<SmtpVerificationEmailSender>());
+            services.AddSingleton<IPasswordResetEmailSender, SmtpPasswordResetEmailSender>();
         }
         else
         {
             services.AddSingleton<IVerificationEmailSender, UnconfiguredVerificationEmailSender>();
+            services.AddSingleton<IPasswordResetEmailSender, UnconfiguredPasswordResetEmailSender>();
         }
 
         services.AddSingleton<IRefreshTokenGenerator, SecureRefreshTokenGenerator>();

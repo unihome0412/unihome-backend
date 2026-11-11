@@ -58,5 +58,11 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
 
         Assert.True(paths.TryGetProperty("/api/v1/cuentas/mi-cuenta", out var deleteAccount));
         Assert.True(deleteAccount.TryGetProperty("delete", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/auth/recuperacion/solicitud", out var resetRequest));
+        Assert.True(resetRequest.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/auth/recuperacion/confirmacion", out var resetConfirm));
+        Assert.True(resetConfirm.TryGetProperty("post", out _));
     }
 }

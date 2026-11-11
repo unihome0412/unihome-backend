@@ -79,12 +79,16 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Smtp__Password` | Sí | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `Smtp__FromEmail` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `Smtp__FromName` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
+| `PasswordRecovery__ResetLinkBaseUrl` | No | `PasswordRecoveryOptions` (`PasswordRecovery`) | Solo si se habilita recuperación de contraseña; URL HTTPS del cliente (se le agrega `?token=...`) |
 | `Proxy__TrustForwardedHeaders` | No | `ProxyOptions` (`Proxy`) | Sí, en `true`, solo si el contenedor corre detrás del ingress de Container Apps |
 | `Api__EnableSwagger` | No | `ApiOptions` (`Api`) | No; `false` por defecto, activar solo para demostraciones puntuales |
 
 Si no existe ninguna clave bajo `Smtp`, el registro funciona sin enviar correo
 real (`correoConfirmacionEnviado: false`); si existe alguna, todas las
-obligatorias de esa sección se validan al arrancar.
+obligatorias de esa sección se validan al arrancar. Para recuperación de contraseña,
+`PasswordRecovery__ResetLinkBaseUrl` debe ser una URL HTTPS (o HTTP loopback en
+desarrollo) sin query ni fragmento; si falta, el endpoint responde igual pero no se
+simula el envío del enlace.
 
 ## Por qué `Proxy__TrustForwardedHeaders`
 

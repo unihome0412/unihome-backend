@@ -27,6 +27,7 @@ using UniHome.Application.Identity.ConfirmEmail;
 using UniHome.Application.Identity.DeleteAccount;
 using UniHome.Application.Identity.Login;
 using UniHome.Application.Identity.Logout;
+using UniHome.Application.Identity.PasswordRecovery;
 using UniHome.Application.Identity.RefreshSessions;
 using UniHome.Application.Identity.RegisterAccount;
 using UniHome.Domain.Accounts;
@@ -118,6 +119,8 @@ builder.Services.AddScoped<LogoutService>();
 builder.Services.AddScoped<ConfirmEmailService>();
 builder.Services.AddScoped<ResendConfirmationService>();
 builder.Services.AddScoped<DeleteAccountService>();
+builder.Services.AddScoped<RequestPasswordResetService>();
+builder.Services.AddScoped<ConfirmPasswordResetService>();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -359,6 +362,48 @@ builder.Services.AddRateLimiter(options =>
                     key,
                     Math.Max(1, limits.ResendPermitLimit),
                     TimeSpan.FromSeconds(Math.Max(1, limits.ResendWindowSeconds))));
+        });
+
+    options.AddPolicy(
+        AuthRateLimitPolicies.PasswordResetRequest,
+        httpContext =>
+        {
+            var limits = httpContext.RequestServices
+                .GetRequiredService<IOptions<AuthRateLimitOptions>>()
+                .Value;
+            var distributedLimiter = httpContext.RequestServices
+                .GetRequiredService<IDistributedRateLimiter>();
+            var partitionKey = GetClientPartitionKey(httpContext, limits.IpHashSalt);
+            var redisKey = $"unihome:rl:{AuthRateLimitPolicies.PasswordResetRequest}:{partitionKey}";
+
+            return RateLimitPartition.Get(
+                redisKey,
+                key => new DistributedRateLimiterBridge(
+                    distributedLimiter,
+                    key,
+                    Math.Max(1, limits.PasswordResetRequestPermitLimit),
+                    TimeSpan.FromSeconds(Math.Max(1, limits.PasswordResetRequestWindowSeconds))));
+        });
+
+    options.AddPolicy(
+        AuthRateLimitPolicies.PasswordResetConfirm,
+        httpContext =>
+        {
+            var limits = httpContext.RequestServices
+                .GetRequiredService<IOptions<AuthRateLimitOptions>>()
+                .Value;
+            var distributedLimiter = httpContext.RequestServices
+                .GetRequiredService<IDistributedRateLimiter>();
+            var partitionKey = GetClientPartitionKey(httpContext, limits.IpHashSalt);
+            var redisKey = $"unihome:rl:{AuthRateLimitPolicies.PasswordResetConfirm}:{partitionKey}";
+
+            return RateLimitPartition.Get(
+                redisKey,
+                key => new DistributedRateLimiterBridge(
+                    distributedLimiter,
+                    key,
+                    Math.Max(1, limits.PasswordResetConfirmPermitLimit),
+                    TimeSpan.FromSeconds(Math.Max(1, limits.PasswordResetConfirmWindowSeconds))));
         });
 });
 

@@ -2,8 +2,8 @@
 
 API REST en .NET 10 para UniHome. Incluye la base de la Etapa 1 y M01: registro
 (HU-001/HU-012), sesión (login, refresh y logout: HU-004/HU-005), confirmación de
-correo y su reenvío (HU-003) y eliminación de cuenta (HU-096).
-**M01 no está completo**: la recuperación de contraseña (HU-006) sigue pendiente.
+correo y su reenvío (HU-003), recuperación de contraseña (HU-006) y eliminación de
+cuenta (HU-096).
 
 ## Stack y capas
 
@@ -35,6 +35,8 @@ La API inicia sin MongoDB configurado. La configuración de MongoDB es externa
 | `POST` | `/api/v1/auth/login` | Login común por correo y contraseña (HU-004). |
 | `POST` | `/api/v1/auth/refresh` | Renovación con rotación de refresh token (EP-M01-08). |
 | `POST` | `/api/v1/auth/logout` | Cierre de la sesión actual con `Authorization: Bearer` (HU-005). |
+| `POST` | `/api/v1/auth/recuperacion/solicitud` | Solicita la recuperación con respuesta genérica (HU-006, EP-M01-06). |
+| `POST` | `/api/v1/auth/recuperacion/confirmacion` | Consume el enlace y establece la nueva contraseña (HU-006, EP-M01-07). |
 | `DELETE` | `/api/v1/cuentas/mi-cuenta` | Elimina (borrado lógico) la cuenta propia con `Authorization: Bearer` (HU-096, EP-M01-09). |
 
 Registro (`201`):
@@ -75,6 +77,15 @@ igual (`400`), para no revelar si la cuenta existe; un código vencido o con int
 agotados responde `410`. El reenvío siempre responde `202` sin cuerpo, exista o no el
 correo.
 
+Recuperación de contraseña (HU-006): `recuperacion/solicitud` responde siempre `200`
+con el mensaje `Si el correo está registrado, recibirás instrucciones para restablecer
+tu contraseña`, exista o no la cuenta. Solo envía el enlace a cuentas activas con
+correo confirmado. El enlace contiene un token opaco de 256 bits, vence a los 30
+minutos y es de un solo uso; en MongoDB solo se guarda su SHA-256. Si el token es
+inválido o ya se usó responde `400`; si venció o agotó sus intentos responde `410`.
+Al confirmar se aplica la misma política de contraseña del registro (8 a 128
+caracteres) y se revocan todas las sesiones de refresh de la cuenta.
+
 Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
 `contrasena` y `confirmacionPerdidaInformacion: true`. Hace borrado lógico
 (`AccountStatus.Deleted`) y revoca todas las sesiones de la cuenta en todos los
@@ -100,6 +111,10 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   rotación emite un refresh nuevo con la vigencia configurada (30 días por defecto);
   fijar un máximo absoluto de sesión queda como decisión de producto/seguridad.
 - Logout revoca únicamente la sesión del dispositivo actual.
+- Recuperación de contraseña: el token es opaco de 256 bits, se guarda como SHA-256,
+  vence en 30 minutos, es de un solo uso y tiene un límite provisional de 5 intentos
+  por token. Al restablecer la contraseña se revocan todas las sesiones de refresh de
+  la cuenta; las cuentas suspendidas, eliminadas o no confirmadas no reciben enlace.
 - No se registran contraseñas, tokens, secretos ni datos personales en logs o respuestas
   de error.
 - Los tokens de acceso no se guardan en el cliente por este backend; su almacenamiento
@@ -118,20 +133,29 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
 - `Auth__RateLimit__LoginPermitLimit` / `LoginWindowSeconds` valen 10 intentos por 60
   segundos por IP; `RefreshPermitLimit` / `RefreshWindowSeconds` valen 20 por 60
   segundos; `ConfirmEmailPermitLimit` / `ConfirmEmailWindowSeconds` valen 10 por 60;
-  `ResendPermitLimit` / `ResendWindowSeconds` valen 5 por 60. Son umbrales
-  provisionales pendientes de aprobación. El limitador es en memoria y asume una sola
-  instancia del proceso (BE-SEC-009); escalar horizontalmente requiere el ADR de
-  estado distribuido.
-- Límite "por cuenta" de intentos de confirmación (spec EP-M01-02, sin valor fijado):
+  `ResendPermitLimit` / `ResendWindowSeconds` valen 5 por 60;
+  `PasswordResetRequestPermitLimit` / `PasswordResetRequestWindowSeconds` valen 5 por
+  60; `PasswordResetConfirmPermitLimit` / `PasswordResetConfirmWindowSeconds` valen 10
+  por 60. Son umbrales provisionales pendientes de aprobación. El limitador usa el
+  adaptador distribuido configurado: Upstash Redis cuando `Redis:Enabled=true` y el
+  adaptador en memoria solo en Development/pruebas. Fuera de Development Redis es
+  obligatorio y las IP se seudonimizan con `Auth:RateLimit:IpHashSalt`.
+- Límite "por cuenta" de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
   (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como
-  vencido (`410`) para forzar un reenvío en vez de permitir reintentos indefinidos.
+  vencido (`410`) para forzar un reenvío.
+- Límite "por token" de recuperación: 5 intentos incorrectos
+  (`PasswordResetToken.MaxAttempts`); al agotarse, el enlace se trata como vencido
+  (`410`) para exigir una solicitud nueva.
+- `PasswordRecovery__ResetLinkBaseUrl` (o `PasswordRecovery:ResetLinkBaseUrl`) es la
+  URL HTTPS del cliente a la que se agrega `?token=...`. Es necesaria para que el
+  correo de recuperación se envíe; si falta o no es válida, no se simula el enlace.
 - El envío SMTP es opcional en Development. Si no existe la sección `Smtp`, el registro
   persiste la cuenta y devuelve `correoConfirmacionEnviado: false`; si existe, se valida
   al arrancar y `correoConfirmacionEnviado: true` solo indica que el relé aceptó el
   mensaje, no que se haya entregado al buzón final.
-- Registro, confirmación de correo, su reenvío, login, refresh, logout y eliminación
-  de cuenta limitan el cuerpo de la solicitud a 8 KB.
+- Registro, confirmación de correo, su reenvío, login, refresh, logout, recuperación y
+  eliminación de cuenta limitan el cuerpo de la solicitud a 8 KB.
 
 ## Persistencia y migraciones MongoDB
 
@@ -139,6 +163,15 @@ La colección `sesiones_refresh` guarda solo hashes de refresh tokens. La colecc
 `cuentas` guarda el correo normalizado como campo único. La rotación se hace con una
 actualización condicionada por el hash vigente, de modo que una sola solicitud
 concurrente puede consumir el token.
+
+La recuperación de contraseña usa la colección preexistente
+`restablecimientos_contrasena` (`_id` string Guid N, `accountId`, `tokenHash` SHA-256,
+`expiresAt`, `consumedAt`, `createdAt` y `failedAttempts`). Sus índices observados son
+`ux_restablecimientos_token` (único), `ix_restablecimientos_cuenta` y
+`ttl_restablecimientos_expires` (TTL 0 s). **No se añadió una migración nueva**: la
+colección ya forma parte del modelo externo aprobado; la API solo verifica sus índices
+en modo lectura y falla cerrada si faltan o divergen. La colección debe existir antes
+de habilitar la recuperación en un entorno; no se creó ni se modificó en esta historia.
 
 La API no crea colecciones ni índices al arrancar. La migración versionada `M01-001`
 se ejecuta con una herramienta separada:
@@ -190,6 +223,10 @@ solo lectura; si falta una garantía crítica, la API no opera esa colección.
 | `GET /health/live` | Proceso vivo. No consulta dependencias externas. |
 | `GET /health/ready` | Conectividad e índices M01 disponibles. Sin configuración o esquema válido responde `503`. |
 
+La colección externa `restablecimientos_contrasena` no forma parte de `M01-001`; su
+verificación de índices se ejecuta al invocar los endpoints de recuperación. Si falta
+o diverge, HU-006 responde `503` y no se declara operativa.
+
 ## Errores y OpenAPI
 
 - Errores homogéneos con `ProblemDetails`, incluyendo `traceId` y `errors` en validaciones.
@@ -218,6 +255,10 @@ solo lectura; si falta una garantía crítica, la API no opera esa colección.
   por código vencido o intentos agotados, `413`, `429` y `503`.
 - Reenvío de confirmación: `202` siempre que el formato sea válido, `400` por correo
   mal formado, `413`, `429` y `503`.
+- Recuperación de contraseña: solicitud `200` genérica para correo válido (exista o no
+  la cuenta), `400` por correo mal formado, `413`, `429` y `503`; confirmación `200`,
+  `400` por token inválido/reutilizado o contraseña inválida, `410` por token vencido o
+  intentos agotados, `413`, `429` y `503`.
 - Eliminación de cuenta: `204`, `400` sin confirmar la pérdida de información, `401`
   por contraseña incorrecta o sesión inválida, `413` y `503`.
 
@@ -241,7 +282,8 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
 `unihome_ci_verificacion`, se aplica únicamente `M01-001` a esa base temporal y las
-pruebas reales de identidad y bloqueo distribuido se ejecutan con TRX. El job falla
+pruebas reales de identidad, recuperación de contraseña y bloqueo distribuido se
+ejecutan con TRX. El job falla
 si MongoDB no inicia, si la migración no queda válida, si las pruebas se omiten o
 si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
 La ejecución manual de verificación
@@ -358,12 +400,12 @@ declara listo para el primer despliegue hasta completar esos pasos.
 
 ## Pendiente de M01 y decisiones abiertas
 
-- Recuperación de contraseña (EP-M01-06/07).
 - **DEC-09**: mensaje/código definitivo ante correo duplicado en el registro.
 - **DEC-10**: tratamiento de menores de edad y consentimiento aplicable.
 - Rate limiting de registro; aprobación de los umbrales provisionales de
-  login/refresh/confirmación/reenvío y del límite "por cuenta" de intentos de
-  confirmación (`VerificationCode.MaxConfirmationAttempts`).
+  login/refresh/confirmación/reenvío/recuperación y de los límites por cuenta/token de
+  intentos (`VerificationCode.MaxConfirmationAttempts`,
+  `PasswordResetToken.MaxAttempts`).
 - **EP-M01-09** (eliminar cuenta) implementado solo en lo exigido por la spec:
   borrado lógico y revocación de todas las sesiones. Pendiente: rechazo `409` por
   vínculos activos de propiedades/ocupación (M05/M09, HU-096) y la política de
@@ -372,10 +414,12 @@ declara listo para el primer despliegue hasta completar esos pasos.
   esta ruta: hoy no existe concepto de administrador en el dominio.
 - Definir proxy/`ForwardedHeaders` confiables para que el rate limit por IP no agrupe
   clientes detrás de un balanceador; la implementación actual no confía en cabeceras.
-- Logout invalida el refresh token de la sesión actual. El access token ya emitido
-  conserva como máximo sus 60 minutos de vigencia; si se requiere revocación inmediata
-  en todos los endpoints protegidos, debe aprobarse y añadirse la consulta de sesión al
-  middleware de autenticación.
+- Logout y recuperación de contraseña invalidan los refresh tokens de la cuenta, pero
+  el access token ya emitido conserva como máximo sus 60 minutos de vigencia. Si se
+  requiere revocación inmediata en todos los endpoints protegidos, debe aprobarse y
+  añadirse la consulta de sesión al middleware de autenticación.
+- La colección externa `restablecimientos_contrasena` no está incluida en `M01-001`;
+  su existencia e índices deben verificarse en cada entorno antes de habilitar HU-006.
 - Adopción de la migración `M01-001` en `unihome_desarrollo` requiere autorización
   explícita, usuario técnico verificado y respaldo/restauración comprobados. `apply`
   sigue bloqueado; solo el comando separado `promote` puede escribir, y aún no se ha

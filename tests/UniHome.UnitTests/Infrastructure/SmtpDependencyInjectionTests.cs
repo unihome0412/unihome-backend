@@ -19,6 +19,8 @@ public sealed class SmtpDependencyInjectionTests
         var sender = provider.GetRequiredService<IVerificationEmailSender>();
 
         Assert.IsType<UnconfiguredVerificationEmailSender>(sender);
+        Assert.IsType<UnconfiguredPasswordResetEmailSender>(
+            provider.GetRequiredService<IPasswordResetEmailSender>());
     }
 
     [Fact]
@@ -30,6 +32,8 @@ public sealed class SmtpDependencyInjectionTests
         var options = provider.GetRequiredService<IOptions<SmtpOptions>>().Value;
 
         Assert.IsType<SmtpVerificationEmailSender>(sender);
+        Assert.IsType<SmtpPasswordResetEmailSender>(
+            provider.GetRequiredService<IPasswordResetEmailSender>());
         Assert.Equal("smtp-relay.brevo.com", options.Host);
         Assert.Equal(SmtpOptions.RequiredPort, options.Port);
         Assert.True(options.UseStartTls);

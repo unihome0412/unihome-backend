@@ -22,6 +22,7 @@ SKIPPED = {"NotExecuted", "NotRunnable"}
 EXPECTED_TESTS = (
     "MongoIdentityPersistenceTests.RegistroLoginRefreshConcurrenteYLogout_DebeFuncionarContraMongoReal",
     "MongoPromotionLockPersistenceTests.BloqueoDistribuido_ExclusionMutua_RenovacionYFencingObsoleto_DebeFuncionarContraMongoReal",
+    "MongoPasswordResetPersistenceTests.ConsumoConcurrente_DebePersistirSoloHashYPermitirUnUnicoGanador",
 )
 
 

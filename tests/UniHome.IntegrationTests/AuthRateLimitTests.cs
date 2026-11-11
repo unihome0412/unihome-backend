@@ -80,6 +80,36 @@ public sealed class AuthRateLimitTests : IClassFixture<RateLimitedApiFactory>
             third.Content.Headers.ContentType?.MediaType);
     }
 
+    [Fact]
+    public async Task SolicitudRecuperacion_ExcedeElLimitePorIp_DebeResponder429()
+    {
+        using var first = await RequestResetAsync();
+        using var second = await RequestResetAsync();
+        using var third = await RequestResetAsync();
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, third.StatusCode);
+        Assert.Equal(
+            "application/problem+json",
+            third.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task ConfirmacionRecuperacion_ExcedeElLimitePorIp_DebeResponder429()
+    {
+        using var first = await ConfirmResetAsync();
+        using var second = await ConfirmResetAsync();
+        using var third = await ConfirmResetAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, first.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, third.StatusCode);
+        Assert.Equal(
+            "application/problem+json",
+            third.Content.Headers.ContentType?.MediaType);
+    }
+
     private Task<HttpResponseMessage> LoginAsync() =>
         _client.PostAsJsonAsync(
             "/api/v1/auth/login",
@@ -103,4 +133,18 @@ public sealed class AuthRateLimitTests : IClassFixture<RateLimitedApiFactory>
         _client.PostAsJsonAsync(
             "/api/v1/auth/confirmacion-correo/reenvio",
             new { correo = AuthTestHelpers.UniqueEmail() });
+
+    private Task<HttpResponseMessage> RequestResetAsync() =>
+        _client.PostAsJsonAsync(
+            "/api/v1/auth/recuperacion/solicitud",
+            new { correo = AuthTestHelpers.UniqueEmail() });
+
+    private Task<HttpResponseMessage> ConfirmResetAsync() =>
+        _client.PostAsJsonAsync(
+            "/api/v1/auth/recuperacion/confirmacion",
+            new
+            {
+                token = AuthTestHelpers.InvalidPasswordResetToken(),
+                nuevaContrasena = "NuevaClave1"
+            });
 }
