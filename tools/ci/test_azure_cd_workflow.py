@@ -46,12 +46,16 @@ class AzureCdWorkflowTests(unittest.TestCase):
             concurrency_key("workflow_dispatch", "refs/heads/main", True))
 
     def test_deploy_solo_es_manual_desde_main_con_todas_las_autorizaciones(self):
+        self.assertIn("if: ${{ !cancelled() &&", self.deploy)
         self.assertIn("github.event_name == 'workflow_dispatch'", self.deploy)
         self.assertIn("github.ref == 'refs/heads/main'", self.deploy)
         self.assertIn("inputs.deploy_to_azure == true", self.deploy)
         self.assertIn("vars.UNIHOME_ENABLE_AZURE_CD == 'true'", self.deploy)
+        self.assertIn("needs.detect-changes.outputs.code == 'true'", self.deploy)
         for job in DEPLOY_JOB_DEPENDENCIES:
             self.assertIn(job, self.deploy)
+            if job != "detect-changes":
+                self.assertIn(f"needs.{job}.result == 'success'", self.deploy)
 
     def test_deploy_tiene_oidc_environment_y_permisos_minimos(self):
         self.assertIn("environment: azure-dev", self.deploy)
@@ -124,6 +128,38 @@ class DeployGuardTests(unittest.TestCase):
         self.assertFalse(deploy_allowed(
             event_name="workflow_dispatch", ref="refs/heads/main",
             deploy_input=True, enabled=True, code_changed=True, needs=needs).allowed)
+
+    def test_cualquier_job_obligatorio_skipped_bloquea(self):
+        for job in DEPLOY_JOB_DEPENDENCIES:
+            needs = dict(self.needs)
+            needs[job] = "skipped"
+            self.assertFalse(deploy_allowed(
+                event_name="workflow_dispatch", ref="refs/heads/main",
+                deploy_input=True, enabled=True, code_changed=True,
+                needs=needs).allowed, job)
+
+    def test_quality_gate_fallido_bloquea(self):
+        needs = dict(self.needs)
+        needs["pr-quality-gate"] = "failure"
+        self.assertFalse(deploy_allowed(
+            event_name="workflow_dispatch", ref="refs/heads/main",
+            deploy_input=True, enabled=True, code_changed=True, needs=needs).allowed)
+
+    def test_cancelacion_bloquea(self):
+        self.assertFalse(deploy_allowed(
+            event_name="workflow_dispatch", ref="refs/heads/main",
+            deploy_input=True, enabled=True, code_changed=True,
+            needs=self.needs, cancelled=True).allowed)
+
+    def test_pact_optional_skipped_no_bloquea_si_obligatorios_ok(self):
+        # Pact no es dependencia directa de deploy-azure; su skip no debe
+        # sustituir la comprobación explícita de los needs obligatorios.
+        needs = dict(self.needs)
+        needs["pact-contract"] = "skipped"
+        self.assertTrue(deploy_allowed(
+            event_name="workflow_dispatch", ref="refs/heads/main",
+            deploy_input=True, enabled=True, code_changed=True,
+            needs=needs, cancelled=False).allowed)
 
     def test_rama_no_main_bloquea(self):
         self.assertFalse(deploy_allowed(

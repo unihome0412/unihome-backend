@@ -53,8 +53,11 @@ def deploy_allowed(
     enabled: bool,
     code_changed: bool,
     needs: dict[str, str],
+    cancelled: bool = False,
     required_jobs: Iterable[str] = DEPLOY_JOB_DEPENDENCIES,
 ) -> DeployDecision:
+    if cancelled:
+        return DeployDecision(False, "la ejecución fue cancelada")
     if event_name != "workflow_dispatch":
         return DeployDecision(False, "el deploy solo se permite en workflow_dispatch")
     if ref != "refs/heads/main":
