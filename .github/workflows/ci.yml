@@ -1461,8 +1461,11 @@ jobs:
 
   deploy-azure:
     name: Deploy Azure Container Apps (manual y aprobado)
+    # Explícito para no heredar el success() implícito del job: los skips de
+    # jobs opcionales transitivos (por ejemplo Pact) no deben omitir el deploy.
+    # Los needs obligatorios se exigen uno a uno como success.
     needs: [detect-changes, build-test, contract-test, docker-build, container-lint, pr-quality-gate, hardening-report]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: azure-dev
