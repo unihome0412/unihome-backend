@@ -93,23 +93,16 @@ public sealed class DistributedRateLimiterBridge : RateLimiter
     public override RateLimiterStatistics? GetStatistics() => null;
 
     /// <summary>
-    /// La adquisición sincrónica directa está prohibida para prevenir sync-over-async y agotamiento
-    /// de hilos en Kestrel (arrojando NotSupportedException). Cuando es invocado internamente por el
-    /// middleware de rate limiting de ASP.NET Core como fase de sondeo previo sincrónico (fast-path),
-    /// retorna un lease no adquirido para dirigir el flujo a la ruta asíncrona AcquireAsyncCore sin bloquear el hilo.
+    /// La adquisición distribuida requiere I/O asíncrona por red hacia Redis.
+    /// No se intenta consultar Redis desde la ruta sincrónica para prevenir sync-over-async
+    /// y agotamiento de hilos en Kestrel. Al retornar un lease no adquirido (IsAcquired=false),
+    /// ASP.NET Core procede de forma natural y no bloqueante por la ruta asíncrona AcquireAsyncCore.
     /// </summary>
     protected override RateLimitLease AttemptAcquireCore(int permitCount)
     {
-        var stackTrace = Environment.StackTrace;
-        if (stackTrace.Contains("Microsoft.AspNetCore.RateLimiting.RateLimitingMiddleware") ||
-            stackTrace.Contains("CombinedAcquire"))
-        {
-            return new DistributedRateLimitLease(isAcquired: false, retryAfter: TimeSpan.Zero);
-        }
-
-        throw new NotSupportedException(
-            "DistributedRateLimiterBridge no admite adquisición sincrónica porque la comunicación con Redis es asíncrona por red. " +
-            "El middleware de ASP.NET Core debe utilizar la ruta asíncrona AcquireAsync.");
+        return new DistributedRateLimitLease(
+            isAcquired: false,
+            retryAfter: TimeSpan.Zero);
     }
 
     protected override async ValueTask<RateLimitLease> AcquireAsyncCore(int permitCount, CancellationToken cancellationToken)

@@ -72,13 +72,16 @@ public sealed class RateLimiterBridgePipelineTests
     }
 
     [Fact]
-    public void Bridge_AttemptAcquireSincronoDirecto_LanzaNotSupportedException()
+    public void Bridge_AttemptAcquireSincronoDirecto_RetornaLeaseNoAdquiridoSinLanzarExcepcion()
     {
         var stub = new StubDistributedRateLimiter();
         var bridge = new DistributedRateLimiterBridge(stub, "partition-key", 10, TimeSpan.FromSeconds(60));
 
-        var ex = Assert.Throws<NotSupportedException>(() => bridge.AttemptAcquire(1));
-        Assert.Contains("asíncrona", ex.Message, StringComparison.OrdinalIgnoreCase);
+        using var lease = bridge.AttemptAcquire(1);
+
+        Assert.NotNull(lease);
+        Assert.False(lease.IsAcquired, "La ruta sincrónica preliminar no debe conceder permisos para forzar la ruta asíncrona por red.");
+        Assert.False(lease.TryGetMetadata(DistributedRateLimitLease.IsServiceUnavailableMetadataName, out _));
     }
 
     [Fact]

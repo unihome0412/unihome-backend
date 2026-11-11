@@ -133,10 +133,64 @@ public sealed class DistributedRedisIntegrationTests
         // Instancia 2 recibe la 4ta petición -> Debe ser rechazada con HTTP 429 gracias al contador compartido
         var r4 = await clientInstance2.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@share.com", contrasena = "Clave123!" });
         Assert.Equal(HttpStatusCode.TooManyRequests, r4.StatusCode);
+        Assert.NotNull(r4.Headers.RetryAfter);
 
         // Instancia 1 recibe la 5ta petición -> También debe ser rechazada con HTTP 429
         var r5 = await clientInstance1.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@share.com", contrasena = "Clave123!" });
         Assert.Equal(HttpStatusCode.TooManyRequests, r5.StatusCode);
+        Assert.NotNull(r5.Headers.RetryAfter);
+    }
+
+    private sealed class TrackingDistributedRateLimiter : IDistributedRateLimiter
+    {
+        public int InvocationCount { get; private set; }
+        public List<string> InvokedKeys { get; } = new();
+
+        public Task<RateLimitResult> CheckAndIncrementAsync(
+            string partitionKey,
+            int permitLimit,
+            TimeSpan window,
+            CancellationToken cancellationToken = default)
+        {
+            InvocationCount++;
+            InvokedKeys.Add(partitionKey);
+            return Task.FromResult(InvocationCount <= permitLimit
+                ? RateLimitResult.Allowed(InvocationCount, TimeSpan.FromSeconds(60))
+                : RateLimitResult.Exceeded(InvocationCount, TimeSpan.FromSeconds(45)));
+        }
+    }
+
+    [Fact]
+    public async Task PipelineHttp_AdquisicionAsincrona_InvocaProveedorDistribuidoYResponde429ConRetryAfter()
+    {
+        var trackingLimiter = new TrackingDistributedRateLimiter();
+
+        using var factory = new CustomRateLimitApiFactory(services =>
+        {
+            services.AddSingleton<IDistributedRateLimiter>(trackingLimiter);
+        });
+
+        using var client = factory.CreateClient();
+
+        // Peticiones dentro del límite (límite configurado = 3)
+        var r1 = await client.PostAsJsonAsync("/api/v1/auth/login", new { correo = "u@test.com", contrasena = "Pass123!" });
+        var r2 = await client.PostAsJsonAsync("/api/v1/auth/login", new { correo = "u@test.com", contrasena = "Pass123!" });
+        var r3 = await client.PostAsJsonAsync("/api/v1/auth/login", new { correo = "u@test.com", contrasena = "Pass123!" });
+
+        // Llegan al controlador (retorna 401 por credenciales incorrectas, no 429 ni 503)
+        Assert.Equal(HttpStatusCode.Unauthorized, r1.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, r2.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, r3.StatusCode);
+
+        // Confirma que el proveedor distribuido fue consultado asíncronamente 3 veces
+        Assert.Equal(3, trackingLimiter.InvocationCount);
+        Assert.All(trackingLimiter.InvokedKeys, k => Assert.StartsWith("unihome:rl:auth-login:", k));
+
+        // 4ta petición excede el límite
+        var r4 = await client.PostAsJsonAsync("/api/v1/auth/login", new { correo = "u@test.com", contrasena = "Pass123!" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, r4.StatusCode);
+        Assert.NotNull(r4.Headers.RetryAfter);
+        Assert.Equal(4, trackingLimiter.InvocationCount);
     }
 
     [Fact]
