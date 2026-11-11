@@ -123,9 +123,10 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   y asume una sola instancia del proceso (BE-SEC-009); MongoDB Atlas continúa siendo la única fuente
   de verdad para el estado de cuentas, suspensiones y revocación de sesiones. Para un futuro escalado
   a 2 réplicas se diseñó la propuesta documental ADR-006 (rate limiting distribuido atómico con Redis
-  en Upstash, actualmente planeada, no implementada en código y no desplegada en producción).
-  El comportamiento seguro ante caídas de Redis (fail-closed vs. degradación local) y las pruebas
-  de concurrencia entre dos réplicas constituyen trabajo planeado pendiente de validación por el equipo.
+  en Upstash, actualmente planeada, no implementada en código y no desplegada en el entorno de desarrollo
+  de Azure `rg-unihome-dev`). El comportamiento seguro ante caídas de Redis (fail-closed con HTTP 503
+  vs. degradación local con contadores independientes) y las pruebas de concurrencia entre dos réplicas
+  constituyen trabajo planeado pendiente de validación por el equipo.
 - Límite "por cuenta" de intentos de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
   (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como

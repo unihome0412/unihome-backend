@@ -10,7 +10,7 @@
 
 El requerimiento de infraestructura del curso (PDF v3, rúbrica de arquitectura y escalabilidad) exige desplegar el backend en al menos 2 réplicas (instancias) en Azure Container Apps.
 
-En la implementación actual del repositorio (`main`), la API opera con **1 sola réplica** (`minReplicas = 1`, `maxReplicas = 1`) y los contadores de intentos de autenticación por IP residen exclusivamente en la memoria RAM del proceso (`src/UniHome.Api/Program.cs:196-295` y `src/UniHome.Api/Configuration/AuthRateLimitOptions.cs:8-35`). Con 2 réplicas y un balanceador de carga, los límites por IP se fragmentan o duplican al repartirse el tráfico entre réplicas, comprometiendo la defensa contra fuerza bruta (BE-SEC-009).
+En la implementación actual del repositorio (`main`), la API opera con **1 sola réplica** (`minReplicas = 1`, `maxReplicas = 1`) en el entorno de desarrollo de Azure (`rg-unihome-dev`) y los contadores de intentos de autenticación por IP residen exclusivamente en la memoria RAM del proceso (`src/UniHome.Api/Program.cs:196-295` y `src/UniHome.Api/Configuration/AuthRateLimitOptions.cs:8-35`). Con 2 réplicas y un balanceador de carga, los límites por IP se fragmentan o duplican al repartirse el tráfico entre réplicas, comprometiendo la defensa contra fuerza bruta (BE-SEC-009).
 
 ### MongoDB como única fuente de verdad
 MongoDB Atlas continúa siendo la **única fuente de verdad** inmutable para:
@@ -23,7 +23,7 @@ La validación de cuenta activa en cada petición autenticada (BE-SEC-008, `src/
 
 ## 2. Alternativas evaluadas
 
-1. **Alternativa A:** Mantener instancia única del API. (Descartada para producción final: incumple el requisito del PDF v3 de correr al menos 2 réplicas).
+1. **Alternativa A:** Mantener instancia única del API. (Descartada para el despliegue final: incumple el requisito del PDF v3 de correr al menos 2 réplicas).
 2. **Alternativa B completa:** Redis para SignalR (M08), rate limiting y caché de datos. (Pospuesta: M08 no está codificado aún y el caché de cuenta no se requiere en esta fase).
 3. **Alternativa C (Propuesta):** Adopción acotada de Redis exclusivamente para rate limiting distribuido, con costo $0 y modo degradado seguro.
 
@@ -31,28 +31,36 @@ La validación de cuenta activa en cada petición autenticada (BE-SEC-008, `src/
 
 Se propone la adopción de Redis con **alcance estrictamente acotado**:
 
-### 3.1. Rate limiting distribuido
+### 3.1. Rate limiting distribuido, atomicidad y proxies confiables
 - **Operaciones atómicas:** Los contadores por IP para endpoints de autenticación (`src/UniHome.Api/Controllers/AuthController.cs`) se sincronizan en Redis mediante un script Lua atómico (1 comando por intento con `EVALSHA` / `EVAL`), garantizando lectura, incremento y validación sin condiciones de carrera.
 - **TTL obligatorio:** Cada clave en Redis se almacena con un TTL de expiración estricto coincidente con la ventana temporal configurada (p. ej. 60 segundos), evitando la acumulación indefinida de claves en memoria.
 - **Identificación segura:** Seudonimización de la IP del cliente con hash SHA-256 junto con una sal criptográfica dedicada (`Auth:RateLimit:IpHashSalt`).
-- **Tratamiento seguro de cabeceras:** La IP real del cliente se extrae mediante `ForwardedHeadersMiddleware` configurado con `ForwardLimit = 1` para confiar únicamente en el proxy de ingress de Azure Container Apps.
+- **Tratamiento seguro de cabeceras y proxies:**
+  - La propuesta técnica contempla el uso de `ForwardedHeadersMiddleware` para extraer la IP real del cliente detrás del balanceador de Azure Container Apps.
+  - Se aclara que fijar `ForwardLimit = 1` limita la cantidad de saltos de encabezado procesados pero **NO constituye una garantía suficiente contra spoofing por sí solo**.
+  - Es indispensable configurar la confianza explícita en los proxies de infraestructura mediante `KnownProxies` o `KnownIPNetworks` conforme a la topología real de red e ingress de Azure Container Apps.
+  - Queda prohibido aceptar encabezados `X-Forwarded-For` o equivalentes provenientes de proxies no confiables.
+  - La configuración concreta de IPs y redes de confianza debe verificarse durante la implementación técnica (no se inventan direcciones IP ni rangos de red en esta fase documental); la extracción y seudonimización de IP es una propuesta pendiente de implementación y validación.
 
-### 3.2. Comportamiento ante fallos de Redis
-Se contemplan cinco escenarios de contingencia:
+### 3.2. Comportamiento ante fallos de Redis y modo degradado
+Se contemplan cinco condiciones de falla técnica:
 1. **Redis no disponible:** Interrupción del servicio de Upstash.
 2. **Pérdida de conexión:** Caídas intermitentes de red o desconexión del cliente.
-3. **Agotamiento de cuota:** Superación del límite gratuito de 500,000 comandos o 10 GB de ancho de banda.
+3. **Agotamiento de cuota:** Superación del límite gratuito de 500,000 comandos o 10 GB de ancho de banda en Upstash.
 4. **Latencia elevada:** Picos de latencia en la nube; se aplicará un timeout estricto de conexión/comando (p. ej. 250 ms) para evitar el agotamiento de hilos en Kestrel.
 5. **Fallo en script Lua:** Error de compilación o ejecución en el motor de Redis.
 
-**Aclaración crítica sobre límites en modo degradado:**
-Un fallback local en memoria RAM **NO** mantiene un límite global compartido. Al particionarse el tráfico entre 2 réplicas, cada réplica contabiliza con contadores locales independientes, lo que en la práctica duplica el límite total admisible de peticiones o provoca bloqueos prematuros en usuarios legítimos bajo redes NAT compartidas si el balanceador distribuye las solicitudes de forma asimétrica.
+**Aclaración crítica sobre límites y semántica de códigos HTTP:**
+- Un fallback local en memoria RAM **NO** mantiene un límite global compartido. Al particionarse el tráfico entre 2 réplicas, cada réplica contabiliza con contadores locales independientes, lo que en la práctica duplica el límite total admisible de peticiones o provoca bloqueos prematuros en usuarios legítimos bajo redes NAT compartidas si el balanceador distribuye las solicitudes de forma asimétrica.
+- El código **HTTP 429 (Too Many Requests)** se reserva exclusivamente para solicitudes que han sido evaluadas correctamente por el limitador y superan el cupo o límite de tasa permitido dentro de la ventana de tiempo.
+- Agotar la cuota mensual de comandos de Upstash (500,000 comandos) o una caída de conexión **NO** significa que el usuario haya excedido su límite de solicitudes; se trata de una indisponibilidad técnica de la dependencia externa.
+- El código **HTTP 503 (Service Unavailable)** se contempla para rechazar temporalmente solicitudes cuando Redis no esté disponible, se produzca timeout o falle la dependencia, *únicamente si el equipo ratifica la política Fail-Closed*.
 
-**Política de seguridad para endpoints sensibles:**
+**Alternativas de contingencia para endpoints sensibles:**
 Para los endpoints críticos de autenticación (Login, Registro, Refresh, Confirmación de correo), el equipo debe formalizar la política aplicable:
-- *Opción Fail-Closed:* Rechazar peticiones de autenticación con código **HTTP 503 (Service Unavailable)** ante indisponibilidad técnica o timeout de Redis para garantizar protección estricta contra ataques de fuerza bruta; el código **HTTP 429 (Too Many Requests)** queda reservado exclusivamente para solicitudes legítimamente evaluadas que exceden el cupo o límite de tasa permitido.
-- *Opción Fail-Open / Degradación local:* Permitir la continuidad del servicio degradando temporalmente a contadores locales en memoria por réplica (asumiendo que el límite global no se garantiza y emitiendo HTTP 429 si el contador local de la réplica se satura).
-- *Estado de la decisión:* **[DECISIÓN PENDIENTE DE VALIDACIÓN Y CONSENSO DEL EQUIPO POR JESUI Y BRIDGET]**. No se asumirá una decisión preaprobada hasta contar con el consenso del equipo.
+- *Alternativa Fail-Closed:* Rechazar peticiones de autenticación con código **HTTP 503 (Service Unavailable)** ante indisponibilidad técnica o timeout de Redis para garantizar protección estricta contra ataques de fuerza bruta.
+- *Alternativa Fail-Open / Degradación local:* Permitir la continuidad del servicio degradando temporalmente a contadores locales en memoria por réplica (asumiendo que el límite global no se garantiza y emitiendo HTTP 429 si el contador local de la réplica se satura).
+- *Estado de la decisión:* **[DECISIÓN PENDIENTE DE VALIDACIÓN Y CONSENSO DEL EQUIPO POR JESUI Y BRIDGET]**. No se asumirá ninguna alternativa como decisión aprobada hasta contar con el consenso del equipo.
 
 ### 3.3. Independencia de Health Checks
 La disponibilidad de Redis no forma parte del probe de preparación (`/health/ready`). La API se considera lista mientras el proceso esté activo y MongoDB Atlas responda.
@@ -68,12 +76,22 @@ La disponibilidad de Redis no forma parte del probe de preparación (`/health/re
 *Fecha de consulta y fuentes: 2026-11-09 y 2026-11-10.*
 
 - **Upstash Redis plan gratuito:** 500,000 comandos al mes, **256 MB** de almacenamiento (conforme a los límites oficiales del plan Free en https://upstash.com/pricing/redis, consultado el 2026-11-10; los 250 MB corresponden al plan de pago Fixed/Pay-as-you-go, no al nivel gratuito), 10 GB de transferencia de datos mensual, 1 base de datos, sin listas de control de acceso (ACLs) ni cifrado en reposo. No requiere tarjeta bancaria para operar en el nivel gratuito.
-- **Presupuesto mensual en Azure (rg-unihome-dev):** Se encuentra configurado un presupuesto formal en Azure Cost Management denominado `unihome-dev-budget` por un monto de **US$25.00 mensuales**, con alertas automáticas al 50% (US$12.50), 80% (US$20.00) y 100% (US$25.00) notificadas al correo del proyecto `unihome0412@gmail.com`. El gasto acumulado actual verificado es de **US$0.00**.
+- **Presupuesto mensual en Azure (rg-unihome-dev):** Se encuentra configurado un presupuesto formal en Azure Cost Management denominado `unihome-dev-budget` por un monto de **US$25.00 mensuales**, con alertas automáticas al 50% (US$12.50), 80% (US$20.00) y 100% (US$25.00) notificadas al correo del proyecto `unihome0412@gmail.com`. El gasto acumulado actual verificado en el entorno de desarrollo es de **US$0.00**.
 - **Separación estricta de presupuestos y costos:**
-  1. El presupuesto mensual de US$25 de Azure supervisa únicamente los recursos desplegados en el Resource Group de Azure (`rg-unihome-dev`) y **NO** cubre, limita ni supervisa los consumos de Upstash Redis en su nube independiente.
+  1. El presupuesto mensual de US$25 de Azure supervisa únicamente los recursos desplegados en el Resource Group de desarrollo (`rg-unihome-dev`) y **NO** cubre, limita ni supervisa los consumos de Upstash Redis en su nube independiente.
   2. El presupuesto de Azure no es un tope de gasto para Upstash ni garantiza la ausencia de cobros si se sobrepasan los límites del proveedor externo.
-  3. Para Upstash, la garantía preventiva de costo cero consiste en **no registrar tarjeta de crédito** en la plataforma, forzando la detención del servicio en lugar de cobros por exceso.
-- **Auditoría de consumo antes de escalar:** Operar 2 réplicas permanentes 24/7 en Azure Container Apps consume 1,296,000 vCPU-segundos/mes, superando la cuota mensual gratuita de 180,000 vCPU-segundos del plan Consumption. Por tanto, antes de activar 2 réplicas continuas se debe auditar el crédito restante de la suscripción (que vence el 3 de diciembre de 2026).
+  3. Para Upstash, no se autoriza una actualización automática a un plan de pago; la regla preventiva de control de costos consiste en **no registrar tarjeta bancaria** en la cuenta.
+  4. [NO VERIFICADO]: El comportamiento exacto de Upstash al alcanzar el tope mensual gratuito (rechazo de comandos con código de error, limitación de tasa/throttling o suspensión temporal de la base hasta el siguiente ciclo de facturación) debe verificarse en la documentación oficial vigente y mediante pruebas controladas; no se asume como hecho garantizado que la falta de tarjeta fuerce una detención sin confirmar previamente la política del proveedor.
+- **Cálculo teórico de consumo en Azure Container Apps (entorno de desarrollo):**
+  - Cuota mensual gratuita por suscripción en plan Consumption: 180,000 vCPU-segundos, 360,000 GiB-segundos y 2 millones de peticiones (fuente: https://learn.microsoft.com/azure/container-apps/billing).
+  - **Escenario teórico de escalado a 2 réplicas continuas (24/7):**
+    * Consumo vCPU: 2 réplicas × 0.25 vCPU × 30 días × 24 horas × 3,600 segundos = **1,296,000 vCPU-segundos mensuales**.
+    * Consumo memoria RAM: 2 réplicas × 0.5 GiB × 30 días × 24 horas × 3,600 segundos = **2,592,000 GiB-segundos mensuales**.
+  - **Aclaraciones y supuestos del cálculo:**
+    * Este cálculo representa un **escenario teórico de actividad continua (24/7 sin escala a cero)**; no constituye una factura exacta ni una predicción garantizada.
+    * El modelo de facturación de Container Apps distingue entre consumo activo (procesando peticiones) y consumo inactivo (idle), por lo que si las réplicas escalan o no reciben carga continua, el consumo real puede variar.
+    * Ambos valores teóricos (1.29M vCPU-s y 2.59M GiB-s) superan las cuotas mensuales gratuitas (180k vCPU-s y 360k GiB-s), consumiendo saldo del crédito de la suscripción (que vence el 3 de diciembre de 2026).
+    * [PENDIENTE DE VALIDACIÓN]: La tasa de facturación residual neta una vez agotada la cuota mensual gratuita frente al crédito disponible antes de fijar `minReplicas = 2` permanentemente en el entorno de desarrollo.
 - **Estimación de comandos de Redis para rate limiting:**
   - Supuesto de tráfico de evaluación: 100 a 500 intentos de autenticación diarios (~3,000 a 15,000 comandos al mes con 1 invocación Lua atómica por intento).
   - Proyección: ~15,000 comandos al mes representan aproximadamente el 3% del cupo mensual de 500,000 comandos de Upstash.
@@ -89,12 +107,6 @@ La disponibilidad de Redis no forma parte del probe de preparación (`/health/re
   4. *Contract Test (OpenAPI):* 10 pruebas en `OpenApiGenderContractTests.cs` verificadas (verificado en Run #128 y Run #121).
   5. *DAST pasivo (OWASP ZAP):* Job `dast-zap` ejecutando `zaproxy:2.17.0` con API Kestrel local, MongoDB y SMTP mock local (`tools/ci/zap_dast.py`, verificado en verde en Run #121 y ejecución manual `42772939746`).
   6. *RESTler Fuzzing:* Job `restler-fuzzing` con Microsoft RESTler v9.3.1 en modo fuzz-lean aislado sobre 7 operaciones OpenAPI (verificado en verde en Run #121 con 2,054 peticiones y 0 errores 500).
-  1. *Build, formato y pruebas unitarias (.NET 10):* Ejecución limpia en cada commit/PR.
-  2. *Análisis estático de seguridad (SAST) y dependencias:* Semgrep, Gitleaks, Dependabot, CodeQL y SonarCloud en verde.
-  3. *Database Test (MongoDB efímero):* Job `mongo-db-test` con contenedor `mongo:8.0.34` fijado por digest en runner, base de datos `unihome_ci_verificacion` y validador TRX `tools/ci/mongo_ci_summary.py` (verificado en verde en Run #121).
-  4. *Contract Test (OpenAPI):* 10 pruebas en `OpenApiGenderContractTests.cs` verificadas.
-  5. *DAST pasivo (OWASP ZAP):* Job `dast-zap` ejecutando `zaproxy:2.17.0` con API Kestrel local, MongoDB y SMTP mock local (`tools/ci/zap_dast.py`, verificado en verde en Run #121).
-  6. *RESTler Fuzzing:* Job `restler-fuzzing` con Microsoft RESTler v9.3.1 en modo fuzz-lean aislado sobre 7 operaciones OpenAPI (verificado en verde en Run #121 con 2,054 peticiones y 0 errores 500).
 - **Pruebas planeadas o pendientes (sin ejecución real o bloqueadas):**
   1. *Pact Contract Testing:* El proyecto proveedor `UniHome.PactTests` está compilado, pero la suite está bloqueada e inactiva (`vars.UNIHOME_ENABLE_PACT`) debido a que la carpeta `pacts/` no contiene contratos JSON reales entregados por el equipo del cliente Android (`unihome-mobile`).
   2. *Pruebas de concurrencia y consistencia de rate limiting entre 2 instancias:* **Trabajo planeado**. Requieren levantar en CI dos instancias simultáneas de la API conectadas al mismo Redis efímero para validar que el límite global es compartido y atómico.
@@ -109,9 +121,9 @@ La disponibilidad de Redis no forma parte del probe de preparación (`/health/re
 
 ## 8. Estado actual del despliegue
 
-- **Redis NO está desplegado** en ninguna instancia de Upstash asociada a producción.
-- **Las 2 réplicas NO están desplegadas**: la API `unihome-api` en `rg-unihome-dev` tiene exactamente **1 sola réplica activa** (`minReplicas = 1`, `maxReplicas = 1`).
-- La arquitectura distribuida con Redis y el escalado a 2 réplicas constituyen una **mejora planeada para una etapa posterior** (posterior a la ratificación del ADR y a su implementación en código).
+- **Redis NO está desplegado** en ninguna instancia de Upstash asociada al entorno de desarrollo.
+- **Las 2 réplicas NO están desplegadas**: la API `unihome-api` en el entorno de desarrollo `rg-unihome-dev` tiene exactamente **1 sola réplica activa** (`minReplicas = 1`, `maxReplicas = 1`).
+- La arquitectura distribuida con Redis y el escalado a 2 réplicas constituyen una **propuesta documental planeada para una etapa posterior** (posterior a la ratificación del ADR y a su implementación en código).
 
 ## 9. Criterios de aprobación
 
