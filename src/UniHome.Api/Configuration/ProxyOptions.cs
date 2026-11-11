@@ -11,4 +11,14 @@ public sealed class ProxyOptions
     public const string SectionName = "Proxy";
 
     public bool TrustForwardedHeaders { get; set; }
+
+    /// <summary>
+    /// Lista explícita de direcciones IP individuales de proxies de confianza (KnownProxies).
+    /// </summary>
+    public List<string> KnownProxies { get; set; } = [];
+
+    /// <summary>
+    /// Lista explícita de redes CIDR de proxies de confianza (KnownIPNetworks, ej. "10.0.0.0/16").
+    /// </summary>
+    public List<string> KnownNetworks { get; set; } = [];
 }

@@ -1,0 +1,139 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using UniHome.Application.Abstractions.RateLimiting;
+using UniHome.Infrastructure.Redis;
+
+namespace UniHome.IntegrationTests.RateLimiting;
+
+public sealed class DistributedRedisIntegrationTests
+{
+    private sealed class FailingDistributedRateLimiter : IDistributedRateLimiter
+    {
+        private readonly bool _isUnavailable;
+
+        public FailingDistributedRateLimiter(bool isUnavailable)
+        {
+            _isUnavailable = isUnavailable;
+        }
+
+        public Task<RateLimitResult> CheckAndIncrementAsync(
+            string partitionKey,
+            int permitLimit,
+            TimeSpan window,
+            CancellationToken cancellationToken = default)
+        {
+            return _isUnavailable
+                ? Task.FromResult(RateLimitResult.ServiceUnavailable("Simulated Redis Outage"))
+                : Task.FromResult(RateLimitResult.Allowed(0, TimeSpan.Zero));
+        }
+    }
+
+    private sealed class CustomRateLimitApiFactory : UniHomeApiFactory
+    {
+        private readonly Action<IServiceCollection>? _configureServices;
+
+        public CustomRateLimitApiFactory(Action<IServiceCollection>? configureServices = null)
+        {
+            _configureServices = configureServices;
+        }
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Auth:RateLimit:LoginPermitLimit"] = "3",
+                    ["Auth:RateLimit:LoginWindowSeconds"] = "60"
+                });
+            });
+
+            if (_configureServices is not null)
+            {
+                builder.ConfigureTestServices(_configureServices);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task MultiplesInstancias_CompartenContadorDistribuidoEnHttp()
+    {
+        // Simulamos un backend distribuido de Redis compartido entre dos réplicas API (Instancia 1 e Instancia 2)
+        var sharedRedisStore = new InMemoryDistributedRateLimiter();
+
+        using var factory1 = new CustomRateLimitApiFactory(services =>
+        {
+            services.AddSingleton<IDistributedRateLimiter>(sharedRedisStore);
+        });
+
+        using var factory2 = new CustomRateLimitApiFactory(services =>
+        {
+            services.AddSingleton<IDistributedRateLimiter>(sharedRedisStore);
+        });
+
+        using var clientInstance1 = factory1.CreateClient();
+        using var clientInstance2 = factory2.CreateClient();
+
+        // Instancia 1 recibe 2 peticiones (Límite configurado = 3)
+        var r1 = await clientInstance1.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@share.com", contrasena = "Clave123!" });
+        var r2 = await clientInstance1.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@share.com", contrasena = "Clave123!" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, r1.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, r2.StatusCode);
+
+        // Instancia 2 recibe la 3ra petición (Alcanza el límite global de 3)
+        var r3 = await clientInstance2.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@share.com", contrasena = "Clave123!" });
+        Assert.Equal(HttpStatusCode.Unauthorized, r3.StatusCode);
+
+        // Instancia 2 recibe la 4ta petición -> Debe ser rechazada con HTTP 429 gracias al contador compartido
+        var r4 = await clientInstance2.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@share.com", contrasena = "Clave123!" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, r4.StatusCode);
+
+        // Instancia 1 recibe la 5ta petición -> También debe ser rechazada con HTTP 429
+        var r5 = await clientInstance1.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@share.com", contrasena = "Clave123!" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, r5.StatusCode);
+    }
+
+    [Fact]
+    public async Task RedisFalla_EnModoFailClosed_ApiResponde503ServiceUnavailable()
+    {
+        using var factory = new CustomRateLimitApiFactory(services =>
+        {
+            services.AddSingleton<IDistributedRateLimiter>(new FailingDistributedRateLimiter(isUnavailable: true));
+        });
+
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@failclosed.com", contrasena = "Clave123!" });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(503, document.RootElement.GetProperty("status").GetInt32());
+        Assert.Contains("no disponible temporalmente", document.RootElement.GetProperty("detail").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RedisFalla_EnModoFailOpen_ApiPermitePeticionSin429()
+    {
+        using var factory = new CustomRateLimitApiFactory(services =>
+        {
+            services.AddSingleton<IDistributedRateLimiter>(new FailingDistributedRateLimiter(isUnavailable: false));
+        });
+
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/auth/login", new { correo = "test@failopen.com", contrasena = "Clave123!" });
+
+        // Debe permitir pasar al controlador de auth (retorna 401 Unauthorized por clave falsa, NO 429 ni 503)
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+}

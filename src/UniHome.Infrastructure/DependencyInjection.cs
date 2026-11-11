@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Abstractions.Storage;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Infrastructure.Configuration;
@@ -9,6 +10,7 @@ using UniHome.Infrastructure.Identity;
 using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Accounts;
 using UniHome.Infrastructure.Persistence.Mongo.Sessions;
+using UniHome.Infrastructure.Redis;
 
 namespace UniHome.Infrastructure;
 
@@ -36,6 +38,22 @@ public static class DependencyInjection
         services
             .AddOptions<JwtOptions>()
             .Bind(configuration.GetSection(JwtOptions.SectionName));
+
+        services
+            .AddOptions<RedisOptions>()
+            .Bind(configuration.GetSection(RedisOptions.SectionName));
+
+        var redisSection = configuration.GetSection(RedisOptions.SectionName);
+        var redisOptions = redisSection.Get<RedisOptions>() ?? new RedisOptions();
+
+        if (redisOptions.Enabled)
+        {
+            services.AddSingleton<IDistributedRateLimiter, UpstashRedisDistributedRateLimiter>();
+        }
+        else
+        {
+            services.AddSingleton<IDistributedRateLimiter, InMemoryDistributedRateLimiter>();
+        }
 
         // La sección Smtp es opcional para desarrollo y pruebas. Si existe
         // cualquier clave, se valida completa al arrancar y no se permite usar

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -20,6 +21,7 @@ using Microsoft.OpenApi;
 using UniHome.Api.Configuration;
 using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
+using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Identity.ConfirmEmail;
 using UniHome.Application.Identity.DeleteAccount;
@@ -186,12 +188,36 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
     options.ForwardLimit = 1;
 
-    // El valor predeterminado solo confía en el salto inmediato si viene de
-    // loopback. El ingress de Container Apps no tiene una IP conocida y fija;
-    // activar Proxy:TrustForwardedHeaders ya es la declaración explícita de que
-    // la topología solo permite llegar al contenedor a través de ese ingress.
-    options.KnownIPNetworks.Clear();
-    options.KnownProxies.Clear();
+    var proxyConfig = builder.Configuration.GetSection(ProxyOptions.SectionName).Get<ProxyOptions>();
+    if (proxyConfig != null && (proxyConfig.KnownProxies.Count > 0 || proxyConfig.KnownNetworks.Count > 0))
+    {
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
+
+        foreach (var proxy in proxyConfig.KnownProxies)
+        {
+            if (IPAddress.TryParse(proxy, out var ip))
+            {
+                options.KnownProxies.Add(ip);
+            }
+        }
+
+        foreach (var network in proxyConfig.KnownNetworks)
+        {
+            var parts = network.Split('/');
+            if (parts.Length == 2 && IPAddress.TryParse(parts[0], out var prefix) && int.TryParse(parts[1], out var prefixLength))
+            {
+                options.KnownIPNetworks.Add(new System.Net.IPNetwork(prefix, prefixLength));
+            }
+        }
+    }
+    else if (proxyConfig?.TrustForwardedHeaders == true)
+    {
+        // El ingress de Container Apps en Azure no tiene IP estática predecible en el nivel de red de desarrollo;
+        // activar TrustForwardedHeaders sin proxies conocidos limpia las redes por defecto pero preserva ForwardLimit = 1.
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
+    }
 });
 
 builder.Services.AddRateLimiter(options =>
@@ -200,6 +226,24 @@ builder.Services.AddRateLimiter(options =>
 
     options.OnRejected = async (context, cancellationToken) =>
     {
+        // 1. Distinguir HTTP 503 (indisponibilidad técnica de Redis) de HTTP 429 (límite superado)
+        if (context.Lease.TryGetMetadata(DistributedRateLimitLease.IsServiceUnavailableMetadataName, out var isUnavailableObj) &&
+            isUnavailableObj is true)
+        {
+            context.HttpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+
+            var unavailableProblem = ApiProblemDetails.Create(
+                context.HttpContext,
+                StatusCodes.Status503ServiceUnavailable,
+                detail: "Servicio de control de tasa no disponible temporalmente. Intente más tarde.");
+
+            await ApiProblemDetailsWriter
+                .WriteAsync(context.HttpContext, unavailableProblem, cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        // 2. HTTP 429 (límite superado)
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
         {
             context.HttpContext.Response.Headers.RetryAfter = Math
@@ -225,16 +269,18 @@ builder.Services.AddRateLimiter(options =>
             var limits = httpContext.RequestServices
                 .GetRequiredService<IOptions<AuthRateLimitOptions>>()
                 .Value;
+            var distributedLimiter = httpContext.RequestServices
+                .GetRequiredService<IDistributedRateLimiter>();
+            var partitionKey = GetClientPartitionKey(httpContext, limits.IpHashSalt);
+            var redisKey = $"unihome:rl:{AuthRateLimitPolicies.Login}:{partitionKey}";
 
-            return RateLimitPartition.GetFixedWindowLimiter(
-                GetClientPartitionKey(httpContext),
-                _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = Math.Max(1, limits.LoginPermitLimit),
-                    Window = TimeSpan.FromSeconds(Math.Max(1, limits.LoginWindowSeconds)),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                });
+            return RateLimitPartition.Get(
+                redisKey,
+                key => new DistributedRateLimiterBridge(
+                    distributedLimiter,
+                    key,
+                    Math.Max(1, limits.LoginPermitLimit),
+                    TimeSpan.FromSeconds(Math.Max(1, limits.LoginWindowSeconds))));
         });
 
     options.AddPolicy(
@@ -244,16 +290,18 @@ builder.Services.AddRateLimiter(options =>
             var limits = httpContext.RequestServices
                 .GetRequiredService<IOptions<AuthRateLimitOptions>>()
                 .Value;
+            var distributedLimiter = httpContext.RequestServices
+                .GetRequiredService<IDistributedRateLimiter>();
+            var partitionKey = GetClientPartitionKey(httpContext, limits.IpHashSalt);
+            var redisKey = $"unihome:rl:{AuthRateLimitPolicies.Refresh}:{partitionKey}";
 
-            return RateLimitPartition.GetFixedWindowLimiter(
-                GetClientPartitionKey(httpContext),
-                _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = Math.Max(1, limits.RefreshPermitLimit),
-                    Window = TimeSpan.FromSeconds(Math.Max(1, limits.RefreshWindowSeconds)),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                });
+            return RateLimitPartition.Get(
+                redisKey,
+                key => new DistributedRateLimiterBridge(
+                    distributedLimiter,
+                    key,
+                    Math.Max(1, limits.RefreshPermitLimit),
+                    TimeSpan.FromSeconds(Math.Max(1, limits.RefreshWindowSeconds))));
         });
 
     options.AddPolicy(
@@ -263,16 +311,18 @@ builder.Services.AddRateLimiter(options =>
             var limits = httpContext.RequestServices
                 .GetRequiredService<IOptions<AuthRateLimitOptions>>()
                 .Value;
+            var distributedLimiter = httpContext.RequestServices
+                .GetRequiredService<IDistributedRateLimiter>();
+            var partitionKey = GetClientPartitionKey(httpContext, limits.IpHashSalt);
+            var redisKey = $"unihome:rl:{AuthRateLimitPolicies.ConfirmEmail}:{partitionKey}";
 
-            return RateLimitPartition.GetFixedWindowLimiter(
-                GetClientPartitionKey(httpContext),
-                _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = Math.Max(1, limits.ConfirmEmailPermitLimit),
-                    Window = TimeSpan.FromSeconds(Math.Max(1, limits.ConfirmEmailWindowSeconds)),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                });
+            return RateLimitPartition.Get(
+                redisKey,
+                key => new DistributedRateLimiterBridge(
+                    distributedLimiter,
+                    key,
+                    Math.Max(1, limits.ConfirmEmailPermitLimit),
+                    TimeSpan.FromSeconds(Math.Max(1, limits.ConfirmEmailWindowSeconds))));
         });
 
     options.AddPolicy(
@@ -282,16 +332,18 @@ builder.Services.AddRateLimiter(options =>
             var limits = httpContext.RequestServices
                 .GetRequiredService<IOptions<AuthRateLimitOptions>>()
                 .Value;
+            var distributedLimiter = httpContext.RequestServices
+                .GetRequiredService<IDistributedRateLimiter>();
+            var partitionKey = GetClientPartitionKey(httpContext, limits.IpHashSalt);
+            var redisKey = $"unihome:rl:{AuthRateLimitPolicies.Resend}:{partitionKey}";
 
-            return RateLimitPartition.GetFixedWindowLimiter(
-                GetClientPartitionKey(httpContext),
-                _ => new FixedWindowRateLimiterOptions
-                {
-                    PermitLimit = Math.Max(1, limits.ResendPermitLimit),
-                    Window = TimeSpan.FromSeconds(Math.Max(1, limits.ResendWindowSeconds)),
-                    QueueLimit = 0,
-                    AutoReplenishment = true
-                });
+            return RateLimitPartition.Get(
+                redisKey,
+                key => new DistributedRateLimiterBridge(
+                    distributedLimiter,
+                    key,
+                    Math.Max(1, limits.ResendPermitLimit),
+                    TimeSpan.FromSeconds(Math.Max(1, limits.ResendWindowSeconds))));
         });
 });
 
@@ -496,7 +548,7 @@ app.MapControllers();
 
 app.Run();
 
-static string GetClientPartitionKey(HttpContext context) =>
-    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+static string GetClientPartitionKey(HttpContext context, string? salt) =>
+    ClientIpHasher.Hash(context.Connection.RemoteIpAddress?.ToString(), salt);
 
 public partial class Program;
