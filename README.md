@@ -119,9 +119,14 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   segundos por IP; `RefreshPermitLimit` / `RefreshWindowSeconds` valen 20 por 60
   segundos; `ConfirmEmailPermitLimit` / `ConfirmEmailWindowSeconds` valen 10 por 60;
   `ResendPermitLimit` / `ResendWindowSeconds` valen 5 por 60. Son umbrales
-  provisionales pendientes de aprobación. El limitador es en memoria y asume una sola
-  instancia del proceso (BE-SEC-009); escalar horizontalmente requiere el ADR de
-  estado distribuido.
+  provisionales pendientes de aprobación. El limitador actual es estrictamente en memoria
+  y asume una sola instancia del proceso (BE-SEC-009); MongoDB Atlas continúa siendo la única fuente
+  de verdad para el estado de cuentas, suspensiones y revocación de sesiones. Para un futuro escalado
+  a 2 réplicas se diseñó la propuesta documental ADR-006 en el SDD compartido (`UniHome_Backend_SDD_v3_propuesta_redis/docs/adr/006-signalr-rate-limit-estado.md`) (rate limiting distribuido atómico con Redis
+  en Upstash, actualmente planeada, no implementada en código y no desplegada en el entorno de desarrollo
+  de Azure `rg-unihome-dev`). El comportamiento seguro ante caídas de Redis (fail-closed con HTTP 503
+  vs. degradación local con contadores independientes) y las pruebas de concurrencia entre dos réplicas
+  constituyen trabajo planeado pendiente de validación por el equipo.
 - Límite "por cuenta" de intentos de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
   (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como
@@ -361,9 +366,10 @@ declara listo para el primer despliegue hasta completar esos pasos.
 - Recuperación de contraseña (EP-M01-06/07).
 - **DEC-09**: mensaje/código definitivo ante correo duplicado en el registro.
 - **DEC-10**: tratamiento de menores de edad y consentimiento aplicable.
-- Rate limiting de registro; aprobación de los umbrales provisionales de
-  login/refresh/confirmación/reenvío y del límite "por cuenta" de intentos de
-  confirmación (`VerificationCode.MaxConfirmationAttempts`).
+- Rate limiting de registro (planeado en propuesta ADR-006 a 5 intentos/minuto);
+  aprobación de los umbrales provisionales de login/refresh/confirmación/reenvío
+  y del límite "por cuenta" de intentos de confirmación
+  (`VerificationCode.MaxConfirmationAttempts`).
 - **EP-M01-09** (eliminar cuenta) implementado solo en lo exigido por la spec:
   borrado lógico y revocación de todas las sesiones. Pendiente: rechazo `409` por
   vínculos activos de propiedades/ocupación (M05/M09, HU-096) y la política de
