@@ -1,0 +1,4 @@
+# Gitleaks ignore list for verified test fixtures in historical commits.
+# Both findings correspond to dummy test values in ProductionMisconfiguredApiFactory (commit 2a6f398).
+2a6f398c869a6dbef26ac64bb133475688f2f3b9:tests/UniHome.IntegrationTests/RateLimiting/DistributedRedisIntegrationTests.cs:generic-api-key:77
+2a6f398c869a6dbef26ac64bb133475688f2f3b9:tests/UniHome.IntegrationTests/RateLimiting/DistributedRedisIntegrationTests.cs:generic-api-key:78

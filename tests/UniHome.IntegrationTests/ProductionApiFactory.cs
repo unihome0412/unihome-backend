@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Infrastructure.Redis;
 using UniHome.IntegrationTests.TestSupport;
 
 namespace UniHome.IntegrationTests;
@@ -23,23 +25,40 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
     public const string TestVerificationCodeHmacSecret =
         "unihome-production-test-verification-code-hmac-secret-01234";
 
+    public const string TestIpHashSalt =
+        "unihome-production-test-salt-0123456789-abcdef";
+
     protected virtual bool TrustForwardedHeaders => false;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // Program.cs valida VerificationCode:HmacSecret leyendo directamente
-        // builder.Configuration antes de que WebApplicationFactory pueda inyectar
-        // configuración de prueba (eso solo surte efecto a partir de Build()).
-        // Las variables de entorno sí están presentes desde el arranque del
-        // proceso, por eso se fijan aquí y no solo en el IConfigurationBuilder.
+        // Program.cs valida VerificationCode:HmacSecret, Jwt:SigningKey, Auth:RateLimit:IpHashSalt
+        // y Redis:Enabled leyendo directamente builder.Configuration antes de que WebApplicationFactory
+        // pueda inyectar configuración de prueba. Las variables de entorno sí están presentes desde el arranque.
         Environment.SetEnvironmentVariable("VerificationCode__HmacSecret", TestVerificationCodeHmacSecret);
         Environment.SetEnvironmentVariable("Jwt__SigningKey", TestSigningKey);
+        Environment.SetEnvironmentVariable("Auth__RateLimit__IpHashSalt", TestIpHashSalt);
+        Environment.SetEnvironmentVariable("Redis__Enabled", "true");
+        Environment.SetEnvironmentVariable("Redis__RestUrl", "https://test-mock.upstash.io");
+        Environment.SetEnvironmentVariable("Redis__RestToken", "mock-token-test");
+
+        if (TrustForwardedHeaders)
+        {
+            Environment.SetEnvironmentVariable("Proxy__TrustForwardedHeaders", "true");
+            Environment.SetEnvironmentVariable("Proxy__KnownProxies__0", "127.0.0.1");
+            Environment.SetEnvironmentVariable("Proxy__KnownProxies__1", "::1");
+            Environment.SetEnvironmentVariable("Proxy__KnownNetworks__0", "10.0.0.0/8");
+        }
+        else
+        {
+            Environment.SetEnvironmentVariable("Proxy__TrustForwardedHeaders", "false");
+        }
 
         builder.UseEnvironment("Production");
 
         builder.ConfigureAppConfiguration((_, configurationBuilder) =>
         {
-            configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+            var config = new Dictionary<string, string?>
             {
                 ["MongoDb:ConnectionString"] = string.Empty,
                 ["MongoDb:DatabaseName"] = string.Empty,
@@ -50,6 +69,10 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
                 ["Jwt:AccessTokenMinutes"] = "60",
                 ["Jwt:RefreshTokenDays"] = "30",
                 ["VerificationCode:HmacSecret"] = TestVerificationCodeHmacSecret,
+                ["Auth:RateLimit:IpHashSalt"] = TestIpHashSalt,
+                ["Redis:Enabled"] = "true",
+                ["Redis:RestUrl"] = "https://test-mock.upstash.io",
+                ["Redis:RestToken"] = "mock-token-test",
                 ["Proxy:TrustForwardedHeaders"] = TrustForwardedHeaders ? "true" : "false",
                 ["Auth:RateLimit:LoginPermitLimit"] = "2",
                 ["Auth:RateLimit:LoginWindowSeconds"] = "60",
@@ -59,22 +82,43 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
                 ["Auth:RateLimit:ConfirmEmailWindowSeconds"] = "60",
                 ["Auth:RateLimit:ResendPermitLimit"] = "1000",
                 ["Auth:RateLimit:ResendWindowSeconds"] = "60"
-            });
+            };
+
+            if (TrustForwardedHeaders)
+            {
+                config["Proxy:KnownProxies:0"] = "127.0.0.1";
+                config["Proxy:KnownProxies:1"] = "::1";
+                config["Proxy:KnownNetworks:0"] = "10.0.0.0/8";
+            }
+
+            configurationBuilder.AddInMemoryCollection(config);
         });
 
         builder.ConfigureServices(services =>
         {
-            // TestServer no expone una dirección HTTPS real; se fija el puerto
-            // para que UseHttpsRedirection calcule un Location determinista.
             services.Configure<HttpsRedirectionOptions>(options => options.HttpsPort = 443);
 
-            // Sin esto, login golpea MongoDbClientProvider sin configurar y
-            // responde 503 antes de llegar al rate limiter que se quiere probar.
             services.RemoveAll<IAccountRepository>();
             services.AddSingleton<IAccountRepository>(new InMemoryAccountRepository());
 
             services.RemoveAll<IRefreshSessionRepository>();
             services.AddSingleton<IRefreshSessionRepository>(new InMemoryRefreshSessionRepository());
+
+            services.RemoveAll<IDistributedRateLimiter>();
+            services.AddSingleton<IDistributedRateLimiter, InMemoryDistributedRateLimiter>();
         });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        Environment.SetEnvironmentVariable("Proxy__TrustForwardedHeaders", null);
+        Environment.SetEnvironmentVariable("Proxy__KnownProxies__0", null);
+        Environment.SetEnvironmentVariable("Proxy__KnownProxies__1", null);
+        Environment.SetEnvironmentVariable("Proxy__KnownNetworks__0", null);
+        Environment.SetEnvironmentVariable("Auth__RateLimit__IpHashSalt", null);
+        Environment.SetEnvironmentVariable("Redis__Enabled", null);
+        Environment.SetEnvironmentVariable("Redis__RestUrl", null);
+        Environment.SetEnvironmentVariable("Redis__RestToken", null);
     }
 }

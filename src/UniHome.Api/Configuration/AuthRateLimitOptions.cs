@@ -8,6 +8,13 @@ public sealed class AuthRateLimitOptions
 {
     public const string SectionName = "Auth:RateLimit";
 
+    /// <summary>
+    /// Sal criptográfica para seudonimizar las IPs antes de usarlas como clave en Redis.
+    /// Previene ataques de diccionario y búsqueda inversa sobre las direcciones de los clientes.
+    /// Se configura vía Auth__RateLimit__IpHashSalt.
+    /// </summary>
+    public string IpHashSalt { get; set; } = string.Empty;
+
     public int LoginPermitLimit { get; set; } = 10;
 
     public int LoginWindowSeconds { get; set; } = 60;
