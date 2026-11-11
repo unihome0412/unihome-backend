@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -58,6 +59,43 @@ public sealed class DistributedRedisIntegrationTests
             if (_configureServices is not null)
             {
                 builder.ConfigureTestServices(_configureServices);
+            }
+        }
+    }
+
+    private sealed class ProductionMisconfiguredApiFactory : WebApplicationFactory<Program>
+    {
+        private readonly Dictionary<string, string?> _envOverrides;
+
+        public ProductionMisconfiguredApiFactory(Dictionary<string, string?> envOverrides)
+        {
+            _envOverrides = envOverrides;
+        }
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            Environment.SetEnvironmentVariable("VerificationCode__HmacSecret", "test-secret-long-enough-0123456789");
+            Environment.SetEnvironmentVariable("Jwt__SigningKey", "test-signing-key-long-enough-0123456789-abcdef");
+
+            foreach (var (k, v) in _envOverrides)
+            {
+                Environment.SetEnvironmentVariable(k.Replace(":", "__"), v);
+            }
+
+            builder.UseEnvironment("Production");
+
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(_envOverrides);
+            });
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            foreach (var k in _envOverrides.Keys)
+            {
+                Environment.SetEnvironmentVariable(k.Replace(":", "__"), null);
             }
         }
     }
@@ -135,5 +173,78 @@ public sealed class DistributedRedisIntegrationTests
 
         // Debe permitir pasar al controlador de auth (retorna 401 Unauthorized por clave falsa, NO 429 ni 503)
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public void ProduccionConRedisDeshabilitado_FallaEnArranque()
+    {
+        try
+        {
+            using var factory = new ProductionMisconfiguredApiFactory(new Dictionary<string, string?>
+            {
+                ["Auth:RateLimit:IpHashSalt"] = "test-salt-long-enough-0123456789",
+                ["Redis:Enabled"] = "false"
+            });
+
+            var ex = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+            Assert.Contains("obligatorio fuera del entorno de Development", ex.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Redis__Enabled", null);
+            Environment.SetEnvironmentVariable("Auth__RateLimit__IpHashSalt", null);
+        }
+    }
+
+    [Fact]
+    public void ProduccionConTrustForwardedHeadersSinProxies_FallaEnArranque()
+    {
+        try
+        {
+            using var factory = new ProductionMisconfiguredApiFactory(new Dictionary<string, string?>
+            {
+                ["Auth:RateLimit:IpHashSalt"] = "test-salt-long-enough-0123456789",
+                ["Redis:Enabled"] = "true",
+                ["Redis:RestUrl"] = "https://mock.upstash.io",
+                ["Redis:RestToken"] = "token",
+                ["Proxy:TrustForwardedHeaders"] = "true"
+            });
+
+            var ex = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+            Assert.Contains("Proxy:TrustForwardedHeaders está activo pero no se especificó ninguna dirección", ex.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Proxy__TrustForwardedHeaders", null);
+            Environment.SetEnvironmentVariable("Redis__Enabled", null);
+            Environment.SetEnvironmentVariable("Redis__RestUrl", null);
+            Environment.SetEnvironmentVariable("Redis__RestToken", null);
+            Environment.SetEnvironmentVariable("Auth__RateLimit__IpHashSalt", null);
+        }
+    }
+
+    [Fact]
+    public void ProduccionSinIpHashSalt_FallaEnArranque()
+    {
+        try
+        {
+            using var factory = new ProductionMisconfiguredApiFactory(new Dictionary<string, string?>
+            {
+                ["Auth:RateLimit:IpHashSalt"] = "",
+                ["Redis:Enabled"] = "true",
+                ["Redis:RestUrl"] = "https://mock.upstash.io",
+                ["Redis:RestToken"] = "token"
+            });
+
+            var ex = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+            Assert.Contains("Auth:RateLimit:IpHashSalt", ex.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Auth__RateLimit__IpHashSalt", null);
+            Environment.SetEnvironmentVariable("Redis__Enabled", null);
+            Environment.SetEnvironmentVariable("Redis__RestUrl", null);
+            Environment.SetEnvironmentVariable("Redis__RestToken", null);
+        }
     }
 }

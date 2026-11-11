@@ -21,8 +21,12 @@ public enum RedisFailureMode
 }
 
 /// <summary>
-/// Opciones de configuración para la integración con Redis / Upstash.
-/// Las credenciales deben proporcionarse exclusivamente mediante variables de entorno o secretos.
+/// Opciones de configuración para la integración con Upstash Redis mediante su API REST sobre HTTPS.
+/// Nota técnica sobre el protocolo:
+/// La implementación se comunica con Upstash exclusivamente mediante solicitudes HTTP POST seguras (REST sobre HTTPS).
+/// No utiliza el protocolo binario RESP de Redis sobre TCP. Si se proporciona una cadena con esquema rediss://,
+/// el cliente extrae el host y el token para consultar el endpoint REST HTTPS del clúster de Upstash.
+/// Las credenciales deben proporcionarse exclusivamente mediante variables de entorno o almacén de secretos.
 /// </summary>
 public sealed class RedisOptions
 {
@@ -30,12 +34,14 @@ public sealed class RedisOptions
 
     /// <summary>
     /// Indica si el rate limiting distribuido con Redis está activo.
-    /// Si es false, se utiliza el limitador en memoria para desarrollo local o pruebas.
+    /// Es estrictamente obligatorio en entornos distintos de Development para garantizar
+    /// límites compartidos entre múltiples réplicas en Azure Container Apps.
     /// </summary>
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// Cadena de conexión estándar (esquema rediss) configurada mediante variables de entorno o secretos.
+    /// Cadena de conexión estándar (esquema rediss) de Upstash configurada mediante variables de entorno.
+    /// Se transforma internamente a endpoint REST sobre HTTPS.
     /// </summary>
     public string? ConnectionString { get; set; }
 
@@ -57,7 +63,8 @@ public sealed class RedisOptions
 
     /// <summary>
     /// Política ante caídas o timeouts de Redis.
-    /// El valor predeterminado es FailClosed (seguridad primero).
+    /// El valor predeterminado seguro es FailClosed (seguridad primero).
+    /// Su selección definitiva para producción requiere ratificación de Jesui y Bridget.
     /// </summary>
     public RedisFailureMode FailureMode { get; set; } = RedisFailureMode.FailClosed;
 }

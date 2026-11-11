@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.HttpOverrides;
 using UniHome.Api.Configuration;
 using UniHome.Application.Abstractions.RateLimiting;
+using UniHome.Infrastructure.Redis;
 
 namespace UniHome.IntegrationTests.RateLimiting;
 
@@ -57,6 +58,57 @@ public sealed class RateLimiterBridgePipelineTests
         Assert.False(lease.IsAcquired);
         Assert.True(lease.TryGetMetadata(DistributedRateLimitLease.IsServiceUnavailableMetadataName, out var isUnavailable));
         Assert.Equal(true, isUnavailable);
+    }
+
+    [Fact]
+    public void Bridge_IdleDuration_EsNoNuloYPermiteDesalojoDeParticionesInactivas()
+    {
+        var stub = new StubDistributedRateLimiter();
+        var bridge = new DistributedRateLimiterBridge(stub, "partition-key", 10, TimeSpan.FromSeconds(60));
+
+        Assert.NotNull(bridge.IdleDuration);
+        Assert.True(bridge.IdleDuration.Value >= TimeSpan.FromMinutes(2),
+            "IdleDuration debe ser de al menos 2 minutos para permitir recolección de memoria sin churn prematuro.");
+    }
+
+    [Fact]
+    public void Bridge_AttemptAcquireSincronoDirecto_LanzaNotSupportedException()
+    {
+        var stub = new StubDistributedRateLimiter();
+        var bridge = new DistributedRateLimiterBridge(stub, "partition-key", 10, TimeSpan.FromSeconds(60));
+
+        var ex = Assert.Throws<NotSupportedException>(() => bridge.AttemptAcquire(1));
+        Assert.Contains("asíncrona", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DesalojoDeParticionLocal_NoAfectaElContadorCompartidoEnRedis()
+    {
+        // Simula que la instancia local de DistributedRateLimiterBridge es desalojada por inactividad
+        // y luego una nueva instancia es creada por la fábrica de particiones para la misma clave.
+        var sharedStore = new InMemoryDistributedRateLimiter();
+        const string key = "unihome:rl:auth-login:hash-ip";
+
+        // Primera instancia del bridge ejecuta 2 peticiones
+        var bridge1 = new DistributedRateLimiterBridge(sharedStore, key, 5, TimeSpan.FromSeconds(60));
+        var l1 = await bridge1.AcquireAsync(1);
+        var l2 = await bridge1.AcquireAsync(1);
+        Assert.True(l1.IsAcquired);
+        Assert.True(l2.IsAcquired);
+
+        // Simulamos desalojo / recolección de bridge1. Se crea bridge2 para la misma clave de partición:
+        var bridge2 = new DistributedRateLimiterBridge(sharedStore, key, 5, TimeSpan.FromSeconds(60));
+        var l3 = await bridge2.AcquireAsync(1);
+        Assert.True(l3.IsAcquired);
+
+        // La 3ra petición debe continuar la cuenta (alcanzar 3, 4, 5, y la 6ta debe fallar)
+        var l4 = await bridge2.AcquireAsync(1);
+        var l5 = await bridge2.AcquireAsync(1);
+        var l6 = await bridge2.AcquireAsync(1);
+
+        Assert.True(l4.IsAcquired);
+        Assert.True(l5.IsAcquired);
+        Assert.False(l6.IsAcquired, "El contador compartido debe conservarse intacto tras el desalojo de la instancia local.");
     }
 
     [Fact]

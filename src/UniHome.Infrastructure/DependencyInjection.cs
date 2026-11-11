@@ -22,7 +22,8 @@ public static class DependencyInjection
     /// </summary>
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        bool isDevelopment = true)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -45,6 +46,31 @@ public static class DependencyInjection
 
         var redisSection = configuration.GetSection(RedisOptions.SectionName);
         var redisOptions = redisSection.Get<RedisOptions>() ?? new RedisOptions();
+
+        // En entornos fuera de Development (Producción/Staging con réplicas múltiples),
+        // Redis es estrictamente obligatorio para evitar contadores locales independientes en memoria.
+        if (!isDevelopment)
+        {
+            if (!redisOptions.Enabled)
+            {
+                throw new InvalidOperationException(
+                    "Redis distribuido es obligatorio fuera del entorno de Development para evitar contadores locales " +
+                    "independientes entre réplicas. Configure Redis:Enabled=true y proporcione las credenciales de Upstash.");
+            }
+
+            var hasCredentials = !string.IsNullOrWhiteSpace(redisOptions.ConnectionString) ||
+                                 (!string.IsNullOrWhiteSpace(redisOptions.RestUrl) && !string.IsNullOrWhiteSpace(redisOptions.RestToken)) ||
+                                 (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("UPSTASH_REDIS_REST_URL")) && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("UPSTASH_REDIS_REST_TOKEN"))) ||
+                                 !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("REDIS_CONNECTIONSTRING")) ||
+                                 !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("Redis__ConnectionString"));
+
+            if (!hasCredentials)
+            {
+                throw new InvalidOperationException(
+                    "Redis:Enabled está activo pero no se configuraron credenciales válidas fuera de Development. " +
+                    "Configure Redis:ConnectionString o Redis:RestUrl y Redis:RestToken.");
+            }
+        }
 
         if (redisOptions.Enabled)
         {

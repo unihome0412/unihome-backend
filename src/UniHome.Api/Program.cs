@@ -48,9 +48,22 @@ if (!builder.Environment.IsDevelopment() &&
         $"{VerificationCodeOptions.MinSecretLength} caracteres fuera de Development.");
 }
 
+// Fuera de Development la sal criptográfica de rate limiting debe estar configurada
+// con al menos MinSaltLength caracteres para evitar ataques rainbow table sobre IPs seudonimizadas en Redis.
+var ipHashSalt = builder.Configuration[
+    $"{AuthRateLimitOptions.SectionName}:IpHashSalt"];
+
+if (!builder.Environment.IsDevelopment() &&
+    (string.IsNullOrWhiteSpace(ipHashSalt) || ipHashSalt.Length < ClientIpHasher.MinSaltLength))
+{
+    throw new InvalidOperationException(
+        $"Configure {AuthRateLimitOptions.SectionName}:IpHashSalt con al menos " +
+        $"{ClientIpHasher.MinSaltLength} caracteres fuera de Development.");
+}
+
 // Composición de la aplicación: Api orquesta; Application/Domain/Infrastructure
-// se registran detrás de sus puertos.
-builder.Services.AddInfrastructure(builder.Configuration);
+// se registran detrás de sus puertos. Se valida que fuera de Development Redis sea obligatorio.
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
 
 // La clave JWT se valida después de que todas las fuentes de configuración
 // (incluidas las de pruebas) hayan sido aplicadas. En Development se genera una
@@ -180,17 +193,26 @@ builder.Services.Configure<ProxyOptions>(
 builder.Services.Configure<ApiOptions>(
     builder.Configuration.GetSection(ApiOptions.SectionName));
 
-// Azure Container Apps termina TLS en su ingress y reenvía HTTP; estos
-// encabezados solo se aplican si Proxy:TrustForwardedHeaders=true. ForwardLimit
-// en 1: no se confía en una cadena de varios valores enviada por el cliente.
-builder.Services.Configure<ForwardedHeadersOptions>(options =>
-{
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    options.ForwardLimit = 1;
+// Azure Container Apps termina TLS en su ingress y reenvía HTTP.
+// Seguridad estricta contra spoofing: nunca se confía ciegamente en X-Forwarded-For.
+// Si TrustForwardedHeaders=true, se exige al menos una IP o red CIDR confiable.
+var proxyConfig = builder.Configuration.GetSection(ProxyOptions.SectionName).Get<ProxyOptions>();
 
-    var proxyConfig = builder.Configuration.GetSection(ProxyOptions.SectionName).Get<ProxyOptions>();
-    if (proxyConfig != null && (proxyConfig.KnownProxies.Count > 0 || proxyConfig.KnownNetworks.Count > 0))
+if (proxyConfig?.TrustForwardedHeaders == true)
+{
+    var hasTrustedProxies = proxyConfig.KnownProxies.Count > 0 || proxyConfig.KnownNetworks.Count > 0;
+    if (!hasTrustedProxies)
     {
+        throw new InvalidOperationException(
+            "Proxy:TrustForwardedHeaders está activo pero no se especificó ninguna dirección o red confiable en " +
+            "Proxy:KnownProxies o Proxy:KnownNetworks. Configure al menos un proxy o red CIDR confiable para evitar spoofing.");
+    }
+
+    builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        options.ForwardLimit = 1;
+
         options.KnownIPNetworks.Clear();
         options.KnownProxies.Clear();
 
@@ -210,15 +232,8 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
                 options.KnownIPNetworks.Add(new System.Net.IPNetwork(prefix, prefixLength));
             }
         }
-    }
-    else if (proxyConfig?.TrustForwardedHeaders == true)
-    {
-        // El ingress de Container Apps en Azure no tiene IP estática predecible en el nivel de red de desarrollo;
-        // activar TrustForwardedHeaders sin proxies conocidos limpia las redes por defecto pero preserva ForwardLimit = 1.
-        options.KnownIPNetworks.Clear();
-        options.KnownProxies.Clear();
-    }
-});
+    });
+}
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -494,9 +509,9 @@ app.UseStatusCodePages(async statusCodeContext =>
         .ConfigureAwait(false);
 });
 
-var proxyOptions = app.Services.GetRequiredService<IOptions<ProxyOptions>>().Value;
+var proxyCurrentConfig = app.Services.GetRequiredService<IOptions<ProxyOptions>>().Value;
 
-if (proxyOptions.TrustForwardedHeaders)
+if (proxyCurrentConfig.TrustForwardedHeaders)
 {
     // Debe ir antes de HSTS, HTTPS redirection, rate limiter y autenticación:
     // todos ellos deben ver el esquema/IP ya reescritos, no los del salto HTTP

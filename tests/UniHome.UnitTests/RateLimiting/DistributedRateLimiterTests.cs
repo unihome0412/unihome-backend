@@ -1,9 +1,12 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Infrastructure;
 using UniHome.Infrastructure.Redis;
 
 namespace UniHome.UnitTests.RateLimiting;
@@ -249,22 +252,92 @@ public sealed class DistributedRateLimiterTests
     }
 
     [Fact]
-    public void ClientIpHasher_SeudonimizaConSha256YSal()
+    public void ClientIpHasher_HmacSha256_EsDeterminista()
     {
-        const string ip1 = "192.168.1.10";
-        const string ip2 = "192.168.1.11";
-        const string salt = "test-secret-salt";
+        const string ip = "192.168.1.50";
+        const string salt = "sal-secreta-de-prueba-valida";
 
-        var hash1 = ClientIpHasher.Hash(ip1, salt);
-        var hash2 = ClientIpHasher.Hash(ip2, salt);
-        var hash1NoSalt = ClientIpHasher.Hash(ip1, null);
+        var hash1 = ClientIpHasher.Hash(ip, salt);
+        var hash2 = ClientIpHasher.Hash(ip, salt);
 
         Assert.NotEmpty(hash1);
-        Assert.Equal(64, hash1.Length); // 64 hex chars = SHA-256
+        Assert.Equal(64, hash1.Length); // 64 hex = 256 bits
+        Assert.Equal(hash1, hash2);
+    }
+
+    [Fact]
+    public void ClientIpHasher_HmacSha256_DiferentesClavesProducenDiferentesHashes()
+    {
+        const string ip = "192.168.1.50";
+        const string salt1 = "sal-secreta-de-prueba-primera";
+        const string salt2 = "sal-secreta-de-prueba-segunda";
+
+        var hash1 = ClientIpHasher.Hash(ip, salt1);
+        var hash2 = ClientIpHasher.Hash(ip, salt2);
+
         Assert.NotEqual(hash1, hash2);
-        Assert.NotEqual(hash1, hash1NoSalt);
-        Assert.Equal(hash1, ClientIpHasher.Hash(ip1, salt)); // Determinista
+    }
+
+    [Fact]
+    public void ClientIpHasher_IpNulaOVacia_RetornaUnknown()
+    {
+        const string salt = "sal-secreta-de-prueba";
         Assert.Equal("unknown", ClientIpHasher.Hash(null, salt));
         Assert.Equal("unknown", ClientIpHasher.Hash("   ", salt));
+    }
+
+    [Fact]
+    public void DependencyInjection_EnDevelopmentSinRedis_RegistraProveedorEnMemoria()
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Redis:Enabled"] = "false"
+            })
+            .Build();
+
+        services.AddInfrastructure(configuration, isDevelopment: true);
+        var sp = services.BuildServiceProvider();
+
+        var limiter = sp.GetRequiredService<IDistributedRateLimiter>();
+        Assert.IsType<InMemoryDistributedRateLimiter>(limiter);
+    }
+
+    [Fact]
+    public void DependencyInjection_EnProduccionSinRedis_FallaEnArranque()
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Redis:Enabled"] = "false"
+            })
+            .Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            services.AddInfrastructure(configuration, isDevelopment: false));
+
+        Assert.Contains("obligatorio fuera del entorno de Development", ex.Message);
+    }
+
+    [Fact]
+    public void DependencyInjection_EnProduccionConRedisHabilitadoPeroSinCredenciales_FallaEnArranque()
+    {
+        var services = new ServiceCollection();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Redis:Enabled"] = "true",
+                ["Redis:ConnectionString"] = "",
+                ["Redis:RestUrl"] = "",
+                ["Redis:RestToken"] = ""
+            })
+            .Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            services.AddInfrastructure(configuration, isDevelopment: false));
+
+        Assert.Contains("credenciales válidas", ex.Message);
     }
 }

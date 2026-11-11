@@ -8,6 +8,9 @@ using Microsoft.Extensions.Logging;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Infrastructure.Configuration;
 using UniHome.IntegrationTests.TestSupport;
+using Xunit;
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace UniHome.IntegrationTests;
 
@@ -61,6 +64,8 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
                 ["Jwt:AccessTokenMinutes"] = "60",
                 ["Jwt:RefreshTokenDays"] = "30",
                 ["VerificationCode:HmacSecret"] = TestVerificationCodeHmacSecret,
+                ["Redis:Enabled"] = "false",
+                ["Auth:RateLimit:IpHashSalt"] = "unihome-dev-test-salt-0123456789-abcdef",
                 ["Auth:RateLimit:LoginPermitLimit"] = "1000",
                 ["Auth:RateLimit:LoginWindowSeconds"] = "60",
                 ["Auth:RateLimit:RefreshPermitLimit"] = "1000",
