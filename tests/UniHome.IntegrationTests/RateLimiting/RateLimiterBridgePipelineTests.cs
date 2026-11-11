@@ -151,4 +151,44 @@ public sealed class RateLimiterBridgePipelineTests
 
         Assert.Equal(2, forwardedOptions.KnownIPNetworks.Count);
     }
+
+    [Fact]
+    public void DistributedRateLimitLease_MetadataNames_EnumeraCorrectamenteSegunEstado()
+    {
+        // 1. Lease rechazado por exceder límite con RetryAfter
+        var leaseExceeded = new DistributedRateLimitLease(
+            isAcquired: false,
+            retryAfter: TimeSpan.FromSeconds(45),
+            isServiceUnavailable: false);
+
+        var metaExceeded = leaseExceeded.MetadataNames.ToList();
+        Assert.Contains(MetadataName.RetryAfter.Name, metaExceeded);
+        Assert.DoesNotContain(DistributedRateLimitLease.IsServiceUnavailableMetadataName, metaExceeded);
+
+        // 2. Lease rechazado por indisponibilidad de Redis (FailClosed -> 503)
+        var leaseUnavailable = new DistributedRateLimitLease(
+            isAcquired: false,
+            retryAfter: TimeSpan.Zero,
+            isServiceUnavailable: true);
+
+        var metaUnavailable = leaseUnavailable.MetadataNames.ToList();
+        Assert.Contains(DistributedRateLimitLease.IsServiceUnavailableMetadataName, metaUnavailable);
+        Assert.DoesNotContain(MetadataName.RetryAfter.Name, metaUnavailable);
+
+        // 3. Lease adquirido exitosamente
+        var leaseAcquired = new DistributedRateLimitLease(
+            isAcquired: true,
+            retryAfter: TimeSpan.Zero,
+            isServiceUnavailable: false);
+
+        Assert.Empty(leaseAcquired.MetadataNames);
+    }
+
+    [Fact]
+    public void DistributedRateLimiterBridge_GetStatistics_RetornaNull()
+    {
+        var stub = new StubDistributedRateLimiter();
+        var bridge = new DistributedRateLimiterBridge(stub, "key", 5, TimeSpan.FromSeconds(60));
+        Assert.Null(bridge.GetStatistics());
+    }
 }

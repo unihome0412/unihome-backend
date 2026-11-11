@@ -74,8 +74,8 @@ public sealed class DistributedRedisIntegrationTests
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            Environment.SetEnvironmentVariable("VerificationCode__HmacSecret", "test-secret-long-enough-0123456789");
-            Environment.SetEnvironmentVariable("Jwt__SigningKey", "test-signing-key-long-enough-0123456789-abcdef");
+            Environment.SetEnvironmentVariable("VerificationCode__HmacSecret", ProductionApiFactory.TestVerificationCodeHmacSecret);
+            Environment.SetEnvironmentVariable("Jwt__SigningKey", ProductionApiFactory.TestSigningKey);
 
             foreach (var (k, v) in _envOverrides)
             {

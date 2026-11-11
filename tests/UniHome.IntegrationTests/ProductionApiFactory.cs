@@ -47,6 +47,7 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
             Environment.SetEnvironmentVariable("Proxy__TrustForwardedHeaders", "true");
             Environment.SetEnvironmentVariable("Proxy__KnownProxies__0", "127.0.0.1");
             Environment.SetEnvironmentVariable("Proxy__KnownProxies__1", "::1");
+            Environment.SetEnvironmentVariable("Proxy__KnownNetworks__0", "10.0.0.0/8");
         }
         else
         {
@@ -87,6 +88,7 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
             {
                 config["Proxy:KnownProxies:0"] = "127.0.0.1";
                 config["Proxy:KnownProxies:1"] = "::1";
+                config["Proxy:KnownNetworks:0"] = "10.0.0.0/8";
             }
 
             configurationBuilder.AddInMemoryCollection(config);
@@ -113,6 +115,7 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("Proxy__TrustForwardedHeaders", null);
         Environment.SetEnvironmentVariable("Proxy__KnownProxies__0", null);
         Environment.SetEnvironmentVariable("Proxy__KnownProxies__1", null);
+        Environment.SetEnvironmentVariable("Proxy__KnownNetworks__0", null);
         Environment.SetEnvironmentVariable("Auth__RateLimit__IpHashSalt", null);
         Environment.SetEnvironmentVariable("Redis__Enabled", null);
         Environment.SetEnvironmentVariable("Redis__RestUrl", null);
