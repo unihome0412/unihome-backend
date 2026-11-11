@@ -38,11 +38,25 @@ public sealed class MongoPasswordResetPersistenceTests
             account.Id,
             generated.Hash,
             now);
+        var attemptGenerated = generator.Generate();
+        var attemptToken = PasswordResetToken.Issue(
+            attemptGenerated.Id,
+            account.Id,
+            attemptGenerated.Hash,
+            now);
+        var expiredGenerated = generator.Generate();
+        var expiredToken = PasswordResetToken.Issue(
+            expiredGenerated.Id,
+            account.Id,
+            expiredGenerated.Hash,
+            now.AddMinutes(-31));
 
         try
         {
             await accounts.AddAsync(account);
             await resets.AddAsync(token);
+            await resets.AddAsync(attemptToken);
+            await resets.AddAsync(expiredToken);
 
             var results = await Task.WhenAll(
                 resets.TryConsumeAsync(token.Id, generated.Hash, now),
@@ -50,10 +64,22 @@ public sealed class MongoPasswordResetPersistenceTests
 
             Assert.Single(results, result => result);
             Assert.Single(results, result => !result);
+            Assert.False(await resets.TryConsumeAsync(token.Id, generated.Hash, now));
 
-            var document = await database
-                .GetCollection<BsonDocument>(MongoIdentitySchema.AccountRecoveryCollection)
+            var firstAttempt = await resets.RegisterFailedAttemptAsync(attemptToken.Id, now);
+            var secondAttempt = await resets.RegisterFailedAttemptAsync(attemptToken.Id, now);
+            Assert.NotNull(firstAttempt);
+            Assert.NotNull(secondAttempt);
+            Assert.Equal(2, secondAttempt.FailedAttempts);
+            Assert.False(await resets.TryConsumeAsync(expiredToken.Id, expiredGenerated.Hash, now));
+
+            var collection = database.GetCollection<BsonDocument>(
+                MongoIdentitySchema.AccountRecoveryCollection);
+            var document = await collection
                 .Find(new BsonDocument("_id", token.Id.ToString("N")))
+                .FirstOrDefaultAsync();
+            var attemptDocument = await collection
+                .Find(new BsonDocument("_id", attemptToken.Id.ToString("N")))
                 .FirstOrDefaultAsync();
 
             Assert.NotNull(document);
@@ -61,17 +87,89 @@ public sealed class MongoPasswordResetPersistenceTests
             Assert.NotEqual(generated.Value, document["tokenHash"].AsString);
             Assert.False(document["consumedAt"].IsBsonNull);
             Assert.Equal(account.Id.ToString("N"), document["accountId"].AsString);
+            Assert.NotNull(attemptDocument);
+            Assert.Equal(2, attemptDocument["failedAttempts"].ToInt32());
+
+            var passwordChanges = await Task.WhenAll(
+                accounts.TryChangePasswordAsync(
+                    account.Id,
+                    account.PasswordHash,
+                    "hash:concurrente-1"),
+                accounts.TryChangePasswordAsync(
+                    account.Id,
+                    account.PasswordHash,
+                    "hash:concurrente-2"));
+            Assert.Single(passwordChanges, changed => changed);
+            Assert.Single(passwordChanges, changed => !changed);
+
+            var accountDocument = await database
+                .GetCollection<BsonDocument>(MongoIdentitySchema.AccountsCollection)
+                .Find(new BsonDocument("_id", account.Id.ToString("N")))
+                .FirstOrDefaultAsync();
+            Assert.NotNull(accountDocument);
+            var storedHash = accountDocument["hashContrasena"].AsString;
+            Assert.True(storedHash is "hash:concurrente-1" or "hash:concurrente-2");
+
+            var indexes = await ListIndexesAsync(collection);
+            var tokenIndex = Assert.Single(
+                indexes,
+                index => GetName(index) == MongoIdentitySchema.AccountRecoveryUniqueTokenIndex);
+            Assert.True(tokenIndex["unique"].AsBoolean);
+            Assert.Equal(
+                1,
+                tokenIndex["key"][MongoIdentitySchema.AccountRecoveryTokenHashField].ToInt32());
+
+            var accountIndex = Assert.Single(
+                indexes,
+                index => GetName(index) == MongoIdentitySchema.AccountRecoveryAccountIndex);
+            Assert.False(
+                accountIndex.GetValue("unique", BsonBoolean.False).ToBoolean());
+            Assert.Equal(
+                1,
+                accountIndex["key"][MongoIdentitySchema.AccountRecoveryAccountIdField].ToInt32());
+
+            var ttlIndex = Assert.Single(
+                indexes,
+                index => GetName(index) == MongoIdentitySchema.AccountRecoveryExpirationTtlIndex);
+            Assert.Equal(0, ttlIndex["expireAfterSeconds"].ToInt64());
+            Assert.Equal(
+                1,
+                ttlIndex["key"][MongoIdentitySchema.AccountRecoveryExpiresAtUtcField].ToInt32());
         }
         finally
         {
-            await database
-                .GetCollection<BsonDocument>(MongoIdentitySchema.AccountRecoveryCollection)
-                .DeleteOneAsync(new BsonDocument("_id", token.Id.ToString("N")));
+            var resetsCollection = database.GetCollection<BsonDocument>(
+                MongoIdentitySchema.AccountRecoveryCollection);
+            foreach (var id in new[] { token.Id, attemptToken.Id, expiredToken.Id })
+            {
+                await resetsCollection.DeleteOneAsync(
+                    new BsonDocument("_id", id.ToString("N")));
+            }
+
             await database
                 .GetCollection<BsonDocument>(MongoIdentitySchema.AccountsCollection)
                 .DeleteOneAsync(new BsonDocument("_id", account.Id.ToString("N")));
         }
     }
+
+    private static async Task<List<BsonDocument>> ListIndexesAsync(
+        IMongoCollection<BsonDocument> collection)
+    {
+        using var cursor = await collection.Indexes.ListAsync();
+        var indexes = new List<BsonDocument>();
+
+        while (await cursor.MoveNextAsync())
+        {
+            indexes.AddRange(cursor.Current);
+        }
+
+        return indexes;
+    }
+
+    private static string GetName(BsonDocument index) =>
+        index.TryGetValue("name", out var value) && value.IsString
+            ? value.AsString
+            : string.Empty;
 
     private static async Task EnsurePasswordResetSchemaAsync(IMongoDatabase database)
     {

@@ -130,13 +130,19 @@ public sealed class ConfirmPasswordResetService
                 cancellationToken)
             .ConfigureAwait(false);
 
-        account.ChangePassword(passwordHash);
-
-        await _accounts
-            .UpdateAsync(account, cancellationToken)
+        // CAS de un solo documento: si dos tokens de la misma cuenta llegaran a
+        // confirmarse a la vez, solo uno puede cambiar el hash esperado.
+        var passwordChanged = await _accounts
+            .TryChangePasswordAsync(
+                account.Id,
+                account.PasswordHash,
+                passwordHash,
+                cancellationToken)
             .ConfigureAwait(false);
 
-        return ConfirmPasswordResetResult.Success();
+        return passwordChanged
+            ? ConfirmPasswordResetResult.Success()
+            : ConfirmPasswordResetResult.InvalidToken();
     }
 
     private async Task<ConfirmPasswordResetResult> RegisterFailedAttemptAsync(

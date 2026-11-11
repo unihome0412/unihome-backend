@@ -155,6 +155,28 @@ public sealed class RequestPasswordResetServiceTests
         Assert.Empty(sender.Messages);
     }
 
+    [Fact]
+    public async Task Request_DosSolicitudesSimultaneas_RespondenGenericoSinCorromperElAlmacenamiento()
+    {
+        var accounts = new InMemoryAccountRepository();
+        await accounts.AddAsync(AccountTestData.Create("ana@uni.edu"));
+        var resets = new InMemoryPasswordResetRepository();
+        var sender = new RecordingPasswordResetEmailSender();
+        var service = CreateService(accounts, resets, sender);
+
+        var results = await Task.WhenAll(
+            service.RequestAsync(new RequestPasswordResetCommand("ana@uni.edu")),
+            service.RequestAsync(new RequestPasswordResetCommand("ana@uni.edu")));
+
+        Assert.All(results, result =>
+            Assert.Equal(RequestPasswordResetStatus.Accepted, result.Status));
+        Assert.Equal(2, sender.Messages.Count);
+        Assert.InRange(resets.All.Count, 1, 2);
+        Assert.Equal(
+            resets.All.Count,
+            resets.All.Select(token => token.TokenHash).Distinct(StringComparer.Ordinal).Count());
+    }
+
     private static RequestPasswordResetService CreateService(
         InMemoryAccountRepository accounts,
         InMemoryPasswordResetRepository resets,

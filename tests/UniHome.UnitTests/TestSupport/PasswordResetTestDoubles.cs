@@ -150,16 +150,30 @@ internal sealed class FixedPasswordResetTokenGenerator : IPasswordResetTokenGene
 
 internal sealed class RecordingPasswordResetEmailSender : IPasswordResetEmailSender
 {
+    private readonly object _gate = new();
     private readonly List<(string Email, string Token)> _messages = [];
 
-    public IReadOnlyList<(string Email, string Token)> Messages => _messages;
+    public IReadOnlyList<(string Email, string Token)> Messages
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _messages.ToArray();
+            }
+        }
+    }
 
     public Task<bool> SendAsync(
         EmailAddress email,
         string token,
         CancellationToken cancellationToken = default)
     {
-        _messages.Add((email.Value, token));
+        lock (_gate)
+        {
+            _messages.Add((email.Value, token));
+        }
+
         return Task.FromResult(true);
     }
 }
@@ -201,6 +215,109 @@ internal sealed class ThrowingPasswordResetRepository : IPasswordResetRepository
     public Task InvalidateAllForAccountAsync(
         Guid accountId,
         DateTimeOffset now,
+        CancellationToken cancellationToken = default) =>
+        throw new UniHome.Application.Identity.Exceptions.StorageUnavailableException();
+}
+
+internal sealed class FlakyAccountRepository : IAccountRepository
+{
+    private readonly InMemoryAccountRepository _inner;
+    private int _failNextPasswordChange;
+
+    public FlakyAccountRepository(InMemoryAccountRepository inner)
+    {
+        _inner = inner;
+    }
+
+    public void FailNextPasswordChange() =>
+        Interlocked.Exchange(ref _failNextPasswordChange, 1);
+
+    public Task AddAsync(Account account, CancellationToken cancellationToken = default) =>
+        _inner.AddAsync(account, cancellationToken);
+
+    public Task<Account?> FindByIdAsync(Guid id, CancellationToken cancellationToken = default) =>
+        _inner.FindByIdAsync(id, cancellationToken);
+
+    public Task<Account?> FindByEmailAsync(
+        EmailAddress email,
+        CancellationToken cancellationToken = default) =>
+        _inner.FindByEmailAsync(email, cancellationToken);
+
+    public Task UpdateAsync(Account account, CancellationToken cancellationToken = default) =>
+        _inner.UpdateAsync(account, cancellationToken);
+
+    public Task<bool> TryChangePasswordAsync(
+        Guid accountId,
+        string expectedPasswordHash,
+        string newPasswordHash,
+        CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.Exchange(ref _failNextPasswordChange, 0) == 1)
+        {
+            throw new UniHome.Application.Identity.Exceptions.StorageUnavailableException();
+        }
+
+        return _inner.TryChangePasswordAsync(
+            accountId,
+            expectedPasswordHash,
+            newPasswordHash,
+            cancellationToken);
+    }
+}
+
+internal sealed class FailingSessionRevocationRepository : IRefreshSessionRepository
+{
+    private readonly IRefreshSessionRepository _inner;
+
+    public FailingSessionRevocationRepository(IRefreshSessionRepository inner)
+    {
+        _inner = inner;
+    }
+
+    public Task CreateAsync(
+        UniHome.Application.Identity.Sessions.RefreshSession session,
+        CancellationToken cancellationToken = default) =>
+        _inner.CreateAsync(session, cancellationToken);
+
+    public Task<UniHome.Application.Identity.Sessions.RefreshSession?> FindByIdAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken = default) =>
+        _inner.FindByIdAsync(sessionId, cancellationToken);
+
+    public Task<bool> TryRotateAsync(
+        Guid sessionId,
+        string currentTokenHash,
+        string newTokenHash,
+        DateTimeOffset now,
+        DateTimeOffset newExpiresAt,
+        CancellationToken cancellationToken = default) =>
+        _inner.TryRotateAsync(
+            sessionId,
+            currentTokenHash,
+            newTokenHash,
+            now,
+            newExpiresAt,
+            cancellationToken);
+
+    public Task<bool> RevokeAsync(
+        Guid sessionId,
+        Guid accountId,
+        DateTimeOffset now,
+        string reason,
+        CancellationToken cancellationToken = default) =>
+        _inner.RevokeAsync(sessionId, accountId, now, reason, cancellationToken);
+
+    public Task RevokeFamilyAsync(
+        Guid sessionId,
+        DateTimeOffset now,
+        string reason,
+        CancellationToken cancellationToken = default) =>
+        _inner.RevokeFamilyAsync(sessionId, now, reason, cancellationToken);
+
+    public Task RevokeAllForAccountAsync(
+        Guid accountId,
+        DateTimeOffset now,
+        string reason,
         CancellationToken cancellationToken = default) =>
         throw new UniHome.Application.Identity.Exceptions.StorageUnavailableException();
 }

@@ -84,7 +84,11 @@ correo confirmado. El enlace contiene un token opaco de 256 bits, vence a los 30
 minutos y es de un solo uso; en MongoDB solo se guarda su SHA-256. Si el token es
 inválido o ya se usó responde `400`; si venció o agotó sus intentos responde `410`.
 Al confirmar se aplica la misma política de contraseña del registro (8 a 128
-caracteres) y se revocan todas las sesiones de refresh de la cuenta.
+caracteres) y se revocan todas las sesiones de refresh de la cuenta. La escritura de
+la contraseña es un CAS de un solo documento sobre el hash anterior: si dos enlaces
+válidos de la misma cuenta se confirman a la vez, solo uno cambia la contraseña. No
+se usan transacciones multi-documento; un fallo posterior al consumo del token deja el
+token consumido y las sesiones revocadas, y exige solicitar un enlace nuevo.
 
 Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
 `contrasena` y `confirmacionPerdidaInformacion: true`. Hace borrado lógico
@@ -115,6 +119,8 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   vence en 30 minutos, es de un solo uso y tiene un límite provisional de 5 intentos
   por token. Al restablecer la contraseña se revocan todas las sesiones de refresh de
   la cuenta; las cuentas suspendidas, eliminadas o no confirmadas no reciben enlace.
+  El cambio de hash usa un CAS sobre el hash anterior para que dos confirmaciones
+  concurrentes de la misma cuenta no puedan ganar ambas.
 - No se registran contraseñas, tokens, secretos ni datos personales en logs o respuestas
   de error.
 - Los tokens de acceso no se guardan en el cliente por este backend; su almacenamiento

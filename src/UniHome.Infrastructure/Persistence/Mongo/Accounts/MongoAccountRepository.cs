@@ -137,6 +137,48 @@ internal sealed class MongoAccountRepository : IAccountRepository
         }
     }
 
+    public async Task<bool> TryChangePasswordAsync(
+        Guid accountId,
+        string expectedPasswordHash,
+        string newPasswordHash,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedPasswordHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newPasswordHash);
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<AccountDocument>.Filter.And(
+                Builders<AccountDocument>.Filter.Eq(
+                    document => document.Id,
+                    accountId.ToString("N", CultureInfo.InvariantCulture)),
+                Builders<AccountDocument>.Filter.Eq(
+                    document => document.PasswordHash,
+                    expectedPasswordHash),
+                Builders<AccountDocument>.Filter.Eq(
+                    document => document.Status,
+                    AccountStatus.Active.ToString()),
+                Builders<AccountDocument>.Filter.Eq(
+                    document => document.EmailConfirmed,
+                    true));
+
+            var update = Builders<AccountDocument>.Update
+                .Set(document => document.PasswordHash, newPasswordHash);
+
+            var result = await collection
+                .UpdateOneAsync(filter, update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            return result.ModifiedCount == 1;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     private async Task<IMongoCollection<AccountDocument>> GetCollectionAsync(CancellationToken cancellationToken)
     {
         if (!_clientProvider.IsConfigured)

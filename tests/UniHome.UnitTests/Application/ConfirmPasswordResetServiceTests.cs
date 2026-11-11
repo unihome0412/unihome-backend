@@ -1,3 +1,5 @@
+using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Identity.Exceptions;
 using UniHome.Application.Identity.PasswordRecovery;
 using UniHome.Domain.Accounts;
 using UniHome.UnitTests.TestSupport;
@@ -247,6 +249,138 @@ public sealed class ConfirmPasswordResetServiceTests
         Assert.True(resets.All.Single().IsConsumed);
     }
 
+    [Fact]
+    public async Task Confirm_DosTokensDistintosConcurrentes_SoloUnCambioDeHashGana()
+    {
+        var accounts = new InMemoryAccountRepository();
+        var account = AccountTestData.Create("ana@uni.edu");
+        await accounts.AddAsync(account);
+        var oldHash = account.PasswordHash;
+
+        var results = await Task.WhenAll(
+            accounts.TryChangePasswordAsync(account.Id, oldHash, "hash:NuevaClave1"),
+            accounts.TryChangePasswordAsync(account.Id, oldHash, "hash:NuevaClave2"));
+
+        Assert.Single(results, result => result);
+        Assert.Single(results, result => !result);
+        var stored = await accounts.FindByIdAsync(account.Id);
+        Assert.Contains(stored!.PasswordHash, new[] { "hash:NuevaClave1", "hash:NuevaClave2" });
+    }
+
+    [Fact]
+    public async Task Confirm_CuandoFallaElCambioDeContrasena_NoCambiaLaContrasenaYConsumeElToken()
+    {
+        var innerAccounts = new InMemoryAccountRepository();
+        var account = AccountTestData.Create("ana@uni.edu");
+        await innerAccounts.AddAsync(account);
+        var accounts = new FlakyAccountRepository(innerAccounts);
+        accounts.FailNextPasswordChange();
+
+        var resets = new InMemoryPasswordResetRepository();
+        var generator = new FixedPasswordResetTokenGenerator();
+        var raw = CreatePersistedToken(resets, generator, account.Id, generator.Generate());
+        var sessions = new FakeRefreshSessionRepository();
+        var session = CreateSession(account.Id);
+        await sessions.CreateAsync(session);
+
+        var service = CreateService(
+            accounts,
+            resets,
+            generator,
+            new RecordingPasswordHasher(),
+            sessions);
+
+        await Assert.ThrowsAsync<StorageUnavailableException>(() =>
+            service.ConfirmAsync(new ConfirmPasswordResetCommand(raw, "NuevaClave1")));
+
+        var stored = await innerAccounts.FindByIdAsync(account.Id);
+        Assert.Equal("hash:" + AccountTestData.Password, stored!.PasswordHash);
+        Assert.True(resets.All.Single().IsConsumed);
+        Assert.NotNull((await sessions.FindByIdAsync(session.Id))!.RevokedAt);
+    }
+
+    [Fact]
+    public async Task Confirm_CuandoFallaRevocarSesiones_NoCambiaLaContrasenaYConsumeElToken()
+    {
+        var accounts = new InMemoryAccountRepository();
+        var account = AccountTestData.Create("ana@uni.edu");
+        await accounts.AddAsync(account);
+
+        var resets = new InMemoryPasswordResetRepository();
+        var generator = new FixedPasswordResetTokenGenerator();
+        var raw = CreatePersistedToken(resets, generator, account.Id, generator.Generate());
+        var innerSessions = new FakeRefreshSessionRepository();
+        var session = CreateSession(account.Id);
+        await innerSessions.CreateAsync(session);
+        var sessions = new FailingSessionRevocationRepository(innerSessions);
+
+        var service = CreateService(
+            accounts,
+            resets,
+            generator,
+            new RecordingPasswordHasher(),
+            sessions);
+
+        await Assert.ThrowsAsync<StorageUnavailableException>(() =>
+            service.ConfirmAsync(new ConfirmPasswordResetCommand(raw, "NuevaClave1")));
+
+        var stored = await accounts.FindByIdAsync(account.Id);
+        Assert.Equal("hash:" + AccountTestData.Password, stored!.PasswordHash);
+        Assert.True(resets.All.Single().IsConsumed);
+        Assert.Null((await innerSessions.FindByIdAsync(session.Id))!.RevokedAt);
+    }
+
+    [Fact]
+    public async Task Confirm_TrasFalloDeActualizacion_PermiteSolicitarOtroEnlaceYCompletar()
+    {
+        var innerAccounts = new InMemoryAccountRepository();
+        var account = AccountTestData.Create("ana@uni.edu");
+        await innerAccounts.AddAsync(account);
+        var accounts = new FlakyAccountRepository(innerAccounts);
+        accounts.FailNextPasswordChange();
+
+        var resets = new InMemoryPasswordResetRepository();
+        var generator = new FixedPasswordResetTokenGenerator();
+        var sender = new RecordingPasswordResetEmailSender();
+        var sessions = new FakeRefreshSessionRepository();
+        var session = CreateSession(account.Id);
+        await sessions.CreateAsync(session);
+
+        var confirm = CreateService(
+            accounts,
+            resets,
+            generator,
+            new RecordingPasswordHasher(),
+            sessions);
+        var firstToken = CreatePersistedToken(
+            resets,
+            generator,
+            account.Id,
+            generator.Generate());
+
+        await Assert.ThrowsAsync<StorageUnavailableException>(() =>
+            confirm.ConfirmAsync(new ConfirmPasswordResetCommand(firstToken, "NuevaClave1")));
+
+        var request = new RequestPasswordResetService(
+            accounts,
+            resets,
+            generator,
+            sender,
+            new FixedClock(Now));
+        var requested = await request.RequestAsync(
+            new RequestPasswordResetCommand("ana@uni.edu"));
+
+        Assert.Equal(RequestPasswordResetStatus.Accepted, requested.Status);
+        var secondToken = Assert.Single(sender.Messages).Token;
+
+        var result = await confirm.ConfirmAsync(
+            new ConfirmPasswordResetCommand(secondToken, "NuevaClave2"));
+
+        Assert.Equal(ConfirmPasswordResetStatus.Success, result.Status);
+        var stored = await innerAccounts.FindByIdAsync(account.Id);
+        Assert.Equal("hash:NuevaClave2", stored!.PasswordHash);
+    }
+
     private static string CreatePersistedToken(
         InMemoryPasswordResetRepository resets,
         FixedPasswordResetTokenGenerator generator,
@@ -263,11 +397,11 @@ public sealed class ConfirmPasswordResetServiceTests
     }
 
     private static ConfirmPasswordResetService CreateService(
-        InMemoryAccountRepository accounts,
+        IAccountRepository accounts,
         InMemoryPasswordResetRepository resets,
         FixedPasswordResetTokenGenerator generator,
         RecordingPasswordHasher hasher,
-        FakeRefreshSessionRepository sessions) =>
+        IRefreshSessionRepository sessions) =>
         new(
             accounts,
             resets,

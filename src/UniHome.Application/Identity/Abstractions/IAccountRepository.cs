@@ -15,4 +15,17 @@ public interface IAccountRepository
     Task<Account?> FindByEmailAsync(EmailAddress email, CancellationToken cancellationToken = default);
 
     Task UpdateAsync(Account account, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cambia el hash de contraseña de una cuenta activa y confirmada solo si el
+    /// hash actual coincide con <paramref name="expectedPasswordHash"/>. Es una
+    /// actualización atómica de un documento, no una transacción multi-documento.
+    /// Devuelve false si la cuenta no existe, no está habilitada o el hash cambió
+    /// de forma concurrente.
+    /// </summary>
+    Task<bool> TryChangePasswordAsync(
+        Guid accountId,
+        string expectedPasswordHash,
+        string newPasswordHash,
+        CancellationToken cancellationToken = default);
 }
