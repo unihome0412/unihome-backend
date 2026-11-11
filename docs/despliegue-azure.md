@@ -285,16 +285,16 @@ az group delete --name rg-unihome-dev --yes --no-wait
     - Se contemplan cinco condiciones de falla: (1) Redis no disponible, (2) caída de conexión, (3) agotamiento de cuota de comandos o ancho de banda, (4) latencia elevada en Upstash (se aplicará timeout preventivo estricto de comando, p. ej. 250 ms), y (5) fallo de ejecución del script Lua.
     - **Aclaración crítica sobre límites:** Un fallback local en memoria RAM **NO** mantiene un límite global; si el tráfico se reparte entre 2 réplicas, cada réplica contabiliza con contadores independientes, lo que en la práctica duplica el límite admisible total o penaliza asimétricamente a usuarios bajo redes NAT.
     - **Política de seguridad diferenciada:** Para endpoints críticos de autenticación (Login, Registro, Refresh, Confirmar correo), se debe elegir formalmente entre:
-      * *Opción A (Fail-Closed):* Rechazar peticiones de autenticación con error controlado ante caída de Redis para preservar la protección estricta contra fuerza bruta.
-      * *Opción B (Fail-Open / Degradación local):* Permitir el servicio degradando a contadores locales en memoria por réplica (asumiendo que el límite global no se garantiza).
-      * *Estado de la decisión:* **[DECISIÓN PENDIENTE DE VALIDACIÓN DEL EQUIPO POR JESUI Y BRIDGET]**. No se asumirá una decisión preaprobada hasta contar con el consenso del equipo.
+      * *Opción A (Fail-Closed):* Rechazar peticiones con código **HTTP 503 (Service Unavailable)** ante indisponibilidad técnica o timeout de Redis, preservando la protección estricta contra fuerza bruta; el código **HTTP 429 (Too Many Requests)** queda reservado exclusivamente para solicitudes que exceden el cupo o límite de peticiones configurado.
+      * *Opción B (Fail-Open / Degradación local):* Permitir la continuidad del servicio degradando a contadores locales en memoria por réplica (asumiendo que el límite global no se garantiza y emitiendo HTTP 429 si el contador local de la instancia se satura).
+      * *Estado de la decisión:* **[DECISIÓN PENDIENTE DE VALIDACIÓN Y CONSENSO DEL EQUIPO POR JESUI Y BRIDGET]**. No se asumirá una decisión preaprobada hasta contar con el consenso del equipo.
   - **Variables y seguridad de secretos:** Las variables planeadas `Redis__ConnectionString` y `Auth__RateLimit__IpHashSalt` son de carácter estrictamente confidencial. Se configurarán únicamente como secretos en Azure Container Apps y GitHub Secrets / Environments; queda prohibido almacenar credenciales reales o ejemplos en el repositorio, archivos de configuración o registros de ejecución.
 
 ## Presupuesto, costos y límites gratuitos
 
 *Fecha de consulta y fuentes oficiales: 2026-11-09 y 2026-11-10.*
 
-- **Upstash Redis plan gratuito:** 500,000 comandos al mes, **250 MB** de almacenamiento (indicado oficialmente como 250 MB en la documentación y precios de Upstash: https://upstash.com/pricing/redis, a menudo referido como 256 MB en especificaciones binarias), 10 GB de transferencia de datos mensual, 1 sola base de datos, sin listas de control de acceso (ACLs) ni cifrado en reposo. No requiere ingresar tarjeta bancaria para operar en el nivel gratuito.
+- **Upstash Redis plan gratuito:** 500,000 comandos al mes, **256 MB** de almacenamiento (conforme a los límites oficiales del plan Free en https://upstash.com/pricing/redis, consultado el 2026-11-10; los 250 MB corresponden al plan de pago Fixed/Pay-as-you-go, no al nivel gratuito), 10 GB de transferencia de datos mensual, 1 sola base de datos, sin listas de control de acceso (ACLs) ni cifrado en reposo. No requiere ingresar tarjeta bancaria para operar en el nivel gratuito.
 - **Presupuesto mensual en Azure (rg-unihome-dev):** Se encuentra configurado un presupuesto formal en Azure Cost Management denominado `unihome-dev-budget` por un monto de **US$25.00 mensuales**, con alertas automáticas configuradas al 50% (US$12.50), 80% (US$20.00) y 100% (US$25.00) notificadas al correo del proyecto `unihome0412@gmail.com`. El gasto actual verificado es de **US$0.00**.
 - **Separación estricta de presupuestos y costos:**
   1. El presupuesto mensual de US$25 de Azure supervisa únicamente los recursos desplegados en el Resource Group de Azure (`rg-unihome-dev`) y **NO** cubre, limita ni supervisa los consumos de Upstash Redis en su nube independiente.
@@ -312,11 +312,11 @@ az group delete --name rg-unihome-dev --yes --no-wait
 Para asegurar la transparencia en los pipelines de GitHub Actions, se diferencia formalmente entre pruebas con evidencia real de ejecución y pruebas planeadas:
 
 - **Pruebas implementadas y verificadas (con ejecuciones exitosas en GitHub Actions):**
-  1. *Build, formato y pruebas unitarias (.NET 10):* Ejecución obligatoria en push y PRs con paso limpio.
-  2. *Análisis estático de seguridad (SAST) y dependencias:* Semgrep, Gitleaks, Dependabot / dotnet list package, CodeQL y SonarCloud.
-  3. *Database Test (MongoDB efímero):* Job `mongo-db-test` con contenedor `mongo:8.0.34` fijado por digest en el runner de CI, base aislada `unihome_ci_verificacion` y validación de pruebas TRX mediante `tools/ci/mongo_ci_summary.py` (verificado en verde en Run #121).
-  4. *Contract Test (OpenAPI):* 10/10 pruebas en `OpenApiGenderContractTests.cs` verificadas.
-  5. *DAST pasivo (OWASP ZAP):* Job `dast-zap` ejecutando `zaproxy:2.17.0` con API Kestrel local, MongoDB y SMTP mock local (`tools/ci/zap_dast.py`, verificado en verde en Run #121).
+  1. *Build, formato y pruebas unitarias (.NET 10):* Ejecución obligatoria en push y PRs con paso limpio (verificado en Run #128 y Run #121).
+  2. *Análisis estático de seguridad (SAST) y dependencias:* Semgrep, Gitleaks, Dependabot / dotnet list package, CodeQL (verificado en Run #95) y SonarCloud (.NET) (verificado en Run #128 y Run #119).
+  3. *Database Test (MongoDB efímero):* Job `mongo-db-test` con contenedor `mongo:8.0.34` fijado por digest en el runner de CI, base aislada `unihome_ci_verificacion` y validación de pruebas TRX mediante `tools/ci/mongo_ci_summary.py` (verificado en verde en Run #121 y Run #119).
+  4. *Contract Test (OpenAPI):* 10/10 pruebas en `OpenApiGenderContractTests.cs` verificadas (verificado en Run #128 y Run #121).
+  5. *DAST pasivo (OWASP ZAP):* Job `dast-zap` ejecutando `zaproxy:2.17.0` con API Kestrel local, MongoDB y SMTP mock local (`tools/ci/zap_dast.py`, verificado en verde en Run #121 y ejecución manual `42772939746`).
   6. *RESTler Fuzzing:* Job `restler-fuzzing` con Microsoft RESTler v9.3.1 en modo fuzz-lean aislado sobre 7 operaciones de OpenAPI (verificado en verde en Run #121 con 2,054 peticiones y 0 errores 500).
 - **Pruebas planeadas o pendientes (sin ejecución real o bloqueadas):**
   1. *Pact Contract Testing:* El proyecto proveedor `UniHome.PactTests` está compilado, pero la suite está bloqueada e inactiva (`vars.UNIHOME_ENABLE_PACT`) debido a que la carpeta `pacts/` no contiene contratos JSON reales por parte del equipo del cliente Android (`unihome-mobile`).
