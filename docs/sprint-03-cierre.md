@@ -24,7 +24,9 @@
 | HU-076 | RF-40 | Solo UI | Sin endpoint propio; el backend no implementa navegación |
 | HU-084 | RF-40 | Implementado | Mapa/lista públicos sin Bearer |
 | HU-085 | RF-41 | Implementado | `PUT/DELETE /api/v1/favoritos/{unidadId}` y `GET /api/v1/favoritos` |
-| HU-086 | RF-40 | Soporte 401 | Ficha y favoritos exigen Bearer; el cliente conserva el destino |
+
+> HU-086 pertenece al Sprint 6 y no se contabiliza en las 15 HU de este Sprint; el backend ya devuelve 401 en ficha y favoritos para que el cliente conserve la acci?n pendiente. HU-071 tambi?n es Sprint 6 y se aplica como control de no exponer PII.
+
 
 ## Endpoints implementados
 
