@@ -1,3 +1,4 @@
+using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
 
 namespace UniHome.Infrastructure.Persistence.Mongo.Migrations;
@@ -10,7 +11,12 @@ namespace UniHome.Infrastructure.Persistence.Mongo.Migrations;
 public sealed class MongoMigrationRegistry
 {
     public static MongoMigrationRegistry Default { get; } =
-        new([MongoIdentityMigration.Definition, MongoUniversityMigration.Definition]);
+        new(
+        [
+            MongoIdentityMigration.Definition,
+            MongoUniversityMigration.Definition,
+            MongoPublicationMigration.Definition
+        ]);
 
     public MongoMigrationRegistry(IEnumerable<MongoMigrationDefinition> migrations)
     {

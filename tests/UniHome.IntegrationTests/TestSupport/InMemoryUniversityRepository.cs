@@ -13,6 +13,7 @@ public sealed class InMemoryUniversityRepository : IUniversityRepository
     private readonly object _gate = new();
     private readonly Dictionary<string, University> _universities =
         new(StringComparer.Ordinal);
+    private readonly Dictionary<Guid, GeoCoordinate> _locations = [];
 
     public IReadOnlyList<University> All
     {
@@ -50,6 +51,25 @@ public sealed class InMemoryUniversityRepository : IUniversityRepository
         {
             return Task.FromResult(
                 _universities.Values.SingleOrDefault(university => university.Id == id));
+        }
+    }
+
+    public Task<GeoCoordinate?> GetLocationAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            _locations.TryGetValue(id, out var location);
+            return Task.FromResult(location);
+        }
+    }
+
+    public void SetLocation(Guid id, GeoCoordinate location)
+    {
+        lock (_gate)
+        {
+            _locations[id] = location;
         }
     }
 

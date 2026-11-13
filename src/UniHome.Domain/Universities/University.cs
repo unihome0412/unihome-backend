@@ -1,5 +1,4 @@
-using System.Globalization;
-using System.Text;
+using UniHome.Domain.Common;
 
 namespace UniHome.Domain.Universities;
 
@@ -87,23 +86,7 @@ public sealed class University
     /// estable entre la creación, la edición y la búsqueda pública
     /// (HU-007/HU-075/HU-077).
     /// </summary>
-    public static string Normalize(string value)
-    {
-        ArgumentNullException.ThrowIfNull(value);
-
-        var decomposed = value.Trim().Normalize(NormalizationForm.FormD);
-        var normalized = new StringBuilder(decomposed.Length);
-
-        foreach (var character in decomposed)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
-            {
-                normalized.Append(char.ToLowerInvariant(character));
-            }
-        }
-
-        return CollapseWhitespace(normalized.ToString());
-    }
+    public static string Normalize(string value) => TextNormalization.Normalize(value);
 
     private static University Create(
         Guid id,
@@ -151,5 +134,5 @@ public sealed class University
     }
 
     private static string CollapseWhitespace(string value) =>
-        string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        TextNormalization.CollapseWhitespace(value);
 }

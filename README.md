@@ -110,6 +110,16 @@ contraseña ni claims administrativos. La barra de navegación y la visibilidad 
 panel son responsabilidad de Android; el backend entrega los indicadores y
 revalida cada ruta administrativa.
 
+Sprint 2 / M05: `POST /api/v1/propiedades`, `POST /api/v1/propiedades/{id}/unidades`,
+`POST /api/v1/unidades/{id}/fotos`, `PUT /api/v1/unidades/{id}/servicios`,
+`PUT /api/v1/unidades/{id}/zona-reglas`, `GET /api/v1/unidades/{id}/vista-previa` y
+`POST /api/v1/publicaciones/primera/terminos`. Todas las rutas requieren Bearer y
+verifican que el recurso pertenezca al titular. La edad se recalcula en servidor.
+La unidad nace en `Borrador`; no se implementó el envío a revisión de Sprint 4.
+La carga de fotos usa un puerto de almacenamiento; **DEC-04 sigue pendiente**, por lo
+que sin proveedor autorizado responde `503` y no se declara funcionalidad de fotos
+lista para producción. Detalle en [`docs/mongodb-m05.md`](docs/mongodb-m05.md).
+
 Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
 `contrasena` y `confirmacionPerdidaInformacion: true`. Hace borrado lógico
 (`AccountStatus.Deleted`) y revoca todas las sesiones de la cuenta en todos los
@@ -210,8 +220,12 @@ sobre `nombreNormalizado`. La migración versionada `M03-001` crea la colección
 índice; el adaptador verifica el esquema en modo lectura y falla cerrada si falta o
 diverge. Detalle en [`docs/mongodb-m03.md`](docs/mongodb-m03.md).
 
+M05 usa `propiedades`, `unidades` y `aceptaciones_terminos` con la migración
+`M05-001`; las fotos guardan solo metadatos y el binario depende de DEC-04. Detalle en
+[`docs/mongodb-m05.md`](docs/mongodb-m05.md).
+
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001` y `M03-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001` y `M05-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -220,6 +234,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M01-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M03-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M03-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M05-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M05-001
 ```
 
 La migración ordinaria solo escribe en `unihome_modelo_pruebas` o en una base incluida
@@ -324,9 +340,9 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 `UNIHOME_ENABLE_MONGO_CI=true`) levanta MongoDB Community 8.0.34 dentro del runner
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
-`unihome_ci_verificacion`, se aplican `M01-001` y `M03-001` a esa base temporal y
-las pruebas reales de identidad, recuperación de contraseña, universidades y bloqueo
-distribuido se ejecutan con TRX. El job falla
+`unihome_ci_verificacion`, se aplican `M01-001`, `M03-001` y `M05-001` a esa base
+temporal y las pruebas reales de identidad, recuperación de contraseña, universidades,
+publicaciones y bloqueo distribuido se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
 La ejecución manual de verificación
@@ -337,8 +353,8 @@ commit de código `f51ac10`) dejó 4/4 pruebas reales aprobadas, 0 omitidas,
 El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
 `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
-`127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001 y un SMTP de
-captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+`127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M03-001 y M05-001, y un
+SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
 confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
 operación documentada y publica `zap-report.html`, `zap-report.json`,
 `dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el
@@ -473,6 +489,11 @@ declara listo para el primer despliegue hasta completar esos pasos.
   `ux_universidades_nombre_normalizado`; no se modificó Atlas.
 - La allowlist `Admin__AccountIds` es un mecanismo provisional hasta que M13 defina
   la provisión, auditoría y revocación formales de administradores.
+- **DEC-04 pendiente:** no hay proveedor de blobs autorizado. La carga de fotos M05
+  está implementada con validación y metadatos, pero falla cerrada con `503` hasta
+  aprobar/configurar el proveedor; no se usó almacenamiento simulado en producción.
+- El Sprint 2 no implementa el envío a revisión ni el expediente de M06 (HU-013/HU-027,
+  Sprint 4); las unidades permanecen en `Borrador`.
 - El perfil devuelve `etiquetaCuenta=UsuarioUniHome` y `vinculadoAUnidad=false`
   mientras M05/M06/M09 no existan. Son indicadores derivados, no estados
   persistidos; deberán conectarse a esos módulos sin cambiar el contrato.

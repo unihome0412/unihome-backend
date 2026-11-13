@@ -39,19 +39,6 @@ public sealed class GetProfileService
             account,
             AccountLabel.UsuarioUniHome,
             IsLinkedToUnit: false,
-            CanPublish: IsAdult(account.BirthDate, _clock.UtcNow));
-    }
-
-    private static bool IsAdult(DateOnly birthDate, DateTimeOffset now)
-    {
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
-        var age = today.Year - birthDate.Year;
-
-        if (birthDate > today.AddYears(-age))
-        {
-            age--;
-        }
-
-        return age >= 18;
+            CanPublish: AgeEligibility.IsAdult(account.BirthDate, _clock.UtcNow));
     }
 }

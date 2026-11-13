@@ -15,6 +15,11 @@ public interface IUniversityRepository
         Guid id,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Ubicación opcional del catálogo; se usa como sugerencia en M05.</summary>
+    Task<GeoCoordinate?> GetLocationAsync(
+        Guid id,
+        CancellationToken cancellationToken = default);
+
     Task<UniversityPage> ListAsync(
         int page,
         int pageSize,

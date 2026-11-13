@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Units.Abstractions;
 using UniHome.Infrastructure.Configuration;
 using UniHome.IntegrationTests.TestSupport;
 
@@ -19,6 +20,7 @@ public sealed class MongoBackedApiFactory : WebApplicationFactory<Program>
 {
     public CapturingVerificationEmailSender EmailSender { get; } = new();
     public RefreshRotationBarrier RotationBarrier { get; } = new();
+    public InMemoryUnitPhotoStorage PhotoStorage { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -55,6 +57,9 @@ public sealed class MongoBackedApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IValidateOptions<SmtpOptions>>();
             services.RemoveAll<IVerificationEmailSender>();
             services.AddSingleton<IVerificationEmailSender>(EmailSender);
+
+            services.RemoveAll<IUnitPhotoStorage>();
+            services.AddSingleton<IUnitPhotoStorage>(PhotoStorage);
             var original = services.Single(service => service.ServiceType == typeof(IRefreshSessionRepository));
             services.Replace(ServiceDescriptor.Singleton<IRefreshSessionRepository>(provider =>
                 new CoordinatedRefreshSessionRepository(

@@ -142,5 +142,25 @@ public sealed class OpenApiDocumentTests : IClassFixture<SwaggerEnabledApiFactor
         Assert.Contains(
             profileSecurity.EnumerateArray(),
             requirement => requirement.TryGetProperty("Bearer", out _));
+
+        var createProperty = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/propiedades")
+            .GetProperty("post");
+
+        Assert.True(createProperty.TryGetProperty("security", out var propertySecurity));
+        Assert.Contains(
+            propertySecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        var preview = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/unidades/{unitId}/vista-previa")
+            .GetProperty("get");
+
+        Assert.True(preview.TryGetProperty("security", out var previewSecurity));
+        Assert.Contains(
+            previewSecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
     }
 }
