@@ -24,14 +24,14 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Job | Variable de repositorio | Otro requisito | Evento permitido |
 |---|---|---|---|
 | SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
-| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M03-001 y M05-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
+| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M01-002, M03-001 y M05-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Verificador de proveedor PactNet 5.0.1 con API Kestrel aislada; requiere contratos JSON reales del consumidor Android en `pacts/`; sin ellos **falla** y permanece desactivado | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
 
-**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. Las migraciones `M01-001`, `M03-001` y `M05-001` se aplican únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
+**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. Las migraciones `M01-001`, `M01-002`, `M03-001` y `M05-001` se aplican únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
 
 ### DAST ZAP baseline pasivo
 
@@ -42,7 +42,7 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
 - Levanta una API efímera en `http://127.0.0.1:5088`, un MongoDB Community
   8.0.34 fijado por digest como servicio del runner y un SMTP de captura local
   con STARTTLS en `127.0.0.1:587`. La base `unihome_dast` se inicializa con
-  M01-001, M03-001 y M05-001 y se destruye al final. No usa Atlas, Brevo, Azure,
+  M01-001, M01-002, M03-001 y M05-001 y se destruye al final. No usa Atlas, Brevo, Azure,
   puertos públicos ni credenciales reales. La CA efímera del SMTP no publica CRL/OCSP, por lo
   que solo en este job se configura `Smtp__CheckCertificateRevocation=false`;
   el valor predeterminado del código sigue siendo `true` y STARTTLS sigue
@@ -96,7 +96,7 @@ El job `restler-fuzzing` usa Microsoft RESTler **v9.3.1**, commit
 en el runner. No se usa una imagen móvil ni un servicio remoto.
 
 - Reutiliza la API ASP.NET Core en `127.0.0.1:5088`, MongoDB 8.0.34 efímero con
-  M01-001, M03-001 y M05-001, y el SMTP de captura local con STARTTLS en
+  M01-001, M01-002, M03-001 y M05-001, y el SMTP de captura local con STARTTLS en
   `127.0.0.1:587`.
 - Prepara dos cuentas sintéticas: una confirmada para login/refresh y otra
   pendiente de confirmar para ejercer el endpoint con un código real capturado
@@ -211,7 +211,7 @@ dotnet stryker --config-file stryker-config.json
   `UNIHOME_MONGO_CI_LOOPBACK_ONLY=1`.
 - No se configura replica set: las pruebas de identidad y bloqueo usan índices y
   operaciones atómicas sobre un documento; no requieren transacciones.
-- Se espera la disponibilidad real del contenedor, se aplican `M01-001`,
+- Se espera la disponibilidad real del contenedor, se aplican `M01-001`, `M01-002`,
   `M03-001` y `M05-001` con `UniHome.MongoMigrator` y se verifican ledger,
   checksum e índices antes de las pruebas.
 - `MongoIdentityPersistenceTests`, `MongoPasswordResetPersistenceTests`,

@@ -67,6 +67,16 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 |---|---|---|---|
 | `MongoDb__ConnectionString` | Sí | `MongoDbOptions` (`MongoDb`) | Sí, para que la API opere con persistencia |
 | `MongoDb__DatabaseName` | No | `MongoDbOptions` (`MongoDb`) | Sí, junto con la anterior |
+| `Redis__Enabled` | No | `RedisOptions` (`Redis`) | **S? fuera de Development**; con `true` exige credenciales |
+| `Redis__ConnectionString` | S? | `RedisOptions` (`Redis`) | Una de las formas de credencial Upstash (`rediss://...`) |
+| `Redis__RestUrl` | No | `RedisOptions` (`Redis`) | Alternativa a ConnectionString; URL REST HTTPS de Upstash |
+| `Redis__RestToken` | S? | `RedisOptions` (`Redis`) | Requerido con `Redis__RestUrl` |
+| `Redis__CommandTimeoutMs` | No | `RedisOptions` (`Redis`) | Opcional; predeterminado 250 ms |
+| `Admin__AccountIds` | No | `AdminAccessOptions` (`Admin`) | Solo para cuentas administrativas autorizadas; lista vac?a deniega todo |
+| `Cloudinary__CloudName` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
+| `Cloudinary__ApiKey` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
+| `Cloudinary__ApiSecret` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
+| `Cloudinary__PublicBaseUrl` | No | `CloudinaryOptions` (`Cloudinary`) | Base HTTPS p?blica de la API para el proxy de fotos |
 | `Jwt__SigningKey` | Sí | `JwtOptions` (`Jwt`) | Sí, mínimo 32 caracteres fuera de Development |
 | `Jwt__Issuer` | No | `JwtOptions` (`Jwt`) | No (tiene valor por defecto `UniHome`) |
 | `Jwt__Audience` | No | `JwtOptions` (`Jwt`) | No (tiene valor por defecto `UniHome.Mobile`) |

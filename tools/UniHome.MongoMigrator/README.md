@@ -1,30 +1,33 @@
 # UniHome.MongoMigrator
 
-Herramienta manual y versionada para auditar, planificar y verificar las
-migraciones `M01-001` de `cuentas`/`sesiones_refresh` y `M03-001` de
-`universidades`, y para ejecutar una promoción explícita a `unihome_desarrollo`
-bajo controles separados. No forma parte de la API, no se invoca durante
-`dotnet test` y no imprime la cadena de conexión, correos, códigos, tokens ni
-documentos.
+Herramienta manual y versionada para auditar, planificar, aplicar y verificar las
+migraciones `M01-001` (cuentas/sesiones), `M01-002`
+(restablecimientos_contrasena), `M03-001` (universidades) y `M05-001`
+(publicaciones), y para ejecutar una promoci?n expl?cita bajo controles
+separados. No forma parte de la API, no se invoca durante `dotnet test` y no
+imprime la cadena de conexi?n, correos, c?digos, tokens ni documentos.
 
 ## Seguridad
 
 - `apply` solo escribe en `unihome_modelo_pruebas` o en una base listada en
   `UNIHOME_MIGRATION_ALLOWED_DATABASES`. `unihome_desarrollo`, `admin`, `local` y
-  `config` están siempre bloqueadas para esa ruta.
-- `promote` es la única ruta de escritura para `unihome_desarrollo`. Exige:
-  destino exacto, `--confirm-database` idéntico, autorización
-  `UNIHOME_PROMOTION_AUTHORIZED_DATABASE=unihome_desarrollo`, `--approval-ref` y
+  `config` est?n siempre bloqueadas para esa ruta.
+- `promote` acepta ?nicamente dos destinos fijos: `unihome_desarrollo` y
+  `unihome_verificacion`. No acepta nombres arbitrarios desde la CLI. Exige
+  destino exacto, `--confirm-database` id?ntico, autorizaci?n
+  `UNIHOME_PROMOTION_AUTHORIZED_DATABASE` con el mismo valor, `--approval-ref` y
   credencial exclusiva.
+- La promoci?n exige que todas las migraciones anteriores est?n aplicadas y
+  verificadas; solo la versi?n seleccionada puede estar pendiente.
 - `promote` no consulta la allowlist ordinaria y no se ejecuta desde la API.
-- La cadena de conexión normal se lee de User Secrets
-  (`MongoDb:ConnectionString`) o de `MongoDb__ConnectionString`. La promoción usa
+- La cadena de conexi?n normal se lee de User Secrets
+  (`MongoDb:ConnectionString`) o de `MongoDb__ConnectionString`. La promoci?n usa
   exclusivamente `MongoDb:MigrationConnectionString`, sin fallback. Si la
-  credencial operativa está presente, se comparan usuario, `authSource`, mecanismo,
-  hosts, réplica y base, no solo la cadena completa.
+  credencial operativa est? presente, se comparan usuario, `authSource`, mecanismo,
+  hosts, r?plica y base, no solo la cadena completa.
 - `promote` y cualquier comando con `--migration-credential` exigen TLS con
-  validación de certificado. Rechazan TLS deshabilitado, `tlsInsecure`,
-  certificados/hostnames inválidos y callbacks personalizados. No modifican TLS ni
+  validaci?n de certificado. Rechazan TLS deshabilitado, `tlsInsecure`,
+  certificados/hostnames inv?lidos y callbacks personalizados. No modifican TLS ni
   certificados.
 - El valor de la URI nunca se pasa como argumento ni se imprime.
 
@@ -37,28 +40,30 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas
 ```
 
-Lectura con la credencial técnica (no escribe):
+Lectura con la credencial t?cnica (no escribe):
 
 ```powershell
-dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_desarrollo --migration-credential
-dotnet run --project tools/UniHome.MongoMigrator -- plan --database unihome_desarrollo --migration-credential
+dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_verificacion --migration-credential
+dotnet run --project tools/UniHome.MongoMigrator -- plan --database unihome_verificacion --migration-credential --version M01-002
 ```
 
-Promoción (no ejecutar sin completar autorización, usuario técnico y respaldo):
+Promoci?n (no ejecutar sin autorizaci?n, usuario t?cnico y respaldo):
 
 ```powershell
-$env:UNIHOME_PROMOTION_AUTHORIZED_DATABASE = 'unihome_desarrollo'
+$env:UNIHOME_PROMOTION_AUTHORIZED_DATABASE = 'unihome_verificacion'
 dotnet user-secrets set "MongoDb:MigrationConnectionString" "<URI_TECNICA>" `
   --id unihome-backend-migrations
 dotnet run --project tools/UniHome.MongoMigrator -- promote `
-  --database unihome_desarrollo `
-  --confirm-database unihome_desarrollo `
-  --approval-ref "<REFERENCIA_DE_APROBACION>"
+  --database unihome_verificacion `
+  --confirm-database unihome_verificacion `
+  --approval-ref "<REFERENCIA_DE_APROBACION>" `
+  --version M01-002
 ```
 
-`--version M01-001|M03-001|M05-001` es opcional; el valor predeterminado es
-M01-001. No se admiten alias, mayúsculas distintas, espacios ni nombres
-parciales.
+`--version M01-001|M01-002|M03-001|M05-001` es opcional; el valor predeterminado
+es M01-001. No se admiten alias, may?sculas distintas, espacios ni nombres
+parciales. La secuencia para `unihome_verificacion` es M01-001, M01-002, M03-001 y
+M05-001; no se promueve una versi?n si falta la anterior.
 
 ## Alcance
 
@@ -69,6 +74,12 @@ La migración crea, si faltan:
   limpieza sobre `expiraEnUtc`.
 - `migraciones` con la versión en `_id` (unicidad nativa de MongoDB) y el
   checksum de la definición.
+
+`M01-002` crea, si falta:
+
+- `restablecimientos_contrasena` con `ux_restablecimientos_token` ?nico sobre
+  `tokenHash`, `ix_restablecimientos_cuenta` sobre `accountId`, TTL 0 sobre
+  `expiresAt` y validador con `consumedAt` date/null.
 
 `M03-001` crea, si faltan:
 
@@ -81,8 +92,8 @@ La migración crea, si faltan:
 - `propiedades`, `unidades` y `aceptaciones_terminos` con sus índices de
   propietario, búsqueda, duplicado de propiedad y unicidad de términos.
 
-Las migraciones M01, M03 y M05 se seleccionan con `--version`; no se aplican en
-cascada. El TTL solo elimina sesiones vencidas; la autorización de una sesión se comprueba
+Las migraciones se seleccionan con `--version`; no se aplican en cascada. La
+promoci?n incremental exige las versiones anteriores. El TTL solo elimina sesiones vencidas; la autorización de una sesión se comprueba
 siempre en el backend. No se crean validadores JSON para M01 porque el contrato no
 los define.
 

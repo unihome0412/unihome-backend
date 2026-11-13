@@ -1,3 +1,4 @@
+using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
 
@@ -14,6 +15,7 @@ public sealed class MongoMigrationRegistry
         new(
         [
             MongoIdentityMigration.Definition,
+            MongoPasswordResetMigration.Definition,
             MongoUniversityMigration.Definition,
             MongoPublicationMigration.Definition
         ]);
