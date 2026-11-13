@@ -6,6 +6,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Properties.Abstractions;
+using UniHome.Application.Publications.Abstractions;
+using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Infrastructure.Configuration;
 using UniHome.IntegrationTests.TestSupport;
@@ -49,6 +52,14 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     public InMemoryPasswordResetRepository PasswordResets { get; } = new();
 
     public InMemoryUniversityRepository Universities { get; } = new();
+
+    public InMemoryPropertyRepository Properties { get; } = new();
+
+    public InMemoryUnitRepository Units { get; } = new();
+
+    public InMemoryTermsAcceptanceRepository Terms { get; } = new();
+
+    public InMemoryUnitPhotoStorage PhotoStorage { get; } = new();
 
     public CapturingVerificationEmailSender EmailSender { get; } = new();
 
@@ -113,6 +124,18 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
             services.RemoveAll<IUniversityRepository>();
             services.AddSingleton<IUniversityRepository>(Universities);
+
+            services.RemoveAll<IPropertyRepository>();
+            services.AddSingleton<IPropertyRepository>(Properties);
+
+            services.RemoveAll<IUnitRepository>();
+            services.AddSingleton<IUnitRepository>(Units);
+
+            services.RemoveAll<ITermsAcceptanceRepository>();
+            services.AddSingleton<ITermsAcceptanceRepository>(Terms);
+
+            services.RemoveAll<IUnitPhotoStorage>();
+            services.AddSingleton<IUnitPhotoStorage>(PhotoStorage);
 
             services.RemoveAll<IVerificationEmailSender>();
             services.AddSingleton<IVerificationEmailSender>(EmailSender);

@@ -1,7 +1,9 @@
 # Sprint 2 — Inventario previsto (no implementado)
 
 **Fuente:** Sprint Planning vigente y SDD M05.  
-**Estado:** inventario para el siguiente sprint; este PR no implementa Sprint 2.
+**Estado:** implementado en la rama `feature/sprint-02-backend-integral`; la
+evidencia y los bloqueos se registran en [`sprint-02-cierre.md`](sprint-02-cierre.md).
+El único bloqueo operativo es DEC-04 para el proveedor de blobs de fotografías.
 
 ## Historias del Sprint 2
 

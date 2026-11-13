@@ -95,6 +95,50 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
+    public async Task OpenApi_DebeIncluirLosEndpointsDeM05()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty("/api/v1/propiedades", out var properties));
+        Assert.True(properties.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/propiedades/{propertyId}/unidades",
+            out var units));
+        Assert.True(units.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/fotos",
+            out var photos));
+        Assert.True(photos.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/servicios",
+            out var services));
+        Assert.True(services.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/zona-reglas",
+            out var zone));
+        Assert.True(zone.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/vista-previa",
+            out var preview));
+        Assert.True(preview.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/publicaciones/primera/terminos",
+            out var terms));
+        Assert.True(terms.TryGetProperty("post", out _));
+    }
+
+    [Fact]
     public async Task OpenApi_DebeIncluirElPerfilDeM02()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");

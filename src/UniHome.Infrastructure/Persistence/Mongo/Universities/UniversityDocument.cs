@@ -23,4 +23,19 @@ public sealed class UniversityDocument
 
     [BsonElement(MongoUniversitySchema.CreatedAtField)]
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>GeoJSON opcional del catálogo externo; no se crea ni modifica aquí.</summary>
+    [BsonElement("location")]
+    [BsonIgnoreIfNull]
+    public UniversityLocationDocument? Location { get; set; }
+}
+
+public sealed class UniversityLocationDocument
+{
+    [BsonElement("type")]
+    public string Type { get; set; } = "Point";
+
+    /// <summary>Orden GeoJSON: longitud, latitud.</summary>
+    [BsonElement("coordinates")]
+    public List<double> Coordinates { get; set; } = [];
 }

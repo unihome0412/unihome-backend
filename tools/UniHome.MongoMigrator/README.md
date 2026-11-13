@@ -56,8 +56,9 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
   --approval-ref "<REFERENCIA_DE_APROBACION>"
 ```
 
-`--version M01-001|M03-001` es opcional; el valor predeterminado es M01-001. No se
-admiten alias, mayúsculas distintas, espacios ni nombres parciales.
+`--version M01-001|M03-001|M05-001` es opcional; el valor predeterminado es
+M01-001. No se admiten alias, mayúsculas distintas, espacios ni nombres
+parciales.
 
 ## Alcance
 
@@ -75,7 +76,12 @@ La migración crea, si faltan:
   `nombreNormalizado`, usado por HU-075 para rechazar duplicados y buscar sin
   acentos ni mayúsculas.
 
-Las migraciones M01 y M03 se seleccionan con `--version`; no se aplican en
+`M05-001` crea, si faltan:
+
+- `propiedades`, `unidades` y `aceptaciones_terminos` con sus índices de
+  propietario, búsqueda, duplicado de propiedad y unicidad de términos.
+
+Las migraciones M01, M03 y M05 se seleccionan con `--version`; no se aplican en
 cascada. El TTL solo elimina sesiones vencidas; la autorización de una sesión se comprueba
 siempre en el backend. No se crean validadores JSON para M01 porque el contrato no
 los define.

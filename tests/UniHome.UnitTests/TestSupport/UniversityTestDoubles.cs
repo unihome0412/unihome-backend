@@ -20,6 +20,8 @@ internal sealed class FakeUniversityRepository : IUniversityRepository
 
     public bool SetActiveResult { get; set; } = true;
 
+    public GeoCoordinate? Location { get; set; }
+
     public Exception? AddException { get; set; }
 
     public int LastPage { get; private set; }
@@ -48,6 +50,11 @@ internal sealed class FakeUniversityRepository : IUniversityRepository
         Guid id,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.SingleOrDefault(university => university.Id == id));
+
+    public Task<GeoCoordinate?> GetLocationAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Location);
 
     public Task<UniversityPage> ListAsync(
         int page,

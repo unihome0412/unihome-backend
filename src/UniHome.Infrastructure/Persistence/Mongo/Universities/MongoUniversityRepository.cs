@@ -80,6 +80,38 @@ internal sealed class MongoUniversityRepository : IUniversityRepository
         }
     }
 
+    public async Task<GeoCoordinate?> GetLocationAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var document = await collection
+                .Find(ByIdFilter(id))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            if (document?.Location is null ||
+                document.Location.Coordinates.Count != 2 ||
+                !string.Equals(document.Location.Type, "Point", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var coordinate = new GeoCoordinate(
+                document.Location.Coordinates[1],
+                document.Location.Coordinates[0]);
+
+            return coordinate.IsValid ? coordinate : null;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<UniversityPage> ListAsync(
         int page,
         int pageSize,
