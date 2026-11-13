@@ -12,7 +12,7 @@ internal static class CloudinaryIntegrationEnvironment
     public const string RunVariable = "UNIHOME_RUN_CLOUDINARY_INTEGRATION_TESTS";
 
     private const string SecretsId = "unihome-backend-api";
-    private static readonly Lazy<IReadOnlyDictionary<string, string>> UserSecrets =
+    private static readonly Lazy<Dictionary<string, string>> UserSecrets =
         new(LoadUserSecrets);
 
     public static string? CloudName => Read("Cloudinary__CloudName", "Cloudinary:CloudName");
@@ -30,7 +30,7 @@ internal static class CloudinaryIntegrationEnvironment
                 : null;
     }
 
-    private static IReadOnlyDictionary<string, string> LoadUserSecrets()
+    private static Dictionary<string, string> LoadUserSecrets()
     {
         var candidates = new[]
         {
