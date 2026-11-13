@@ -264,7 +264,7 @@ public sealed class ConfirmPasswordResetServiceTests
         Assert.Single(results, result => result);
         Assert.Single(results, result => !result);
         var stored = await accounts.FindByIdAsync(account.Id);
-        Assert.Contains(stored!.PasswordHash, new[] { "hash:NuevaClave1", "hash:NuevaClave2" });
+        Assert.True(stored!.PasswordHash is "hash:NuevaClave1" or "hash:NuevaClave2");
     }
 
     [Fact]

@@ -306,7 +306,7 @@ jobs:
   pact-contract:
     name: Contract Test (Pact, requiere contratos reales)
     needs: [detect-changes, contract-test]
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_PACT == 'true' && github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_PACT == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.run_mongo_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -1423,6 +1423,7 @@ jobs:
       CODE_CHANGED: ${{ needs.detect-changes.outputs.code }}
       EVENT_NAME: ${{ github.event_name }}
       EVENT_REF: ${{ github.ref }}
+      RUN_MONGO_ONLY: ${{ github.event.inputs.run_mongo_only }}
       UNIHOME_ENABLE_SONAR: ${{ vars.UNIHOME_ENABLE_SONAR }}
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
@@ -1446,6 +1447,7 @@ jobs:
       CODE_CHANGED: ${{ needs.detect-changes.outputs.code }}
       EVENT_NAME: ${{ github.event_name }}
       EVENT_REF: ${{ github.ref }}
+      RUN_MONGO_ONLY: ${{ github.event.inputs.run_mongo_only }}
       UNIHOME_ENABLE_SONAR: ${{ vars.UNIHOME_ENABLE_SONAR }}
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}

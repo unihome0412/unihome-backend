@@ -2,6 +2,8 @@ using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Identity.PasswordRecovery;
+using UniHome.Application.Identity.Sessions;
 using UniHome.Domain.Accounts;
 using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
@@ -50,6 +52,13 @@ public sealed class MongoPasswordResetPersistenceTests
             account.Id,
             expiredGenerated.Hash,
             now.AddMinutes(-31));
+        var serviceGenerated = generator.Generate();
+        var serviceToken = PasswordResetToken.Issue(
+            serviceGenerated.Id,
+            account.Id,
+            serviceGenerated.Hash,
+            now);
+        var sessionId = Guid.NewGuid();
 
         try
         {
@@ -57,6 +66,7 @@ public sealed class MongoPasswordResetPersistenceTests
             await resets.AddAsync(token);
             await resets.AddAsync(attemptToken);
             await resets.AddAsync(expiredToken);
+            await resets.AddAsync(serviceToken);
 
             var results = await Task.WhenAll(
                 resets.TryConsumeAsync(token.Id, generated.Hash, now),
@@ -110,6 +120,45 @@ public sealed class MongoPasswordResetPersistenceTests
             var storedHash = accountDocument["hashContrasena"].AsString;
             Assert.True(storedHash is "hash:concurrente-1" or "hash:concurrente-2");
 
+            var sessions = factory.Services.GetRequiredService<IRefreshSessionRepository>();
+            var passwordHasher = factory.Services.GetRequiredService<IPasswordHasher>();
+            var confirm = new ConfirmPasswordResetService(
+                accounts,
+                resets,
+                generator,
+                passwordHasher,
+                sessions,
+                factory.Services.GetRequiredService<ISystemClock>());
+            await sessions.CreateAsync(new RefreshSession(
+                sessionId,
+                account.Id,
+                "hash:refresh-vigente",
+                now,
+                now.AddDays(30),
+                [],
+                RevokedAt: null,
+                RevokedReason: null,
+                CreatedAt: now,
+                LastRotatedAt: now));
+
+            var confirmation = await confirm.ConfirmAsync(
+                new ConfirmPasswordResetCommand(serviceGenerated.Value, "NuevaClave1"));
+            Assert.Equal(ConfirmPasswordResetStatus.Success, confirmation.Status);
+
+            var storedSession = await sessions.FindByIdAsync(sessionId);
+            Assert.NotNull(storedSession);
+            Assert.NotNull(storedSession.RevokedAt);
+            Assert.Equal("password_reset", storedSession.RevokedReason);
+
+            var updatedAccount = await accounts.FindByIdAsync(account.Id);
+            Assert.NotNull(updatedAccount);
+            Assert.True(
+                passwordHasher.VerifyPassword(updatedAccount.PasswordHash, "NuevaClave1"));
+            Assert.False(await resets.TryConsumeAsync(
+                serviceToken.Id,
+                serviceGenerated.Hash,
+                now.AddMinutes(1)));
+
             var indexes = await ListIndexesAsync(collection);
             var tokenIndex = Assert.Single(
                 indexes,
@@ -140,11 +189,21 @@ public sealed class MongoPasswordResetPersistenceTests
         {
             var resetsCollection = database.GetCollection<BsonDocument>(
                 MongoIdentitySchema.AccountRecoveryCollection);
-            foreach (var id in new[] { token.Id, attemptToken.Id, expiredToken.Id })
+            foreach (var id in new[]
+                     {
+                         token.Id,
+                         attemptToken.Id,
+                         expiredToken.Id,
+                         serviceToken.Id
+                     })
             {
                 await resetsCollection.DeleteOneAsync(
                     new BsonDocument("_id", id.ToString("N")));
             }
+
+            await database
+                .GetCollection<BsonDocument>(MongoIdentitySchema.SessionsCollection)
+                .DeleteOneAsync(new BsonDocument("_id", sessionId.ToString("N")));
 
             await database
                 .GetCollection<BsonDocument>(MongoIdentitySchema.AccountsCollection)
@@ -196,7 +255,7 @@ public sealed class MongoPasswordResetPersistenceTests
                           "accountId": { "bsonType": ["objectId", "string", "binData"] },
                           "tokenHash": { "bsonType": "string", "maxLength": 4096 },
                           "expiresAt": { "bsonType": "date" },
-                          "consumedAt": { "bsonType": "date" },
+                          "consumedAt": { "bsonType": ["date", "null"] },
                           "createdAt": { "bsonType": "date" }
                         }
                       }
