@@ -17,12 +17,13 @@ public static class TestAccountFactory
         string email,
         string password = DefaultPassword,
         AccountStatus status = AccountStatus.Active,
-        bool emailConfirmed = true)
+        bool emailConfirmed = true,
+        Guid? id = null)
     {
         var now = DateTimeOffset.UtcNow;
 
         return Account.Restore(
-            Guid.NewGuid(),
+            id ?? Guid.NewGuid(),
             "Ana López",
             EmailAddress.Create(email),
             new DateOnly(2004, 5, 10),

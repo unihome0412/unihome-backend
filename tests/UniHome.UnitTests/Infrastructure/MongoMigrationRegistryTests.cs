@@ -1,19 +1,24 @@
 using MongoDB.Bson;
 using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
+using UniHome.Infrastructure.Persistence.Mongo.Universities;
 
 namespace UniHome.UnitTests.Infrastructure;
 
 public sealed class MongoMigrationRegistryTests
 {
     [Fact]
-    public void RegistroPorDefecto_DebeContenerSoloM01EnOrden()
+    public void RegistroPorDefecto_DebeContenerM01YM03EnOrden()
     {
         var registry = MongoMigrationRegistry.Default;
 
-        var migration = Assert.Single(registry.Migrations);
-        Assert.Equal(MongoIdentityMigration.Version, migration.Version);
-        Assert.Equal(MongoIdentityMigration.Definition.Checksum, migration.Checksum);
+        Assert.Equal(
+            [MongoIdentityMigration.Version, MongoUniversityMigration.Version],
+            registry.Migrations.Select(migration => migration.Version));
+        Assert.Equal(MongoIdentityMigration.Definition.Checksum, registry.Migrations[0].Checksum);
+        Assert.Equal(MongoUniversityMigration.Definition.Checksum, registry.Migrations[1].Checksum);
+        Assert.Contains(MongoIdentitySchema.AccountsCollection, registry.ManagedCollections);
+        Assert.Contains(MongoUniversitySchema.Collection, registry.ManagedCollections);
     }
 
     [Fact]

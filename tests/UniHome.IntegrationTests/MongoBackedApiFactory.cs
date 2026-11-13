@@ -39,6 +39,7 @@ public sealed class MongoBackedApiFactory : WebApplicationFactory<Program>
                 ["Jwt:RefreshTokenDays"] = "30",
                 ["VerificationCode:HmacSecret"] =
                     "unihome-mongo-integration-hmac-secret-0123456789-abcdef",
+                ["Admin:AccountIds:0"] = UniHomeApiFactory.TestAdminAccountId.ToString("N"),
                 ["Auth:RateLimit:LoginPermitLimit"] = "1000",
                 ["Auth:RateLimit:LoginWindowSeconds"] = "60",
                 ["Auth:RateLimit:RefreshPermitLimit"] = "1000",

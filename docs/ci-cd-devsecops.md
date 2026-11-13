@@ -24,14 +24,14 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Job | Variable de repositorio | Otro requisito | Evento permitido |
 |---|---|---|---|
 | SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
-| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
+| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001 y M03-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Verificador de proveedor PactNet 5.0.1 con API Kestrel aislada; requiere contratos JSON reales del consumidor Android en `pacts/`; sin ellos **falla** y permanece desactivado | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
 
-**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. La migración `M01-001` se aplica únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
+**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. Las migraciones `M01-001` y `M03-001` se aplican únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
 
 ### DAST ZAP baseline pasivo
 
@@ -210,16 +210,17 @@ dotnet stryker --config-file stryker-config.json
   `UNIHOME_MONGO_CI_LOOPBACK_ONLY=1`.
 - No se configura replica set: las pruebas de identidad y bloqueo usan índices y
   operaciones atómicas sobre un documento; no requieren transacciones.
-- Se espera la disponibilidad real del contenedor, se aplica únicamente `M01-001`
-  con `UniHome.MongoMigrator` y se verifica el ledger, checksum e índices antes de
-  las pruebas.
-- `MongoIdentityPersistenceTests` y `MongoPromotionLockPersistenceTests` se
+- Se espera la disponibilidad real del contenedor, se aplican `M01-001` y
+  `M03-001` con `UniHome.MongoMigrator` y se verifican ledger, checksum e índices
+  antes de las pruebas.
+- `MongoIdentityPersistenceTests`, `MongoPasswordResetPersistenceTests`,
+  `MongoUniversityPersistenceTests` y `MongoPromotionLockPersistenceTests` se
   ejecutan contra MongoDB real; el correo se sustituye por un doble en memoria.
   No se envían correos.
-- Un script valida el TRX: exige las dos pruebas, rechaza `NotExecuted`, falla si
-  hay cero resultados, si la inicialización no terminó o si el paso de pruebas no
-  fue exitoso. El resumen incluye versión, base, conteos, duración, inicialización
-  y resultado final.
+- Un script valida el TRX: exige las cuatro pruebas, rechaza `NotExecuted`, falla
+  si hay cero resultados, si la inicialización no terminó o si el paso de pruebas
+  no fue exitoso. El resumen incluye versión, base, conteos, duración,
+  inicialización y resultado final.
 - Evidencia: `mongodb-ci-results` con el TRX, la salida de migración/verificación
   y el resumen Markdown. El contenedor se destruye al finalizar el job y la base
   temporal se elimina explícitamente.

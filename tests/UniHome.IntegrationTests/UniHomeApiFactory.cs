@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Universities.Abstractions;
 using UniHome.Infrastructure.Configuration;
 using UniHome.IntegrationTests.TestSupport;
 using Xunit;
@@ -37,11 +38,17 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     public const string TestVerificationCodeHmacSecret =
         "unihome-test-verification-code-hmac-secret-0123456789";
 
+    /// <summary>Cuenta interna usada solo por las pruebas de rutas /admin.</summary>
+    public static readonly Guid TestAdminAccountId =
+        Guid.Parse("d3b07384-d9a0-4f5a-8a8d-1a2b3c4d5e6f");
+
     public InMemoryAccountRepository Accounts { get; } = new();
 
     public InMemoryRefreshSessionRepository Sessions { get; } = new();
 
     public InMemoryPasswordResetRepository PasswordResets { get; } = new();
+
+    public InMemoryUniversityRepository Universities { get; } = new();
 
     public CapturingVerificationEmailSender EmailSender { get; } = new();
 
@@ -68,6 +75,7 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
                 ["Jwt:AccessTokenMinutes"] = "60",
                 ["Jwt:RefreshTokenDays"] = "30",
                 ["VerificationCode:HmacSecret"] = TestVerificationCodeHmacSecret,
+                ["Admin:AccountIds:0"] = TestAdminAccountId.ToString("N"),
                 ["Redis:Enabled"] = "false",
                 ["Auth:RateLimit:IpHashSalt"] = "unihome-dev-test-salt-0123456789-abcdef",
                 ["Auth:RateLimit:LoginPermitLimit"] = "1000",
@@ -102,6 +110,9 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
             services.RemoveAll<IPasswordResetRepository>();
             services.AddSingleton<IPasswordResetRepository>(PasswordResets);
+
+            services.RemoveAll<IUniversityRepository>();
+            services.AddSingleton<IUniversityRepository>(Universities);
 
             services.RemoveAll<IVerificationEmailSender>();
             services.AddSingleton<IVerificationEmailSender>(EmailSender);

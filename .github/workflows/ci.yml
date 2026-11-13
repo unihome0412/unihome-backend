@@ -501,30 +501,43 @@ jobs:
         run: dotnet restore UniHome.Backend.slnx --locked-mode
       - name: Build Release
         run: dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
-      - name: Inicializar base efímera con M01-001
+      - name: Inicializar base efímera con M01-001 y M03-001
         id: mongo-migration
         run: |
           set -euo pipefail
           mkdir -p TestResults/mongo
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
-            apply --database unihome_ci_verificacion --confirm \
+            apply --database unihome_ci_verificacion --confirm --version M01-001 \
             | tee TestResults/mongo/migration-apply.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
-            verify --database unihome_ci_verificacion \
+            verify --database unihome_ci_verificacion --version M01-001 \
             | tee TestResults/mongo/migration-verify.txt
           grep -F 'Registrada: True' TestResults/mongo/migration-verify.txt
           grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify.txt
           grep -F 'M01 coinciden: True' TestResults/mongo/migration-verify.txt
           grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify.txt
           grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database unihome_ci_verificacion --confirm --version M03-001 \
+            | tee TestResults/mongo/migration-apply-m03.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database unihome_ci_verificacion --version M03-001 \
+            | tee TestResults/mongo/migration-verify-m03.txt
+          grep -F 'Registrada: True' TestResults/mongo/migration-verify-m03.txt
+          grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify-m03.txt
+          grep -F 'Índices M03-001 coinciden: True' TestResults/mongo/migration-verify-m03.txt
+          grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m03.txt
+          grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m03.txt
       - name: Pruebas reales contra MongoDB
         id: mongo-tests
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
           --configuration Release --no-build --no-restore
-          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests|FullyQualifiedName~MongoPasswordResetPersistenceTests"
+          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests|FullyQualifiedName~MongoPasswordResetPersistenceTests|FullyQualifiedName~MongoUniversityPersistenceTests"
           --logger "trx;LogFileName=mongo-ci.trx"
           --results-directory TestResults/mongo
       - name: Validar evidencias y resumir MongoDB

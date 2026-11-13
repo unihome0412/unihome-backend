@@ -126,6 +126,10 @@ Todas tienen `_id_`; índices adicionales observados:
 | `universidades` | `geo_universidades`, `ix_universidades_nombre` |
 | `vinculos_ocupacion` | `ix_ocupacion_inquilino_estado`, `ix_ocupacion_unidad_estado` |
 
+`universidades` ya tiene una migración versionada propia (`M03-001`) para el
+catálogo de HU-075; el detalle y la conciliación pendiente con el índice externo
+están en [`mongodb-m03.md`](mongodb-m03.md).
+
 Los índices `geo_*` observados son `2dsphere`; se mantienen GeoJSON,
 los documentos privados de propiedad, Decimal128 y pagos externos informativos
 como requisitos para las futuras implementaciones, sin declararlos implementados.

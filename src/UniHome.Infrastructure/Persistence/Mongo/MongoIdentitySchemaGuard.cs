@@ -3,19 +3,22 @@ using MongoDB.Driver;
 using UniHome.Application.Identity.Exceptions;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
+using UniHome.Infrastructure.Persistence.Mongo.Universities;
 
 namespace UniHome.Infrastructure.Persistence.Mongo;
 
 /// <summary>
-/// Fail-closed sin DDL ni caché: verifica índices antes de utilizar cada colección.
-/// La identidad de ejecución necesita listIndexes, no createIndex/createCollection.
+/// Fail-closed sin DDL ni caché: verifica índices antes de utilizar cada colección
+/// operativa (identidad, recuperación y universidades). La identidad de ejecución
+/// necesita listIndexes, no createIndex/createCollection.
 /// </summary>
 internal static class MongoIdentitySchemaGuard
 {
     private static readonly MongoCollectionDefinition[] Definitions =
     [
         .. MongoIdentityMigration.Definition.Collections,
-        MongoPasswordResetIndexes.Definition
+        MongoPasswordResetIndexes.Definition,
+        MongoUniversityIndexes.Definition
     ];
 
     public static async Task EnsureAsync<TDocument>(

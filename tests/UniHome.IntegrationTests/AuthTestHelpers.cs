@@ -19,13 +19,15 @@ internal static class AuthTestHelpers
         UniHomeApiFactory factory,
         string email,
         AccountStatus status = AccountStatus.Active,
-        bool emailConfirmed = true)
+        bool emailConfirmed = true,
+        Guid? id = null)
     {
         var account = TestSupport.TestAccountFactory.Create(
             email,
             Password,
             status,
-            emailConfirmed);
+            emailConfirmed,
+            id);
 
         await factory.Accounts.AddAsync(account);
         return account;
