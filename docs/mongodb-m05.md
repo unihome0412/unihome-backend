@@ -58,7 +58,7 @@ dotnet run --project tools/UniHome.MongoMigrator -- verify `
   --database unihome_modelo_pruebas --version M05-001
 ```
 
-El job `mongo-db-test` aplica M01-001, M03-001 y M05-001 en
+El job `mongo-db-test` aplica M01-001, M01-002, M03-001 y M05-001 en
 `unihome_ci_verificacion` y ejecuta la prueba real
 `MongoPublicationPersistenceTests`.
 

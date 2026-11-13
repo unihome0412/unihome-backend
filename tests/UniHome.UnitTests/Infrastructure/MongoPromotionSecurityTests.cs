@@ -27,7 +27,7 @@ public sealed class MongoPromotionSecurityTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("unihome_modelo_pruebas")]
-    [InlineData("unihome_verificacion")]
+    [InlineData("unihome_otra")]
     [InlineData("UNIHOME_DESARROLLO")]
     [InlineData(" unihome_desarrollo")]
     [InlineData("unihome_desarrollo ")]
@@ -112,6 +112,33 @@ public sealed class MongoPromotionSecurityTests
         Assert.Equal(MongoPromotionGuard.TargetDatabaseName, authorization.ConfirmationDatabase);
         Assert.Equal(MongoPromotionGuard.TargetDatabaseName, authorization.AuthorizedDatabase);
         Assert.Equal(MongoIdentityMigration.Version, authorization.Version);
+    }
+
+    [Fact]
+    public void DestinoVerificacion_ConAutorizacionExacta_DebeAceptarse()
+    {
+        var authorization = MongoPromotionGuard.EnsureAuthorized(
+            MongoPromotionGuard.VerificationTargetDatabaseName,
+            MongoPromotionGuard.VerificationTargetDatabaseName,
+            MongoPromotionGuard.VerificationTargetDatabaseName,
+            "APR-VERIF-001");
+
+        Assert.Equal(MongoPromotionGuard.VerificationTargetDatabaseName, authorization.DatabaseName);
+        Assert.Equal(MongoPromotionGuard.VerificationTargetDatabaseName, authorization.ConfirmationDatabase);
+        Assert.Equal(MongoPromotionGuard.VerificationTargetDatabaseName, authorization.AuthorizedDatabase);
+    }
+
+    [Theory]
+    [InlineData("unihome_desarrollo")]
+    [InlineData("unihome_modelo_pruebas")]
+    public void DestinoVerificacion_ConAutorizacionDeOtroDestino_DebeRechazarse(string authorized)
+    {
+        Assert.Throws<MongoPromotionAuthorizationException>(() =>
+            MongoPromotionGuard.EnsureAuthorized(
+                MongoPromotionGuard.VerificationTargetDatabaseName,
+                MongoPromotionGuard.VerificationTargetDatabaseName,
+                authorized,
+                "APR-VERIF-001"));
     }
 
     [Theory]

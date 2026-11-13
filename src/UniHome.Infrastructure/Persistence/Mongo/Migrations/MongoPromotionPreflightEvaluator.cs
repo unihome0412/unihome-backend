@@ -3,9 +3,12 @@ using MongoDB.Bson;
 namespace UniHome.Infrastructure.Persistence.Mongo.Migrations;
 
 /// <summary>
-/// Evalúa un snapshot de solo lectura y un plan sin escribir. Distingue una base
-/// vacía, una ejecución parcial recuperable, una migración aplicada y una
-/// divergencia que debe auditarse. No lee documentos ni imprime valores.
+/// Evalúa un snapshot de solo lectura y un plan sin escribir. Para permitir la
+/// publicación incremental exige que todas las migraciones anteriores del registro
+/// estén aplicadas y que sus colecciones/índices/validadores coincidan; solo la
+/// migración seleccionada puede estar incompleta. Distingue una base vacía, una
+/// ejecución parcial recuperable, una migración aplicada y una divergencia que debe
+/// auditarse. No lee documentos ni imprime valores.
 /// </summary>
 public static class MongoPromotionPreflightEvaluator
 {
@@ -21,14 +24,22 @@ public static class MongoPromotionPreflightEvaluator
         ArgumentNullException.ThrowIfNull(registry);
 
         var issues = new List<string>(planIssues ?? []);
-        var allowedCollections = migration.Collections
+        var orderedMigrations = registry.GetUpTo(migration.Version);
+        var priorMigrations = orderedMigrations
+            .Where(item => !string.Equals(
+                item.Version,
+                migration.Version,
+                StringComparison.Ordinal))
+            .ToArray();
+        var allowedCollections = orderedMigrations
+            .SelectMany(item => item.Collections)
             .Select(collection => collection.Name)
             .Append(MongoIdentitySchema.MigrationLedgerCollection)
             .ToHashSet(StringComparer.Ordinal);
 
-        if (!MongoPromotionGuard.IsExactTarget(snapshot.DatabaseName))
+        if (!MongoPromotionGuard.IsAllowedTarget(snapshot.DatabaseName))
         {
-            issues.Add("La base del snapshot no es el destino de promoción exacto.");
+            issues.Add("La base del snapshot no es un destino de promoción autorizado.");
         }
 
         var duplicateCollections = snapshot.Collections
@@ -45,7 +56,7 @@ public static class MongoPromotionPreflightEvaluator
         foreach (var collection in snapshot.Collections.Where(collection =>
                      !allowedCollections.Contains(collection.Name)))
         {
-            issues.Add($"Colección no administrada por la migración: {collection.Name}.");
+            issues.Add($"Colección no administrada por las migraciones anteriores: {collection.Name}.");
         }
 
         var collectionByName = snapshot.Collections
@@ -83,15 +94,15 @@ public static class MongoPromotionPreflightEvaluator
             issues.Add($"Versión duplicada en el ledger: {group.Key}.");
         }
 
-        var registeredVersions = registry.Migrations
+        var orderedVersions = orderedMigrations
             .Select(item => item.Version)
             .ToHashSet(StringComparer.Ordinal);
 
         foreach (var record in snapshot.Ledger)
         {
-            if (!registeredVersions.Contains(record.Version))
+            if (!orderedVersions.Contains(record.Version))
             {
-                issues.Add($"Versión de ledger no registrada: {record.Version}.");
+                issues.Add($"Versión de ledger no registrada o posterior a la migración: {record.Version}.");
             }
         }
 
@@ -107,6 +118,38 @@ public static class MongoPromotionPreflightEvaluator
         var indexesComplete = true;
         var managedCollectionsPresent = false;
 
+        foreach (var previous in priorMigrations)
+        {
+            var previousLedger = snapshot.Ledger.FirstOrDefault(record =>
+                string.Equals(record.Version, previous.Version, StringComparison.Ordinal));
+
+            if (previousLedger is null)
+            {
+                issues.Add($"La migración previa {previous.Version} no está aplicada.");
+            }
+            else if (!string.Equals(
+                         previousLedger.Checksum,
+                         previous.Checksum,
+                         StringComparison.OrdinalIgnoreCase))
+            {
+                issues.Add($"La migración previa {previous.Version} tiene un checksum distinto en el ledger.");
+            }
+
+            foreach (var definition in previous.Collections)
+            {
+                if (!collectionByName.TryGetValue(definition.Name, out var collection))
+                {
+                    issues.Add(
+                        $"Falta la colección {definition.Name} de la migración previa {previous.Version}.");
+                    continue;
+                }
+
+                managedCollectionsPresent = true;
+                ValidateDefinition(definition, collection, requireEmpty: false, issues);
+                ValidateIndexes(definition, collection, issues);
+            }
+        }
+
         foreach (var definition in migration.Collections)
         {
             if (!collectionByName.TryGetValue(definition.Name, out var collection))
@@ -115,26 +158,7 @@ public static class MongoPromotionPreflightEvaluator
             }
 
             managedCollectionsPresent = true;
-
-            if (collection.HasDocuments)
-            {
-                issues.Add($"La colección {definition.Name} contiene documentos; no se promueve sobre datos.");
-            }
-
-            if (definition.Validator is null)
-            {
-                if (collection.HasValidator || collection.Validator is not null)
-                {
-                    issues.Add($"Validador no previsto: {definition.Name}.");
-                }
-            }
-            else if (!definition.Validator.Matches(
-                         collection.Validator,
-                         collection.ValidationLevel,
-                         collection.ValidationAction))
-            {
-                issues.Add($"Validador divergente: {definition.Name}.");
-            }
+            ValidateDefinition(definition, collection, requireEmpty: true, issues);
 
             var inspection = MongoIndexCatalog.Inspect(definition, collection.Indexes);
             issues.AddRange(inspection.Issues);
@@ -147,9 +171,9 @@ public static class MongoPromotionPreflightEvaluator
 
         if (plan is not null)
         {
-            if (!MongoPromotionGuard.IsExactTarget(plan.DatabaseName))
+            if (!MongoPromotionGuard.IsAllowedTarget(plan.DatabaseName))
             {
-                issues.Add("El plan no corresponde al destino de promoción exacto.");
+                issues.Add("El plan no corresponde a un destino de promoción autorizado.");
             }
 
             if (!string.Equals(plan.Version, migration.Version, StringComparison.Ordinal))
@@ -222,5 +246,53 @@ public static class MongoPromotionPreflightEvaluator
             snapshot.Collections.Count == 0,
             plan?.Writes ?? [],
             issues);
+    }
+
+    private static void ValidateDefinition(
+        MongoCollectionDefinition definition,
+        MongoCollectionSnapshot collection,
+        bool requireEmpty,
+        ICollection<string> issues)
+    {
+        if (requireEmpty && collection.HasDocuments)
+        {
+            issues.Add($"La colección {definition.Name} contiene documentos; no se promueve sobre datos.");
+        }
+
+        if (definition.Validator is null)
+        {
+            if (collection.HasValidator || collection.Validator is not null)
+            {
+                issues.Add($"Validador no previsto: {definition.Name}.");
+            }
+
+            return;
+        }
+
+        if (!definition.Validator.Matches(
+                collection.Validator,
+                collection.ValidationLevel,
+                collection.ValidationAction))
+        {
+            issues.Add($"Validador divergente: {definition.Name}.");
+        }
+    }
+
+    private static void ValidateIndexes(
+        MongoCollectionDefinition definition,
+        MongoCollectionSnapshot collection,
+        ICollection<string> issues)
+    {
+        var inspection = MongoIndexCatalog.Inspect(definition, collection.Indexes);
+
+        foreach (var issue in inspection.Issues)
+        {
+            issues.Add(issue);
+        }
+
+        foreach (var missing in inspection.Missing)
+        {
+            issues.Add($"?ndice ausente en {definition.Name}: {missing.Name}.");
+        }
     }
 }
