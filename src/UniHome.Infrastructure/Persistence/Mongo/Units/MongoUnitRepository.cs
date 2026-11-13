@@ -7,6 +7,7 @@ using UniHome.Application.Identity.Exceptions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
+using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 
 namespace UniHome.Infrastructure.Persistence.Mongo.Units;
@@ -56,6 +57,102 @@ internal sealed class MongoUnitRepository : IUnitRepository
                 .ConfigureAwait(false);
 
             return document is null ? null : ToDomain(document);
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<IReadOnlyList<Unit>> FindByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var stringIds = ids
+                .Select(id => id.ToString("N", CultureInfo.InvariantCulture))
+                .ToArray();
+            var documents = await collection
+                .Find(Builders<UnitDocument>.Filter.In(document => document.Id, stringIds))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents.Select(ToDomain).ToArray();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<IReadOnlyList<Unit>> ListPublicCandidatesAsync(
+        Guid universityId,
+        decimal? maxPriceMxn,
+        bool onlyIndividual,
+        ForWhom? forWhom,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filters = new List<FilterDefinition<UnitDocument>>
+            {
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.UniversityId,
+                    universityId.ToString("N", CultureInfo.InvariantCulture)),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.PublicationState,
+                    PublicationState.Aprobada.ToString()),
+                Builders<UnitDocument>.Filter.Or(
+                    Builders<UnitDocument>.Filter.Eq(
+                        document => document.AvailabilityState,
+                        UnitAvailability.Disponible.ToString()),
+                    Builders<UnitDocument>.Filter.Exists(
+                        document => document.AvailabilityState,
+                        false))
+            };
+
+            if (maxPriceMxn is not null)
+            {
+                filters.Add(Builders<UnitDocument>.Filter.Lte(
+                    document => document.PricePerPlace,
+                    maxPriceMxn.Value));
+            }
+
+            if (onlyIndividual)
+            {
+                filters.Add(Builders<UnitDocument>.Filter.Eq(
+                    document => document.Occupancy,
+                    Occupancy.Individual.ToString()));
+            }
+
+            if (forWhom is not null)
+            {
+                filters.Add(Builders<UnitDocument>.Filter.Eq(
+                    document => document.ForWhom,
+                    forWhom.Value.ToString()));
+            }
+
+            var documents = await collection
+                .Find(Builders<UnitDocument>.Filter.And(filters))
+                .Sort(Builders<UnitDocument>.Sort
+                    .Ascending(document => document.PricePerPlace)
+                    .Ascending(document => document.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents.Select(ToDomain).ToArray();
         }
         catch (MongoException exception)
         {
@@ -206,6 +303,7 @@ internal sealed class MongoUnitRepository : IUnitRepository
             Services = unit.Services.Select(ToDocument).ToList(),
             Photos = unit.Photos.Select(ToDocument).ToList(),
             PublicationState = unit.PublicationState.ToString(),
+            AvailabilityState = unit.Availability.ToString(),
             CreatedAt = unit.CreatedAt.UtcDateTime
         };
 
@@ -253,7 +351,10 @@ internal sealed class MongoUnitRepository : IUnitRepository
             document.Photos.Select(ToDomain),
             Enum.Parse<PublicationState>(document.PublicationState),
             new DateTimeOffset(
-                DateTime.SpecifyKind(document.CreatedAt, DateTimeKind.Utc)));
+                DateTime.SpecifyKind(document.CreatedAt, DateTimeKind.Utc)),
+            string.IsNullOrWhiteSpace(document.AvailabilityState)
+                ? UnitAvailability.Disponible
+                : Enum.Parse<UnitAvailability>(document.AvailabilityState));
 
     private static ServiceCharge ToDomain(ServiceChargeDocument document) =>
         ServiceCharge.Create(

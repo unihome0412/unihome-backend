@@ -1,4 +1,5 @@
 using UniHome.Application.Units.Abstractions;
+using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
 
 namespace UniHome.IntegrationTests.TestSupport;
@@ -37,6 +38,51 @@ public sealed class InMemoryUnitRepository : IUnitRepository
         {
             _units.TryGetValue(id, out var unit);
             return Task.FromResult(unit);
+        }
+    }
+
+    public Task<IReadOnlyList<Unit>> FindByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<Unit> items = _units
+                .Where(pair => ids.Contains(pair.Key))
+                .Select(pair => pair.Value)
+                .ToArray();
+            return Task.FromResult(items);
+        }
+    }
+
+    public Task<IReadOnlyList<Unit>> ListPublicCandidatesAsync(
+        Guid universityId,
+        decimal? maxPriceMxn,
+        bool onlyIndividual,
+        ForWhom? forWhom,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<Unit> items = _units.Values
+                .Where(unit => unit.UniversityId == universityId)
+                .Where(unit => unit.PublicationState == PublicationState.Aprobada)
+                .Where(unit => unit.Availability == UnitAvailability.Disponible)
+                .Where(unit => maxPriceMxn is null || unit.PricePerPlace <= maxPriceMxn)
+                .Where(unit => !onlyIndividual || unit.Occupancy == Occupancy.Individual)
+                .Where(unit => forWhom is null || unit.ForWhom == forWhom)
+                .OrderBy(unit => unit.PricePerPlace)
+                .ThenBy(unit => unit.Id)
+                .ToArray();
+            return Task.FromResult(items);
+        }
+    }
+
+    public void Replace(Unit unit)
+    {
+        lock (_gate)
+        {
+            _units[unit.Id] = unit;
         }
     }
 

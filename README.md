@@ -220,12 +220,26 @@ sobre `nombreNormalizado`. La migración versionada `M03-001` crea la colección
 índice; el adaptador verifica el esquema en modo lectura y falla cerrada si falta o
 diverge. Detalle en [`docs/mongodb-m03.md`](docs/mongodb-m03.md).
 
+M07 usa `favoritos` (`accountId`, `unitId`, `createdAt`) con ?ndice ?nico
+`ux_favoritos_cuenta_unidad` y la migraci?n `M07-001`; no cambia M05-001. Detalle
+en [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
+
 M05 usa `propiedades`, `unidades` y `aceptaciones_terminos` con la migración
 `M05-001`; las fotos guardan solo metadatos y el binario depende de DEC-04. Detalle en
 [`docs/mongodb-m05.md`](docs/mongodb-m05.md).
 
+Sprint 3 / M04-M07: `GET /api/v1/exploracion/mapa`, `GET /api/v1/exploracion/lista`,
+`GET /api/v1/unidades/{id}/tarjeta`, `GET /api/v1/unidades/{id}/ficha`,
+`PUT/DELETE /api/v1/favoritos/{id}` y `GET /api/v1/favoritos`. Mapa, lista y tarjeta
+son p?blicos (la tarjeta acepta Bearer opcional para `esFavorito`); ficha y favoritos
+exigen sesi?n. Solo se exponen unidades Aprobadas y Disponibles. HU-007 reutiliza la
+b?squeda M03 existente. No se expone correo ni tel?fono del arrendador. La distancia
+usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
+[`docs/sprint-03-cierre.md`](docs/sprint-03-cierre.md) y
+[`docs/mongodb-m07.md`](docs/mongodb-m07.md).
+
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001`, `M03-001` y `M05-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001`, `M05-001` y `M07-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -236,6 +250,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M03-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M05-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M05-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M07-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M07-001
 ```
 
 La migración ordinaria solo escribe en `unihome_modelo_pruebas` o en una base incluida
@@ -340,9 +356,9 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 `UNIHOME_ENABLE_MONGO_CI=true`) levanta MongoDB Community 8.0.34 dentro del runner
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
-`unihome_ci_verificacion`, se aplican `M01-001`, `M03-001` y `M05-001` a esa base
+`unihome_ci_verificacion`, se aplican `M01-001`, `M03-001`, `M05-001` y `M07-001` a esa base
 temporal y las pruebas reales de identidad, recuperación de contraseña, universidades,
-publicaciones y bloqueo distribuido se ejecutan con TRX. El job falla
+publicaciones, exploraci?n/favoritos y bloqueo distribuido se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
 La ejecución manual de verificación
@@ -494,6 +510,10 @@ declara listo para el primer despliegue hasta completar esos pasos.
   aprobar/configurar el proveedor; no se usó almacenamiento simulado en producción.
 - El Sprint 2 no implementa el envío a revisión ni el expediente de M06 (HU-013/HU-027,
   Sprint 4); las unidades permanecen en `Borrador`.
+- M04/M07 requieren que M06 apruebe publicaciones para que existan unidades p?blicas
+  reales; `arrendadorVerificado` permanece `false` hasta la verificaci?n de M06.
+- La ubicaci?n de universidad no se administra por M03; sin ella la distancia es null
+  y un filtro `distanciaMaxKm` responde 400. Se requiere carga controlada.
 - El perfil devuelve `etiquetaCuenta=UsuarioUniHome` y `vinculadoAUnidad=false`
   mientras M05/M06/M09 no existan. Son indicadores derivados, no estados
   persistidos; deberán conectarse a esos módulos sin cambiar el contrato.

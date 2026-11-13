@@ -1,5 +1,6 @@
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
+using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 
 namespace UniHome.Infrastructure.Persistence.Mongo.Publications;
 
@@ -123,6 +124,10 @@ public sealed class UnitDocument
 
     [BsonElement(MongoPublicationSchema.UnitStateField)]
     public string PublicationState { get; set; } = string.Empty;
+
+    [BsonElement(MongoExplorationSchema.UnitAvailabilityField)]
+    [BsonIgnoreIfNull]
+    public string? AvailabilityState { get; set; }
 
     [BsonElement(MongoPublicationSchema.UnitCreatedAtField)]
     public DateTime CreatedAt { get; set; }
