@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace UniHome.IntegrationTests.TestSupport;
 
 /// <summary>
@@ -9,9 +11,74 @@ internal static class CloudinaryIntegrationEnvironment
 {
     public const string RunVariable = "UNIHOME_RUN_CLOUDINARY_INTEGRATION_TESTS";
 
-    public static string? CloudName => Environment.GetEnvironmentVariable("Cloudinary__CloudName");
-    public static string? ApiKey => Environment.GetEnvironmentVariable("Cloudinary__ApiKey");
-    public static string? ApiSecret => Environment.GetEnvironmentVariable("Cloudinary__ApiSecret");
+    private const string SecretsId = "unihome-backend-api";
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> UserSecrets =
+        new(LoadUserSecrets);
+
+    public static string? CloudName => Read("Cloudinary__CloudName", "Cloudinary:CloudName");
+    public static string? ApiKey => Read("Cloudinary__ApiKey", "Cloudinary:ApiKey");
+    public static string? ApiSecret => Read("Cloudinary__ApiSecret", "Cloudinary:ApiSecret");
+
+    private static string? Read(string environmentName, string secretName)
+    {
+        var value = Environment.GetEnvironmentVariable(environmentName);
+        return !string.IsNullOrWhiteSpace(value)
+            ? value
+            : UserSecrets.Value.TryGetValue(secretName, out var secret) &&
+              !string.IsNullOrWhiteSpace(secret)
+                ? secret
+                : null;
+    }
+
+    private static IReadOnlyDictionary<string, string> LoadUserSecrets()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Microsoft",
+                "UserSecrets",
+                SecretsId,
+                "secrets.json"),
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".microsoft",
+                "usersecrets",
+                SecretsId,
+                "secrets.json")
+        };
+
+        foreach (var path in candidates)
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(path));
+                var values = new Dictionary<string, string>(StringComparer.Ordinal);
+
+                foreach (var property in document.RootElement.EnumerateObject())
+                {
+                    if (property.Value.ValueKind == JsonValueKind.String)
+                    {
+                        values[property.Name] = property.Value.GetString() ?? string.Empty;
+                    }
+                }
+
+                return values;
+            }
+            catch (Exception)
+            {
+                // No se registra el contenido ni la ruta de secretos.
+                return new Dictionary<string, string>(StringComparer.Ordinal);
+            }
+        }
+
+        return new Dictionary<string, string>(StringComparer.Ordinal);
+    }
 
     public static bool IsRunRequested =>
         string.Equals(
