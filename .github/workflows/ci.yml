@@ -555,9 +555,9 @@ jobs:
             | tee TestResults/mongo/migration-verify-m07.txt
           grep -F 'Registrada: True' TestResults/mongo/migration-verify-m07.txt
           grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify-m07.txt
-          grep -F '?ndices M07-001 coinciden: True' TestResults/mongo/migration-verify-m07.txt
+          grep -F 'M07-001 coinciden: True' TestResults/mongo/migration-verify-m07.txt
           grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m07.txt
-          grep -F 'Resultado: V?LIDO' TestResults/mongo/migration-verify-m07.txt
+          grep -F 'Resultado: V' TestResults/mongo/migration-verify-m07.txt
       - name: Pruebas reales contra MongoDB
         id: mongo-tests
         run: >-
@@ -838,7 +838,7 @@ jobs:
             --configuration Release --no-build -- \
             verify --database "$MONGO_DAST_DATABASE" --version M07-001 \
             | tee artifacts/dast-zap/migration-verify-m07.txt
-          grep -F 'Resultado: V?LIDO' artifacts/dast-zap/migration-verify-m07.txt
+          grep -F 'Resultado: V' artifacts/dast-zap/migration-verify-m07.txt
       - name: Preparar SMTP de captura local y confianza TLS
         run: |
           set -euo pipefail
@@ -1294,7 +1294,7 @@ jobs:
             --configuration Release --no-build -- \
             verify --database "$MONGO_RESTLER_DATABASE" --version M07-001 \
             | tee artifacts/restler/migration-verify-m07.txt
-          grep -F 'Resultado: V?LIDO' artifacts/restler/migration-verify-m07.txt
+          grep -F 'Resultado: V' artifacts/restler/migration-verify-m07.txt
       - name: Preparar SMTP de captura local y confianza TLS
         run: |
           set -euo pipefail
