@@ -101,7 +101,7 @@ No se modificaron rutas ni contratos existentes de forma incompatible.
 - Build Release: 0 advertencias, 0 errores.
 - Formato: sin cambios.
 - Unitarias: 457/457.
-- Integración regular: 163/163; 4 pruebas MongoDB opt-in omitidas en el job normal.
+- Integración regular: 164/164; 4 pruebas MongoDB opt-in omitidas en el job normal.
 - OpenAPI: 10/10 en el filtro local.
 - Python CI: 133/133.
 - La evidencia de MongoDB real, SonarCloud, CodeQL y demás gates se registra en

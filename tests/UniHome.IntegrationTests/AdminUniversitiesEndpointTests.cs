@@ -342,6 +342,20 @@ public sealed class AdminUniversitiesEndpointTests : IClassFixture<UniHomeApiFac
     }
 
     [Fact]
+    public async Task CambiarEstado_SinActiva_DebeResponder400()
+    {
+        await AuthenticateAsAdminAsync();
+        var university = await CreateUniversityAsync(
+            $"Universidad Sin Estado {Guid.NewGuid():N}");
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{university.Id}/estado",
+            new { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task CambiarEstado_Inexistente_DebeResponder404()
     {
         await AuthenticateAsAdminAsync();
