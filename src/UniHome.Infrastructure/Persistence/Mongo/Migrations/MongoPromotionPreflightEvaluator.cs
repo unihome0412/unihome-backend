@@ -252,7 +252,7 @@ public static class MongoPromotionPreflightEvaluator
         MongoCollectionDefinition definition,
         MongoCollectionSnapshot collection,
         bool requireEmpty,
-        ICollection<string> issues)
+        List<string> issues)
     {
         if (requireEmpty && collection.HasDocuments)
         {
@@ -281,7 +281,7 @@ public static class MongoPromotionPreflightEvaluator
     private static void ValidateIndexes(
         MongoCollectionDefinition definition,
         MongoCollectionSnapshot collection,
-        ICollection<string> issues)
+        List<string> issues)
     {
         var inspection = MongoIndexCatalog.Inspect(definition, collection.Indexes);
 
