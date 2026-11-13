@@ -531,7 +531,7 @@ jobs:
           grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify-m01-002.txt
           grep -F 'M01-002 coinciden: True' TestResults/mongo/migration-verify-m01-002.txt
           grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m01-002.txt
-          grep -F 'Resultado: V?LIDO' TestResults/mongo/migration-verify-m01-002.txt
+          grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m01-002.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
             apply --database unihome_ci_verificacion --confirm --version M03-001 \
@@ -820,7 +820,7 @@ jobs:
             --configuration Release --no-build -- \
             verify --database "$MONGO_DAST_DATABASE" --version M01-002 \
             | tee artifacts/dast-zap/migration-verify-m01-002.txt
-          grep -F 'Resultado: V?LIDO' artifacts/dast-zap/migration-verify-m01-002.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m01-002.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
             apply --database "$MONGO_DAST_DATABASE" --confirm --version M03-001 \
@@ -1276,7 +1276,7 @@ jobs:
             --configuration Release --no-build -- \
             verify --database "$MONGO_RESTLER_DATABASE" --version M01-002 \
             | tee artifacts/restler/migration-verify-m01-002.txt
-          grep -F 'Resultado: V?LIDO' artifacts/restler/migration-verify-m01-002.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m01-002.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
             apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M03-001 \
