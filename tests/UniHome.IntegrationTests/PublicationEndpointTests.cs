@@ -15,6 +15,7 @@ public sealed class PublicationEndpointTests : IClassFixture<UniHomeApiFactory>
     private const string AdultEmail = "publication.adult@uni.edu";
     private const string OtherEmail = "publication.other@uni.edu";
     private const string MinorEmail = "publication.minor@uni.edu";
+    private static readonly string[] SingleFurniture = ["Cama"];
 
     private readonly UniHomeApiFactory _factory;
     private readonly HttpClient _client;
@@ -152,7 +153,7 @@ public sealed class PublicationEndpointTests : IClassFixture<UniHomeApiFactory>
                 precioMensualPorLugarMxn = 3500,
                 tamanoM2 = 12,
                 plantillaBase = "HabitacionIndividual",
-                muebles = new[] { "Cama" }
+                muebles = SingleFurniture
             });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -339,7 +340,7 @@ public sealed class PublicationEndpointTests : IClassFixture<UniHomeApiFactory>
                 paraQuien = "Mixto",
                 bano = "Privado",
                 mobiliario = "Amueblado",
-                muebles = new[] { "Cama" }
+                muebles = SingleFurniture
             });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());

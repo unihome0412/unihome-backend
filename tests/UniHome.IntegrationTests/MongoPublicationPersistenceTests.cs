@@ -24,6 +24,7 @@ namespace UniHome.IntegrationTests;
 public sealed class MongoPublicationPersistenceTests
 {
     private const string Email = "mongo.publication.owner@example.invalid";
+    private static readonly string[] FurnitureItems = ["Cama", "Escritorio"];
 
     [MongoIntegrationFact]
     public async Task FlujoM05_DebePersistirPropiedadUnidadServiciosZonaFotosYTerminos()
@@ -96,7 +97,7 @@ public sealed class MongoPublicationPersistenceTests
                     paraQuien = "Mixto",
                     bano = "Privado",
                     mobiliario = "Amueblado",
-                    muebles = new[] { "Cama", "Escritorio" }
+                    muebles = FurnitureItems
                 });
             Assert.Equal(HttpStatusCode.Created, unitResponse.StatusCode);
             using var unitJson = JsonDocument.Parse(await unitResponse.Content.ReadAsStringAsync());

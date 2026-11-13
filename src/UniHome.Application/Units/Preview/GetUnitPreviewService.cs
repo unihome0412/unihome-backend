@@ -3,6 +3,7 @@ using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Domain.Common;
+using UniHome.Domain.Units;
 
 namespace UniHome.Application.Units.Preview;
 
@@ -56,8 +57,22 @@ public sealed class GetUnitPreviewService
             return OperationResult<UnitPreviewView>.NotFound();
         }
 
-        var primaryPhoto = unit.Photos.FirstOrDefault(photo => photo.IsPrimary) ??
-                           unit.Photos.FirstOrDefault();
+        UnitPhoto? primaryPhoto = null;
+
+        for (var index = 0; index < unit.Photos.Count; index++)
+        {
+            if (unit.Photos[index].IsPrimary)
+            {
+                primaryPhoto = unit.Photos[index];
+                break;
+            }
+        }
+
+        if (primaryPhoto is null && unit.Photos.Count > 0)
+        {
+            primaryPhoto = unit.Photos[0];
+        }
+
         var photoUrl = primaryPhoto is null
             ? null
             : _storage.GetReadUrl(primaryPhoto.StorageKey);

@@ -99,7 +99,7 @@ revisión ni crea expedientes de M06.
 ## Pruebas locales
 
 - Build Release: 0 advertencias, 0 errores.
-- Unitarias: 493/493.
+- Unitarias: 515/515.
 - Integración regular: 174/174; 5 MongoDB opt-in omitidas en el job normal.
 - OpenAPI: 11/11.
 - Python CI: 133/133.

@@ -1,3 +1,4 @@
+using UniHome.Domain.Accounts;
 using UniHome.Domain.Common;
 using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
@@ -153,6 +154,138 @@ public sealed class PropertyAndUnitTests
             ServiceCharge.Create(ServiceName.Internet, ServiceMode.Incluido, null),
             ServiceCharge.Create(ServiceName.Internet, ServiceMode.Aparte, 300)
         ]));
+    }
+
+    [Theory]
+    [InlineData(UnitTemplate.HabitacionIndividual, UnitType.Habitacion, Occupancy.Individual, 1)]
+    [InlineData(UnitTemplate.HabitacionCompartida, UnitType.Habitacion, Occupancy.Compartida, 2)]
+    [InlineData(UnitTemplate.DepartamentoCompleto, UnitType.Departamento, Occupancy.Individual, 1)]
+    [InlineData(UnitTemplate.Estudio, UnitType.Estudio, Occupancy.Individual, 1)]
+    public void UnitTemplates_DebenRellenarValoresTipicos(
+        UnitTemplate template,
+        UnitType type,
+        Occupancy occupancy,
+        int places)
+    {
+        var defaults = UnitTemplates.Get(template);
+
+        Assert.Equal(type, defaults.Type);
+        Assert.Equal(occupancy, defaults.Occupancy);
+        Assert.Equal(places, defaults.Places);
+        Assert.Equal(ForWhom.Mixto, defaults.ForWhom);
+        Assert.Equal(BathroomType.Privado, defaults.Bathroom);
+        Assert.Equal(FurnitureType.Amueblado, defaults.Furniture);
+    }
+
+    [Fact]
+    public void Property_ConUnaSolaCoordenada_DebeRechazarse()
+    {
+        Assert.Throws<ArgumentException>(() => Property.Create(
+            Guid.NewGuid(),
+            "Casa",
+            "Calle 1",
+            "Centro",
+            PropertyType.Casa,
+            Guid.NewGuid(),
+            latitude: 19.43,
+            longitude: null,
+            floor: null,
+            unitNumber: null,
+            Now));
+    }
+
+    [Fact]
+    public void Property_ConCoordenadasFueraDeRango_DebeRechazarse()
+    {
+        Assert.Throws<ArgumentException>(() => Property.Create(
+            Guid.NewGuid(),
+            "Casa",
+            "Calle 1",
+            "Centro",
+            PropertyType.Casa,
+            Guid.NewGuid(),
+            latitude: 100,
+            longitude: -99,
+            floor: null,
+            unitNumber: null,
+            Now));
+    }
+
+    [Fact]
+    public void Unit_CompartidaConUnLugar_DebeRechazarse()
+    {
+        Assert.Throws<ArgumentException>(() => Unit.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            UnitType.Habitacion,
+            Occupancy.Compartida,
+            places: 1,
+            3500,
+            12,
+            ForWhom.Mixto,
+            BathroomType.Privado,
+            FurnitureType.Amueblado,
+            [],
+            null,
+            Now));
+    }
+
+    [Fact]
+    public void Unit_ConMuebleFueraDelCatalogo_DebeRechazarse()
+    {
+        Assert.Throws<ArgumentException>(() => Unit.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            UnitType.Habitacion,
+            Occupancy.Individual,
+            1,
+            3500,
+            12,
+            ForWhom.Mixto,
+            BathroomType.Privado,
+            FurnitureType.Amueblado,
+            ["Jacuzzi"],
+            null,
+            Now));
+    }
+
+    [Fact]
+    public void Unit_NoDebeSuperarDiezFotos()
+    {
+        var unit = Unit.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            UnitType.Habitacion,
+            Occupancy.Individual,
+            1,
+            3500,
+            12,
+            ForWhom.Mixto,
+            BathroomType.Privado,
+            FurnitureType.Amueblado,
+            [],
+            null,
+            Now);
+        var photos = Enumerable.Range(0, Unit.MaxPhotos + 1)
+            .Select(index => new UnitPhoto(
+                $"key-{index}", "image/png", 10, "hash", index, index == 0, Now))
+            .ToArray();
+
+        Assert.Throws<ArgumentException>(() => unit.AppendPhotos(photos));
+    }
+
+    [Fact]
+    public void AgeEligibility_DebeRespetarElCumpleanosDelAnio()
+    {
+        Assert.False(AgeEligibility.IsAdult(
+            new DateOnly(2008, 12, 1),
+            new DateTimeOffset(2026, 11, 13, 0, 0, 0, TimeSpan.Zero)));
+        Assert.True(AgeEligibility.IsAdult(
+            new DateOnly(2008, 11, 13),
+            new DateTimeOffset(2026, 11, 13, 0, 0, 0, TimeSpan.Zero)));
     }
 
     [Fact]
