@@ -156,19 +156,21 @@ No crear otra Container App, otro servicio Azure ni contratar un plan pago.
 
 ## 6. Cloudinary
 
-Los secretos ya existentes en la Container App son:
-
-- `cloudinary-cloud-name`
-- `cloudinary-api-key`
-- `cloudinary-api-secret`
-
-No se recrean ni se leen sus valores. Referencias previstas:
+Al cierre del preflight, la Container App ya conten?a los nombres de secretos
+`cloudinary-cloud-name`, `cloudinary-api-key`, `cloudinary-api-secret`,
+`upstash-rest-url`, `upstash-rest-token` y `auth-rate-limit-ip-hash-salt`. No se
+crearon, modificaron ni leyeron sus valores. Las variables de entorno a?n no los
+referencian. Referencias previstas (sin recrear secretos):
 
 ```text
 Cloudinary__CloudName=secretref:cloudinary-cloud-name
 Cloudinary__ApiKey=secretref:cloudinary-api-key
 Cloudinary__ApiSecret=secretref:cloudinary-api-secret
 Cloudinary__PublicBaseUrl=https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io
+Redis__Enabled=true
+Redis__RestUrl=secretref:upstash-rest-url
+Redis__RestToken=secretref:upstash-rest-token
+Auth__RateLimit__IpHashSalt=secretref:auth-rate-limit-ip-hash-salt
 ```
 
 `Cloudinary__PublicBaseUrl` es la base HTTPS que el proxy devuelve a los
