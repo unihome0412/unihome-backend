@@ -82,10 +82,10 @@ public sealed class UnitPhotosController : AuthenticatedControllerBase
                 "La fotografía no existe.");
         }
 
-        Response.Headers["Cache-Control"] = isPublic
+        Response.Headers.CacheControl = isPublic
             ? "public, max-age=300"
             : "private, no-store";
-        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers.XContentTypeOptions = "nosniff";
 
         return File(photo.Content, photo.ContentType, enableRangeProcessing: false);
     }
