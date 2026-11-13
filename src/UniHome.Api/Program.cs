@@ -200,14 +200,13 @@ builder.Services
 
 builder.Services.AddSingleton<IAuthorizationHandler, AdminAccessHandler>();
 
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy(AdminAccessOptions.PolicyName, policy =>
+builder.Services
+    .AddAuthorizationBuilder()
+    .AddPolicy(AdminAccessOptions.PolicyName, policy =>
     {
         policy.RequireAuthenticatedUser();
         policy.AddRequirements(new AdminAccessRequirement());
     });
-});
 
 builder.Services.Configure<AuthRateLimitOptions>(
     builder.Configuration.GetSection(AuthRateLimitOptions.SectionName));

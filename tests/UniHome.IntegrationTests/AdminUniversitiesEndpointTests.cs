@@ -193,6 +193,19 @@ public sealed class AdminUniversitiesEndpointTests : IClassFixture<UniHomeApiFac
     }
 
     [Fact]
+    public async Task Buscar_ConTerminoExcesivo_DebeResponder400()
+    {
+        using var response = await _client.GetAsync(
+            $"/api/v1/universidades?buscar={new string('a', 101)}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(document.RootElement
+            .GetProperty("errors")
+            .TryGetProperty("buscar", out _));
+    }
+
+    [Fact]
     public async Task Buscar_SinCoincidencias_DebeResponderListaVacia()
     {
         using var response = await _client.GetAsync(

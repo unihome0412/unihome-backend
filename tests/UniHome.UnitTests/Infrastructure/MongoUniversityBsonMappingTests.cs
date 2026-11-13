@@ -8,6 +8,14 @@ public sealed class MongoUniversityBsonMappingTests
 {
     private const string Identifier = "00112233445566778899aabbccddeeff";
     private static readonly DateTime Timestamp = new(2026, 11, 13, 12, 0, 0, DateTimeKind.Utc);
+    private static readonly string[] ExpectedFields =
+    [
+        "_id",
+        "nombreYCampus",
+        "nombreNormalizado",
+        "activa",
+        "createdAt"
+    ];
 
     [Fact]
     public void UniversityDocument_DebeUsarLosNombresDelModeloM03()
@@ -21,9 +29,7 @@ public sealed class MongoUniversityBsonMappingTests
             CreatedAt = Timestamp
         }.ToBsonDocument();
 
-        Assert.Equal(
-            new[] { "_id", "nombreYCampus", "nombreNormalizado", "activa", "createdAt" }.Order(),
-            document.Names.Order());
+        Assert.Equal(ExpectedFields.Order(), document.Names.Order());
         Assert.Equal(BsonType.String, document["_id"].BsonType);
         Assert.Equal(BsonType.String, document["nombreYCampus"].BsonType);
         Assert.Equal(BsonType.String, document["nombreNormalizado"].BsonType);

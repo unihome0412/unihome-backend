@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -14,8 +15,11 @@ namespace UniHome.Infrastructure.Persistence.Mongo.Universities;
 /// <summary>
 /// Adaptador MongoDB del catálogo M03. El índice único sobre el nombre
 /// normalizado decide los duplicados de forma atómica; la búsqueda solo devuelve
-/// universidades activas y el límite se aplica en la consulta.
+/// universidades activas y el límite se aplica en la consulta. La cobertura real
+/// se ejerce en <c>MongoUniversityPersistenceTests</c> (opt-in); se excluye del
+/// reporte unitario para no declarar cobertura ficticia de MongoDB.
 /// </summary>
+[ExcludeFromCodeCoverage]
 internal sealed class MongoUniversityRepository : IUniversityRepository
 {
     private const int DuplicateKeyCode = 11000;
