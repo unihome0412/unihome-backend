@@ -317,9 +317,9 @@ distribuido se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
 La ejecución manual de verificación
-([42570584187](https://github.com/unihome0412/unihome-backend/actions/runs/42570584187),
-commit `9f4b4b5`) dejó 2/2 pruebas reales aprobadas, 0 omitidas y la limpieza
-temporal confirmada.
+([43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
+commit de código `f51ac10`) dejó 4/4 pruebas reales aprobadas, 0 omitidas,
+`M01-001` y `M03-001` válidas y la limpieza temporal confirmada.
 
 El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial

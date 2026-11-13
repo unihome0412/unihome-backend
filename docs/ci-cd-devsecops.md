@@ -42,8 +42,8 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
 - Levanta una API efímera en `http://127.0.0.1:5088`, un MongoDB Community
   8.0.34 fijado por digest como servicio del runner y un SMTP de captura local
   con STARTTLS en `127.0.0.1:587`. La base `unihome_dast` se inicializa con
-  M01-001 y se destruye al final. No usa Atlas, Brevo, Azure, puertos públicos
-  ni credenciales reales. La CA efímera del SMTP no publica CRL/OCSP, por lo
+  M01-001 y M03-001 y se destruye al final. No usa Atlas, Brevo, Azure, puertos
+  públicos ni credenciales reales. La CA efímera del SMTP no publica CRL/OCSP, por lo
   que solo en este job se configura `Smtp__CheckCertificateRevocation=false`;
   el valor predeterminado del código sigue siendo `true` y STARTTLS sigue
   siendo obligatorio.
@@ -96,7 +96,7 @@ El job `restler-fuzzing` usa Microsoft RESTler **v9.3.1**, commit
 en el runner. No se usa una imagen móvil ni un servicio remoto.
 
 - Reutiliza la API ASP.NET Core en `127.0.0.1:5088`, MongoDB 8.0.34 efímero con
-  M01-001 y el SMTP de captura local con STARTTLS en `127.0.0.1:587`.
+  M01-001 y M03-001, y el SMTP de captura local con STARTTLS en `127.0.0.1:587`.
 - Prepara dos cuentas sintéticas: una confirmada para login/refresh y otra
   pendiente de confirmar para ejercer el endpoint con un código real capturado
   del SMTP. El token provider de RESTler crea una cuenta nueva y hace
@@ -224,10 +224,11 @@ dotnet stryker --config-file stryker-config.json
 - Evidencia: `mongodb-ci-results` con el TRX, la salida de migración/verificación
   y el resumen Markdown. El contenedor se destruye al finalizar el job y la base
   temporal se elimina explícitamente.
-- Verificación real (9 de noviembre de 2026):
-  [ejecución manual 42570584187](https://github.com/unihome0412/unihome-backend/actions/runs/42570584187),
-  commit `9f4b4b5`, job `mongo-db-test` en verde, TRX con 2 pruebas ejecutadas y
-  aprobadas, 0 fallidas, 0 omitidas, M01-001 válida y limpieza confirmada.
+- Verificación real (13 de noviembre de 2026):
+  [ejecución manual 43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
+  commit de código `f51ac10`, job `mongo-db-test` en verde, TRX con 4 pruebas
+  ejecutadas y aprobadas, 0 fallidas, 0 omitidas, M01-001 y M03-001 válidas y
+  limpieza confirmada.
 
 ## CD Azure preparado (sin despliegue)
 
@@ -290,6 +291,6 @@ Las pruebas activadas en un contexto admisible pasan a ser **obligatorias** para
 - Esta entrega se validó sintácticamente (YAML), con pruebas de la lógica del quality gate y comprobación de archivos y referencias. La integración de Stryker.NET se validó localmente con .NET 10 y una ejecución real de mutaciones; el primer run de GitHub Actions sigue siendo la validación del pipeline completo.
 - Semgrep usa reglas externas y una versión de CLI instalada al ejecutar: para un pipeline reproducible de producción habrá que fijar versiones/digests y comprobar la licencia/costos aplicables.
 - Dockle usa un binario oficial descargado de GitHub; fijar y validar su checksum antes de exigirlo en producción.
-- Pact tiene soporte de proveedor preparado, pero no hay contratos reales del consumidor Android; el job debe permanecer desactivado y no se declara aprobado. RESTler ya fue verificado con ejecución real. Stryker.NET tiene configuración versionada y línea base local verificada. MongoDB CI fue verificado en la ejecución manual `42570584187`: job `mongo-db-test` en verde, 2/2 pruebas reales, 0 omitidas y artefacto `mongodb-ci-results`; la base temporal y el contenedor se destruyeron al finalizar.
+- Pact tiene soporte de proveedor preparado, pero no hay contratos reales del consumidor Android; el job debe permanecer desactivado y no se declara aprobado. RESTler ya fue verificado con ejecución real. Stryker.NET tiene configuración versionada y línea base local verificada. MongoDB CI fue verificado en la ejecución manual `43395389178`: job `mongo-db-test` en verde, 4/4 pruebas reales, 0 omitidas, migraciones M01-001 y M03-001 válidas y artefacto `mongodb-ci-results`; la base temporal y el contenedor se destruyeron al finalizar.
 - Si el CI que actualmente está en GitHub fue modificado **después** del ZIP del 6 de noviembre, no aplicar el paquete a ciegas: reconciliar las diferencias antes.
 - Conservar `.local-sdd/` únicamente en local. `AGENTS.md`, `opencode.json`, `memoria.md` del SDD tampoco deben subir. La documentación técnica de CI en este paquete sí puede versionarse.

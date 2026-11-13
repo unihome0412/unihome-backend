@@ -773,19 +773,28 @@ jobs:
           done
           echo "::error::MongoDB efímero no disponible para DAST."
           exit 1
-      - name: Inicializar base efímera DAST con M01-001
+      - name: Inicializar base efímera DAST con M01-001 y M03-001
         run: |
           set -euo pipefail
           mkdir -p artifacts/dast-zap
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
-            apply --database "$MONGO_DAST_DATABASE" --confirm \
+            apply --database "$MONGO_DAST_DATABASE" --confirm --version M01-001 \
             | tee artifacts/dast-zap/migration-apply.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
-            verify --database "$MONGO_DAST_DATABASE" \
+            verify --database "$MONGO_DAST_DATABASE" --version M01-001 \
             | tee artifacts/dast-zap/migration-verify.txt
           grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_DAST_DATABASE" --confirm --version M03-001 \
+            | tee artifacts/dast-zap/migration-apply-m03.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_DAST_DATABASE" --version M03-001 \
+            | tee artifacts/dast-zap/migration-verify-m03.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m03.txt
       - name: Preparar SMTP de captura local y confianza TLS
         run: |
           set -euo pipefail
@@ -1202,19 +1211,28 @@ jobs:
           done
           echo "::error::MongoDB efímero no disponible para RESTler."
           exit 1
-      - name: Inicializar base efímera RESTler con M01-001
+      - name: Inicializar base efímera RESTler con M01-001 y M03-001
         run: |
           set -euo pipefail
           mkdir -p artifacts/restler
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
-            apply --database "$MONGO_RESTLER_DATABASE" --confirm \
+            apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M01-001 \
             | tee artifacts/restler/migration-apply.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
-            verify --database "$MONGO_RESTLER_DATABASE" \
+            verify --database "$MONGO_RESTLER_DATABASE" --version M01-001 \
             | tee artifacts/restler/migration-verify.txt
           grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M03-001 \
+            | tee artifacts/restler/migration-apply-m03.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_RESTLER_DATABASE" --version M03-001 \
+            | tee artifacts/restler/migration-verify-m03.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m03.txt
       - name: Preparar SMTP de captura local y confianza TLS
         run: |
           set -euo pipefail
