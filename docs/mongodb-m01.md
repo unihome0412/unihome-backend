@@ -2,10 +2,10 @@
 
 ## Alcance y trazabilidad
 
-Implementación técnica para HU-001/HU-012 (cuenta) y HU-004/HU-005
-(sesión), EP-M01-08 (refresh), RF-01/RF-02 y C-03/C-09/C-10 de la referencia
-SDD. No cierra M01 ni aprueba ADR o decisiones de producto pendientes.
-La referencia `.local-sdd` no se modifica.
+Implementación técnica para HU-001/HU-012 (cuenta), HU-004/HU-005
+(sesión), HU-006 (recuperación de contraseña), EP-M01-08 (refresh), RF-01/RF-02
+y C-03/C-09/C-10 de la referencia SDD. No cierra M01 ni aprueba ADR o decisiones
+de producto pendientes. La referencia `.local-sdd` no se modifica.
 
 `M01-001` materializa los nombres que usan los adaptadores; no adapta los nombres
 ingleses del catálogo M02–M13 ni cambia contratos REST. La API no ejecuta DDL
@@ -19,8 +19,9 @@ eliminar índices: la comprobación y la escritura no forman una transacción co
 
 ## Mapeo físico comprobado por serialización BSON
 
-Fuentes: `AccountDocument`, `RefreshSessionDocument` y sus repositorios.
-`MongoIdentityBsonMappingTests` verifica nombres y tipos reales del serializador.
+Fuentes: `AccountDocument`, `RefreshSessionDocument`, `PasswordResetDocument` y sus
+repositorios. `MongoIdentityBsonMappingTests` y
+`MongoPasswordResetBsonMappingTests` verifican nombres y tipos reales del serializador.
 Los identificadores se convierten de Guid a string de 32 hex (`N`) en los
 repositorios: no son ObjectId ni UUID binario. Fechas de instante: BSON date UTC.
 
@@ -70,6 +71,27 @@ adicional ni consulta por fecha de revocación que justifique otro índice.
 La rotación usa un filtro atómico sobre hash vigente, revocación y expiración.
 El backend rechaza sesiones vencidas aunque MongoDB aún no las haya eliminado:
 TTL es limpieza eventual, no autorización.
+
+### `restablecimientos_contrasena`
+
+| Campo físico | Tipo BSON | Índice |
+|---|---|---|
+| `_id` | string (Guid N) | `_id_`, único nativo |
+| `accountId` | string (Guid N) | `ix_restablecimientos_cuenta`, ascendente |
+| `tokenHash` | string (SHA-256 hexadecimal) | `ux_restablecimientos_token`, único, ascendente |
+| `expiresAt` | date | `ttl_restablecimientos_expires`, ascendente, TTL 0 s |
+| `consumedAt` | date/null | — |
+| `createdAt` | date | — |
+| `failedAttempts` | int | — |
+
+Esta colección pertenece al modelo externo preexistente y **no es creada ni
+modificada por `M01-001`**. El código comprueba los tres índices en modo lectura
+antes de operar; si falta la colección o un índice, responde almacenamiento no
+disponible. El token en claro nunca se guarda: el repositorio persiste únicamente
+SHA-256 y consume el documento con una actualización condicionada por hash,
+vigencia y límite de intentos. La colección debe existir antes de habilitar HU-006
+en un entorno; no se añadió una migración nueva para no alterar el esquema externo
+sin autorización.
 
 ## Inventario Atlas observado
 

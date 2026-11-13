@@ -221,6 +221,17 @@ public sealed class AccountTests
     }
 
     [Fact]
+    public void ChangePassword_ReemplazaElHashSinAceptarVacios()
+    {
+        var account = CreateAccount();
+
+        account.ChangePassword("hash:NuevaClave1");
+
+        Assert.Equal("hash:NuevaClave1", account.PasswordHash);
+        Assert.Throws<ArgumentException>(() => account.ChangePassword("   "));
+    }
+
+    [Fact]
     public void Delete_SobreUnaCuentaYaEliminada_Lanza()
     {
         var account = CreateAccount();

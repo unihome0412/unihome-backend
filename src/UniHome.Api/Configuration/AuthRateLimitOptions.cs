@@ -40,6 +40,22 @@ public sealed class AuthRateLimitOptions
     public int ResendPermitLimit { get; set; } = 5;
 
     public int ResendWindowSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// EP-M01-06 (HU-006): cada solicitud aceptada puede enviar un correo. Límite
+    /// provisional por IP mientras no se apruebe un valor definitivo.
+    /// </summary>
+    public int PasswordResetRequestPermitLimit { get; set; } = 5;
+
+    public int PasswordResetRequestWindowSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// EP-M01-07 (HU-006): límite por IP para intentos de confirmación. El límite
+    /// por token lo aplica <c>PasswordResetToken.MaxAttempts</c>.
+    /// </summary>
+    public int PasswordResetConfirmPermitLimit { get; set; } = 10;
+
+    public int PasswordResetConfirmWindowSeconds { get; set; } = 60;
 }
 
 public static class AuthRateLimitPolicies
@@ -48,4 +64,6 @@ public static class AuthRateLimitPolicies
     public const string Refresh = "auth-refresh";
     public const string ConfirmEmail = "auth-confirm-email";
     public const string Resend = "auth-confirm-email-resend";
+    public const string PasswordResetRequest = "auth-password-reset-request";
+    public const string PasswordResetConfirm = "auth-password-reset-confirm";
 }

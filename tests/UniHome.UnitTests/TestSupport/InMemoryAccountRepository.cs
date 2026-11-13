@@ -72,4 +72,30 @@ internal sealed class InMemoryAccountRepository : IAccountRepository
 
         return Task.CompletedTask;
     }
+
+    public Task<bool> TryChangePasswordAsync(
+        Guid accountId,
+        string expectedPasswordHash,
+        string newPasswordHash,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedPasswordHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(newPasswordHash);
+
+        lock (_gate)
+        {
+            var account = _accounts.Values.SingleOrDefault(candidate => candidate.Id == accountId);
+
+            if (account is null ||
+                account.Status != AccountStatus.Active ||
+                !account.IsEmailConfirmed ||
+                !string.Equals(account.PasswordHash, expectedPasswordHash, StringComparison.Ordinal))
+            {
+                return Task.FromResult(false);
+            }
+
+            account.ChangePassword(newPasswordHash);
+            return Task.FromResult(true);
+        }
+    }
 }

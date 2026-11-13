@@ -14,6 +14,13 @@ on:
         required: false
         default: false
         type: boolean
+      run_mongo_only:
+        description: >-
+          Ejecutar únicamente la validación MongoDB efímera entre los jobs
+          manuales; no ejecuta DAST, RESTler ni mutación.
+        required: false
+        default: false
+        type: boolean
 
 # El job deploy-azure es manual y falla cerrado. No se ejecuta en PR/push y
 # requiere la variable de repositorio y el environment protegido.
@@ -299,7 +306,7 @@ jobs:
   pact-contract:
     name: Contract Test (Pact, requiere contratos reales)
     needs: [detect-changes, contract-test]
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_PACT == 'true' && github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_PACT == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.run_mongo_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -517,7 +524,7 @@ jobs:
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
           --configuration Release --no-build --no-restore
-          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests"
+          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests|FullyQualifiedName~MongoPasswordResetPersistenceTests"
           --logger "trx;LogFileName=mongo-ci.trx"
           --results-directory TestResults/mongo
       - name: Validar evidencias y resumir MongoDB
@@ -563,7 +570,7 @@ jobs:
   mutation-test:
     name: Mutation Test (Stryker.NET, manual)
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MUTATION == 'true' && github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MUTATION == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.run_mongo_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -662,7 +669,7 @@ jobs:
   dast-zap:
     name: DAST (OWASP ZAP) - baseline pasivo aislado
     needs: [detect-changes, build-test]
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_ZAP == 'true' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feature/')) && needs.build-test.result == 'success' }}
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_ZAP == 'true' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feature/')) && needs.build-test.result == 'success' && github.event.inputs.run_mongo_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -1098,7 +1105,7 @@ jobs:
   restler-fuzzing:
     name: RESTler Fuzzing - API efímera aislada
     needs: [detect-changes, contract-test]
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_RESTLER == 'true' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feature/')) }}
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_RESTLER == 'true' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/feature/')) && github.event.inputs.run_mongo_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -1416,6 +1423,7 @@ jobs:
       CODE_CHANGED: ${{ needs.detect-changes.outputs.code }}
       EVENT_NAME: ${{ github.event_name }}
       EVENT_REF: ${{ github.ref }}
+      RUN_MONGO_ONLY: ${{ github.event.inputs.run_mongo_only }}
       UNIHOME_ENABLE_SONAR: ${{ vars.UNIHOME_ENABLE_SONAR }}
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
@@ -1439,6 +1447,7 @@ jobs:
       CODE_CHANGED: ${{ needs.detect-changes.outputs.code }}
       EVENT_NAME: ${{ github.event_name }}
       EVENT_REF: ${{ github.ref }}
+      RUN_MONGO_ONLY: ${{ github.event.inputs.run_mongo_only }}
       UNIHOME_ENABLE_SONAR: ${{ vars.UNIHOME_ENABLE_SONAR }}
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
@@ -1465,7 +1474,7 @@ jobs:
     # jobs opcionales transitivos (por ejemplo Pact) no deben omitir el deploy.
     # Los needs obligatorios se exigen uno a uno como success.
     needs: [detect-changes, build-test, contract-test, docker-build, container-lint, pr-quality-gate, hardening-report]
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && github.event.inputs.run_mongo_only != 'true' && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: azure-dev

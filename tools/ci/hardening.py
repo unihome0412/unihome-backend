@@ -28,6 +28,10 @@ OPTIONAL_REF_PATTERNS = {
     "restler-fuzzing": ("refs/heads/main", "refs/heads/feature/"),
 }
 
+# En el dispatch dedicado solo se exige MongoDB entre los jobs manuales; el
+# workflow omite estos controles de forma explícita para ese modo.
+MONGO_ONLY_SUPPRESSED = {"mutation-test", "pact-contract", "dast-zap", "restler-fuzzing"}
+
 
 def _ref_allowed(job: str, ref: str) -> bool:
     patterns = OPTIONAL_REF_PATTERNS.get(job)
@@ -39,12 +43,21 @@ def _ref_allowed(job: str, ref: str) -> bool:
     )
 
 
-def evaluate(needs: dict, changed: bool, flags: dict, event: str, ref: str = "") -> tuple[list, list]:
+def evaluate(
+    needs: dict,
+    changed: bool,
+    flags: dict,
+    event: str,
+    ref: str = "",
+    run_mongo_only: bool = False,
+) -> tuple[list, list]:
     required = set(MUST_RUN_ALWAYS)
     if changed:
         required.update(MUST_RUN_FOR_CODE)
         for job, (flag, events) in OPTIONAL.items():
             if str(flags.get(flag, "")).lower() != "true" or event not in events:
+                continue
+            if run_mongo_only and job in MONGO_ONLY_SUPPRESSED:
                 continue
             # SonarCloud Free solo analiza main o PRs internos a main.
             # Un workflow_dispatch desde una rama feature no debe exigir Sonar.
@@ -68,12 +81,14 @@ def make_report(
     changed: bool,
     event: str = "",
     ref: str = "",
+    run_mongo_only: bool = False,
 ) -> str:
     rows = [
         "# UniHome — Hardening Report",
         "",
         f"- Cambios de código o CI: **{'sí' if changed else 'no (solo documentación)'}**",
         f"- Evento / rama evaluados: **{event or 'n/d'} / {ref or 'n/d'}**",
+        f"- Modo solo MongoDB: **{'sí' if run_mongo_only else 'no'}**",
         f"- Quality Gate: **{'FAIL' if issues else 'PASS'}**",
         "- `skipped` NO equivale a una prueba aprobada.",
         f"- DAST ZAP manual: **{'obligatorio' if 'dast-zap' in required else 'no exigido'}** "
@@ -105,8 +120,11 @@ def main() -> int:
     changed = os.environ.get("CODE_CHANGED", "true").lower() == "true"
     event = os.environ.get("EVENT_NAME", "")
     ref = os.environ.get("EVENT_REF", "")
-    required, problems = evaluate(needs, changed, flags, event, ref)
-    report = make_report(needs, required, problems, changed, event, ref)
+    run_mongo_only = os.environ.get("RUN_MONGO_ONLY", "").lower() == "true"
+    required, problems = evaluate(
+        needs, changed, flags, event, ref, run_mongo_only=run_mongo_only)
+    report = make_report(
+        needs, required, problems, changed, event, ref, run_mongo_only=run_mongo_only)
     if args.output:
         path = Path(args.output)
         path.parent.mkdir(parents=True, exist_ok=True)

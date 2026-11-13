@@ -24,7 +24,11 @@ public sealed class RateLimitedApiFactory : UniHomeApiFactory
                 ["Auth:RateLimit:ConfirmEmailPermitLimit"] = "2",
                 ["Auth:RateLimit:ConfirmEmailWindowSeconds"] = "60",
                 ["Auth:RateLimit:ResendPermitLimit"] = "2",
-                ["Auth:RateLimit:ResendWindowSeconds"] = "60"
+                ["Auth:RateLimit:ResendWindowSeconds"] = "60",
+                ["Auth:RateLimit:PasswordResetRequestPermitLimit"] = "2",
+                ["Auth:RateLimit:PasswordResetRequestWindowSeconds"] = "60",
+                ["Auth:RateLimit:PasswordResetConfirmPermitLimit"] = "2",
+                ["Auth:RateLimit:PasswordResetConfirmWindowSeconds"] = "60"
             });
         });
     }

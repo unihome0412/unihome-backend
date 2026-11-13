@@ -182,6 +182,72 @@ class GateTests(unittest.TestCase):
         self.assertEqual([], issues)
         self.assertIn("restler-fuzzing", required)
 
+    def test_mongo_only_no_exige_controles_manuales_omitidos(self):
+        needs = self._base_needs()
+        needs["mongo-db-test"] = {"result": "success"}
+        for job in ("mutation-test", "pact-contract", "dast-zap", "restler-fuzzing"):
+            needs[job] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs,
+            True,
+            {
+                "UNIHOME_ENABLE_MONGO_CI": "true",
+                "UNIHOME_ENABLE_MUTATION": "true",
+                "UNIHOME_ENABLE_PACT": "true",
+                "UNIHOME_ENABLE_ZAP": "true",
+                "UNIHOME_ENABLE_RESTLER": "true",
+            },
+            "workflow_dispatch",
+            "refs/heads/feature/hu-006-recuperacion-contrasena",
+            run_mongo_only=True,
+        )
+        self.assertEqual([], issues)
+        self.assertIn("mongo-db-test", required)
+        for job in ("mutation-test", "pact-contract", "dast-zap", "restler-fuzzing"):
+            self.assertNotIn(job, required)
+
+    def test_mongo_only_exige_mongo_aprobado(self):
+        needs = self._base_needs()
+        needs["mongo-db-test"] = {"result": "failure"}
+        required, issues = evaluate(
+            needs,
+            True,
+            {"UNIHOME_ENABLE_MONGO_CI": "true"},
+            "workflow_dispatch",
+            "refs/heads/feature/hu-006-recuperacion-contrasena",
+            run_mongo_only=True,
+        )
+        self.assertIn("mongo-db-test", required)
+        self.assertTrue(any("mongo-db-test" in issue for issue in issues))
+
+    def test_mongo_only_no_omite_controles_automaticos(self):
+        needs = self._base_needs()
+        needs["mongo-db-test"] = {"result": "success"}
+        needs["build-test"] = {"result": "failure"}
+        _, issues = evaluate(
+            needs,
+            True,
+            {"UNIHOME_ENABLE_MONGO_CI": "true"},
+            "workflow_dispatch",
+            "refs/heads/feature/hu-006-recuperacion-contrasena",
+            run_mongo_only=True,
+        )
+        self.assertTrue(any("build-test" in issue for issue in issues))
+
+    def test_mongo_only_sin_input_sigue_exigiendo_manuales(self):
+        needs = self._base_needs()
+        needs["mongo-db-test"] = {"result": "success"}
+        needs["mutation-test"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs,
+            True,
+            {"UNIHOME_ENABLE_MONGO_CI": "true", "UNIHOME_ENABLE_MUTATION": "true"},
+            "workflow_dispatch",
+            "refs/heads/feature/hu-006-recuperacion-contrasena",
+        )
+        self.assertIn("mutation-test", required)
+        self.assertTrue(any("mutation-test" in issue for issue in issues))
+
     @staticmethod
     def _base_needs():
         return {x: {"result": "success"} for x in (
@@ -299,6 +365,37 @@ class GateTests(unittest.TestCase):
             "dast-zap: esperado success; encontrado skipped",
             stderr.getvalue(),
         )
+
+    def test_main_mongo_only_reporta_modo_y_omite_manuales(self):
+        needs = self._base_needs()
+        needs["mongo-db-test"] = {"result": "success"}
+        needs["mutation-test"] = {"result": "skipped"}
+        needs["dast-zap"] = {"result": "skipped"}
+        needs["restler-fuzzing"] = {"result": "skipped"}
+        env = {
+            "NEEDS_JSON": json.dumps(needs),
+            "CODE_CHANGED": "true",
+            "EVENT_NAME": "workflow_dispatch",
+            "EVENT_REF": "refs/heads/feature/hu-006-recuperacion-contrasena",
+            "RUN_MONGO_ONLY": "true",
+            "UNIHOME_ENABLE_MONGO_CI": "true",
+            "UNIHOME_ENABLE_MUTATION": "true",
+            "UNIHOME_ENABLE_ZAP": "true",
+            "UNIHOME_ENABLE_RESTLER": "true",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(sys, "argv", ["hardening.py", "--gate"]),
+            redirect_stdout(StringIO()) as stdout,
+            redirect_stderr(StringIO()),
+        ):
+            result = main()
+        self.assertEqual(0, result)
+        report = stdout.getvalue()
+        self.assertIn("Modo solo MongoDB: **sí**", report)
+        self.assertIn("| `mutation-test` | **skipped** | no |", report)
+        self.assertIn("| `dast-zap` | **skipped** | no |", report)
+        self.assertIn("| `restler-fuzzing` | **skipped** | no |", report)
 
     def test_main_dast_exitoso_muestra_evento_y_rama(self):
         needs = self._base_needs()

@@ -76,4 +76,7 @@ internal static class AuthTestHelpers
 
         return Guid.ParseExact(refreshToken[..separator], "N");
     }
+
+    public static string InvalidPasswordResetToken() =>
+        $"{Guid.NewGuid():N}.{new string('B', 43)}";
 }
