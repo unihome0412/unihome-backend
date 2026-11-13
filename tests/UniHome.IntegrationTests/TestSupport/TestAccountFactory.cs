@@ -18,7 +18,8 @@ public static class TestAccountFactory
         string password = DefaultPassword,
         AccountStatus status = AccountStatus.Active,
         bool emailConfirmed = true,
-        Guid? id = null)
+        Guid? id = null,
+        DateOnly? birthDate = null)
     {
         var now = DateTimeOffset.UtcNow;
 
@@ -26,7 +27,7 @@ public static class TestAccountFactory
             id ?? Guid.NewGuid(),
             "Ana López",
             EmailAddress.Create(email),
-            new DateOnly(2004, 5, 10),
+            birthDate ?? new DateOnly(2004, 5, 10),
             Gender.Mujer,
             Hasher.HashPassword(password),
             new PrivacyAcceptance("2026-01", now),

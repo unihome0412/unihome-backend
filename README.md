@@ -97,8 +97,18 @@ un usuario autenticado sin privilegio recibe `403`, un nombre vacío devuelve `4
 un duplicado normalizado responde `409`. El nombre normalizado ignora mayúsculas,
 acentos y espacios sobrantes. `GET /api/v1/universidades?buscar=` es público y
 devuelve hasta 10 universidades activas; por eso el alta aparece de inmediato en el
-buscador. Edición, activación y desactivación pertenecen a HU-077 y no se
-implementaron en esta historia.
+buscador. La administración de HU-077 añade `GET /api/v1/admin/universidades` (listado
+paginado con activas e inactivas), `PUT /api/v1/admin/universidades/{id}` (edición
+con la misma normalización y protección de duplicados) y
+`PUT /api/v1/admin/universidades/{id}/estado` (activación/desactivación lógica,
+sin borrado). La búsqueda pública solo devuelve activas.
+
+Perfil (HU-002/HU-008): `GET /api/v1/perfil/mi-perfil` requiere Bearer y devuelve
+`nombreCompleto`, `correo`, `fechaNacimiento`, `genero`, `universidadActual`,
+`etiquetaCuenta`, `vinculadoAUnidad` y `puedePublicar`. No expone hash de
+contraseña ni claims administrativos. La barra de navegación y la visibilidad del
+panel son responsabilidad de Android; el backend entrega los indicadores y
+revalida cada ruta administrativa.
 
 Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
 `contrasena` y `confirmacionPerdidaInformacion: true`. Hace borrado lógico
@@ -238,6 +248,9 @@ técnico separado, respaldo/restauración verificado y autorización humana. Cad
 promoción selecciona una versión; hoy existen `M01-001` y `M03-001`. Las demás
 colecciones externas aún no tienen migración versionada ni contratos BSON/DTO
 aprobados.
+
+Matriz de cierre, endpoints y responsabilidades Android del Sprint 1:
+[`docs/sprint-01-cierre.md`](docs/sprint-01-cierre.md).
 
 Inventario BSON, colecciones/índices observados y límites operativos:
 [`docs/mongodb-m01.md`](docs/mongodb-m01.md). El procedimiento de promoción, comandos,
@@ -460,6 +473,11 @@ declara listo para el primer despliegue hasta completar esos pasos.
   `ux_universidades_nombre_normalizado`; no se modificó Atlas.
 - La allowlist `Admin__AccountIds` es un mecanismo provisional hasta que M13 defina
   la provisión, auditoría y revocación formales de administradores.
+- El perfil devuelve `etiquetaCuenta=UsuarioUniHome` y `vinculadoAUnidad=false`
+  mientras M05/M06/M09 no existan. Son indicadores derivados, no estados
+  persistidos; deberán conectarse a esos módulos sin cambiar el contrato.
+- El panel de HU-011 cubre Universidades en Sprint 1. Expedientes y Usuarios
+  pertenecen a M06/M13 de sprints posteriores; no se crearon endpoints de relleno.
 - Retención/limpieza de cuentas no confirmadas y anonimización de datos tras
   eliminar una cuenta (ADR-005).
 - Scalar/Swagger UI solo si se aprueba explícitamente.

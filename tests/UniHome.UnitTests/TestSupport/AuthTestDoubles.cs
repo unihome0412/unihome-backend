@@ -14,12 +14,13 @@ internal static class AccountTestData
         string email,
         string password = Password,
         AccountStatus status = AccountStatus.Active,
-        bool emailConfirmed = true) =>
+        bool emailConfirmed = true,
+        DateOnly? birthDate = null) =>
         Account.Restore(
             Guid.NewGuid(),
             "Ana López",
             EmailAddress.Create(email),
-            new DateOnly(2004, 5, 10),
+            birthDate ?? new DateOnly(2004, 5, 10),
             Gender.Mujer,
             $"hash:{password}",
             new PrivacyAcceptance("2026-01", Now),

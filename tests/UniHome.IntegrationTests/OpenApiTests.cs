@@ -76,10 +76,35 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var paths = document.RootElement.GetProperty("paths");
 
-        Assert.True(paths.TryGetProperty("/api/v1/admin/universidades", out var create));
-        Assert.True(create.TryGetProperty("post", out _));
+        Assert.True(paths.TryGetProperty("/api/v1/admin/universidades", out var adminUniversities));
+        Assert.True(adminUniversities.TryGetProperty("post", out _));
+        Assert.True(adminUniversities.TryGetProperty("get", out _));
 
         Assert.True(paths.TryGetProperty("/api/v1/universidades", out var search));
         Assert.True(search.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/admin/universidades/{id}",
+            out var editUniversity));
+        Assert.True(editUniversity.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/admin/universidades/{id}/estado",
+            out var changeUniversityStatus));
+        Assert.True(changeUniversityStatus.TryGetProperty("put", out _));
+    }
+
+    [Fact]
+    public async Task OpenApi_DebeIncluirElPerfilDeM02()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty("/api/v1/perfil/mi-perfil", out var profile));
+        Assert.True(profile.TryGetProperty("get", out _));
     }
 }

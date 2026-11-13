@@ -31,8 +31,12 @@ using UniHome.Application.Identity.Logout;
 using UniHome.Application.Identity.PasswordRecovery;
 using UniHome.Application.Identity.RefreshSessions;
 using UniHome.Application.Identity.RegisterAccount;
+using UniHome.Application.Profiles.GetProfile;
+using UniHome.Application.Universities.ChangeUniversityStatus;
 using UniHome.Application.Universities.CreateUniversity;
+using UniHome.Application.Universities.ListUniversities;
 using UniHome.Application.Universities.SearchUniversities;
+using UniHome.Application.Universities.UpdateUniversity;
 using UniHome.Domain.Accounts;
 using UniHome.Infrastructure;
 using UniHome.Infrastructure.Configuration;
@@ -124,7 +128,11 @@ builder.Services.AddScoped<ResendConfirmationService>();
 builder.Services.AddScoped<DeleteAccountService>();
 builder.Services.AddScoped<RequestPasswordResetService>();
 builder.Services.AddScoped<ConfirmPasswordResetService>();
+builder.Services.AddScoped<GetProfileService>();
 builder.Services.AddScoped<CreateUniversityService>();
+builder.Services.AddScoped<ListUniversitiesService>();
+builder.Services.AddScoped<UpdateUniversityService>();
+builder.Services.AddScoped<ChangeUniversityStatusService>();
 builder.Services.AddScoped<SearchUniversitiesService>();
 
 builder.Services

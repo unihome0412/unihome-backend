@@ -42,6 +42,39 @@ public sealed class InMemoryUniversityRepository : IUniversityRepository
         return Task.CompletedTask;
     }
 
+    public Task<University?> FindByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(
+                _universities.Values.SingleOrDefault(university => university.Id == id));
+        }
+    }
+
+    public Task<UniversityPage> ListAsync(
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(page);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
+
+        lock (_gate)
+        {
+            var ordered = _universities.Values
+                .OrderBy(university => university.NormalizedName, StringComparer.Ordinal)
+                .ToArray();
+            var items = ordered
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToArray();
+
+            return Task.FromResult(new UniversityPage(items, ordered.Length));
+        }
+    }
+
     public Task<IReadOnlyList<University>> SearchActiveAsync(
         string normalizedTerm,
         int limit,
@@ -61,6 +94,53 @@ public sealed class InMemoryUniversityRepository : IUniversityRepository
                 .ToArray();
 
             return Task.FromResult<IReadOnlyList<University>>(results);
+        }
+    }
+
+    public Task<bool> UpdateNameAndCampusAsync(
+        University university,
+        string expectedNormalizedName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(university);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedNormalizedName);
+
+        lock (_gate)
+        {
+            if (!_universities.TryGetValue(expectedNormalizedName, out var current) ||
+                current.Id != university.Id)
+            {
+                return Task.FromResult(false);
+            }
+
+            if (_universities.TryGetValue(university.NormalizedName, out var conflict) &&
+                conflict.Id != university.Id)
+            {
+                throw new DuplicateUniversityException();
+            }
+
+            _universities.Remove(expectedNormalizedName);
+            _universities[university.NormalizedName] = university;
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> SetActiveAsync(
+        Guid id,
+        bool isActive,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            var university = _universities.Values.SingleOrDefault(item => item.Id == id);
+
+            if (university is null)
+            {
+                return Task.FromResult(false);
+            }
+
+            university.SetActive(isActive);
+            return Task.FromResult(true);
         }
     }
 }
