@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Abstractions.Storage;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Universities.Abstractions;
 using UniHome.Infrastructure.Configuration;
 using UniHome.Infrastructure.Email;
 using UniHome.Infrastructure.Identity;
@@ -11,6 +12,7 @@ using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Accounts;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Sessions;
+using UniHome.Infrastructure.Persistence.Mongo.Universities;
 using UniHome.Infrastructure.Redis;
 
 namespace UniHome.Infrastructure;
@@ -113,6 +115,7 @@ public static class DependencyInjection
         services.AddSingleton<IAccountRepository, MongoAccountRepository>();
         services.AddSingleton<IRefreshSessionRepository, MongoRefreshSessionRepository>();
         services.AddSingleton<IPasswordResetRepository, MongoPasswordResetRepository>();
+        services.AddSingleton<IUniversityRepository, MongoUniversityRepository>();
         services.AddSingleton<IPasswordHasher, AspNetCorePasswordHasher>();
         services.AddSingleton<IDummyPasswordHashProvider, DummyPasswordHashProvider>();
         services.AddSingleton<ISystemClock, SystemClock>();

@@ -90,6 +90,16 @@ válidos de la misma cuenta se confirman a la vez, solo uno cambia la contraseñ
 se usan transacciones multi-documento; un fallo posterior al consumo del token deja el
 token consumido y las sesiones revocadas, y exige solicitar un enlace nuevo.
 
+Universidades (HU-075): `POST /api/v1/admin/universidades` recibe
+`{ "nombreYCampus": "..." }` y responde `201` con `id`, `nombreYCampus`, `activa` y
+`fechaAlta`. Exige el privilegio administrativo interno; sin token responde `401`,
+un usuario autenticado sin privilegio recibe `403`, un nombre vacío devuelve `400` y
+un duplicado normalizado responde `409`. El nombre normalizado ignora mayúsculas,
+acentos y espacios sobrantes. `GET /api/v1/universidades?buscar=` es público y
+devuelve hasta 10 universidades activas; por eso el alta aparece de inmediato en el
+buscador. Edición, activación y desactivación pertenecen a HU-077 y no se
+implementaron en esta historia.
+
 Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
 `contrasena` y `confirmacionPerdidaInformacion: true`. Hace borrado lógico
 (`AccountStatus.Deleted`) y revoca todas las sesiones de la cuenta en todos los
@@ -136,6 +146,11 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
 - `Jwt__Issuer` y `Jwt__Audience` son configurables. `Jwt__AccessTokenMinutes` vale 60
   por defecto y `Jwt__RefreshTokenDays` vale 30 por defecto. Estos valores de fuente
   siguen sujetos a revisión de seguridad.
+- `Admin__AccountIds__0`, `Admin__AccountIds__1`, ... contiene los identificadores
+  internos con privilegio administrativo. La policy revalida el claim `sub` contra
+  esa lista en cada petición; no se acepta rol del cliente y una lista vacía deniega
+  todas las rutas `/admin/*`. La provisión definitiva de administradores pertenece a
+  M13 y queda pendiente de aprobación.
 - `Auth__RateLimit__LoginPermitLimit` / `LoginWindowSeconds` valen 10 intentos por 60
   segundos por IP; `RefreshPermitLimit` / `RefreshWindowSeconds` valen 20 por 60
   segundos; `ConfirmEmailPermitLimit` / `ConfirmEmailWindowSeconds` valen 10 por 60;
@@ -179,14 +194,22 @@ colección ya forma parte del modelo externo aprobado; la API solo verifica sus 
 en modo lectura y falla cerrada si faltan o divergen. La colección debe existir antes
 de habilitar la recuperación en un entorno; no se creó ni se modificó en esta historia.
 
-La API no crea colecciones ni índices al arrancar. La migración versionada `M01-001`
-se ejecuta con una herramienta separada:
+M03 usa la colección `universidades` (`nombreYCampus`, `nombreNormalizado`,
+`activa`, `createdAt`) con el índice único `ux_universidades_nombre_normalizado`
+sobre `nombreNormalizado`. La migración versionada `M03-001` crea la colección y el
+índice; el adaptador verifica el esquema en modo lectura y falla cerrada si falta o
+diverge. Detalle en [`docs/mongodb-m03.md`](docs/mongodb-m03.md).
+
+La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
+`M01-001` y `M03-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
 dotnet run --project tools/UniHome.MongoMigrator -- plan --database unihome_modelo_pruebas
-dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm
-dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M01-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M01-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M03-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M03-001
 ```
 
 La migración ordinaria solo escribe en `unihome_modelo_pruebas` o en una base incluida
@@ -211,16 +234,17 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
 ```
 
 No ejecutar ese comando sin completar las puertas de conectividad TLS/SSPI, usuario
-técnico separado, respaldo/restauración verificado y autorización humana. La primera
-promoción solo crearía `M01-001`; las 20 colecciones externas aún no tienen migración
-versionada ni contratos BSON/DTO aprobados.
+técnico separado, respaldo/restauración verificado y autorización humana. Cada
+promoción selecciona una versión; hoy existen `M01-001` y `M03-001`. Las demás
+colecciones externas aún no tienen migración versionada ni contratos BSON/DTO
+aprobados.
 
 Inventario BSON, colecciones/índices observados y límites operativos:
 [`docs/mongodb-m01.md`](docs/mongodb-m01.md). El procedimiento de promoción, comandos,
 riesgos, respaldo/restauración y criterios de aceptación están en
 [`docs/mongodb-promocion.md`](docs/mongodb-promocion.md). La migración debe verificarse
-antes de habilitar tráfico. Readiness y repositorios verifican los índices M01 en modo
-solo lectura; si falta una garantía crítica, la API no opera esa colección.
+antes de habilitar tráfico. Readiness y repositorios verifican los índices operativos
+en modo solo lectura; si falta una garantía crítica, la API no opera esa colección.
 
 ## Health checks
 
@@ -287,15 +311,15 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 `UNIHOME_ENABLE_MONGO_CI=true`) levanta MongoDB Community 8.0.34 dentro del runner
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
-`unihome_ci_verificacion`, se aplica únicamente `M01-001` a esa base temporal y las
-pruebas reales de identidad, recuperación de contraseña y bloqueo distribuido se
-ejecutan con TRX. El job falla
-si MongoDB no inicia, si la migración no queda válida, si las pruebas se omiten o
-si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
+`unihome_ci_verificacion`, se aplican `M01-001` y `M03-001` a esa base temporal y
+las pruebas reales de identidad, recuperación de contraseña, universidades y bloqueo
+distribuido se ejecutan con TRX. El job falla
+si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
+o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
 La ejecución manual de verificación
-([42570584187](https://github.com/unihome0412/unihome-backend/actions/runs/42570584187),
-commit `9f4b4b5`) dejó 2/2 pruebas reales aprobadas, 0 omitidas y la limpieza
-temporal confirmada.
+([43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
+commit de código `f51ac10`) dejó 4/4 pruebas reales aprobadas, 0 omitidas,
+`M01-001` y `M03-001` válidas y la limpieza temporal confirmada.
 
 El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
@@ -415,9 +439,9 @@ declara listo para el primer despliegue hasta completar esos pasos.
 - **EP-M01-09** (eliminar cuenta) implementado solo en lo exigido por la spec:
   borrado lógico y revocación de todas las sesiones. Pendiente: rechazo `409` por
   vínculos activos de propiedades/ocupación (M05/M09, HU-096) y la política de
-  retención/anonimización de datos tras eliminar (ver ADR-005 más abajo). Tampoco se
-  implementó la restricción de que una cuenta administradora no se autoelimine por
-  esta ruta: hoy no existe concepto de administrador en el dominio.
+  retención/anonimización de datos tras eliminar (ver ADR-005 más abajo). La ruta
+  administrativa usa una allowlist interna de cuentas, pero todavía no se impide que
+  una cuenta administradora se autoelimine por esta ruta.
 - Definir proxy/`ForwardedHeaders` confiables para que el rate limit por IP no agrupe
   clientes detrás de un balanceador; la implementación actual no confía en cabeceras.
 - Logout y recuperación de contraseña invalidan los refresh tokens de la cuenta, pero
@@ -426,10 +450,16 @@ declara listo para el primer despliegue hasta completar esos pasos.
   añadirse la consulta de sesión al middleware de autenticación.
 - La colección externa `restablecimientos_contrasena` no está incluida en `M01-001`;
   su existencia e índices deben verificarse en cada entorno antes de habilitar HU-006.
-- Adopción de la migración `M01-001` en `unihome_desarrollo` requiere autorización
+- Adopción de `M01-001` o `M03-001` en `unihome_desarrollo` requiere autorización
   explícita, usuario técnico verificado y respaldo/restauración comprobados. `apply`
   sigue bloqueado; solo el comando separado `promote` puede escribir, y aún no se ha
   ejecutado.
+- La colección externa `universidades` observada en Atlas tiene un índice
+  `ix_universidades_nombre` no necesariamente único y un validador previo. Antes de
+  habilitar HU-075 en Atlas se debe revisar, autorizar y conciliar
+  `ux_universidades_nombre_normalizado`; no se modificó Atlas.
+- La allowlist `Admin__AccountIds` es un mecanismo provisional hasta que M13 defina
+  la provisión, auditoría y revocación formales de administradores.
 - Retención/limpieza de cuentas no confirmadas y anonimización de datos tras
   eliminar una cuenta (ADR-005).
 - Scalar/Swagger UI solo si se aprueba explícitamente.

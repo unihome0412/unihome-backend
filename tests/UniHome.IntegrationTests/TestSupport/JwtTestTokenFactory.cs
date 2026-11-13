@@ -21,21 +21,28 @@ public static class JwtTestTokenFactory
         string audience = UniHomeApiFactory.TestAudience,
         DateTimeOffset? expiresAt = null,
         DateTimeOffset? notBefore = null,
-        string algorithm = SecurityAlgorithms.HmacSha256)
+        string algorithm = SecurityAlgorithms.HmacSha256,
+        bool includeAdminClaim = false)
     {
         var now = DateTimeOffset.UtcNow;
         var nbf = notBefore ?? now.AddMinutes(-1);
+        var claims = new List<Claim>
+        {
+            new("sub", accountId.ToString("N")),
+            new("sid", sessionId.ToString("N")),
+            new("jti", Guid.NewGuid().ToString("N"))
+        };
+
+        if (includeAdminClaim)
+        {
+            claims.Add(new Claim("admin", "true"));
+        }
 
         var descriptor = new SecurityTokenDescriptor
         {
             Issuer = issuer,
             Audience = audience,
-            Subject = new ClaimsIdentity(
-            [
-                new Claim("sub", accountId.ToString("N")),
-                new Claim("sid", sessionId.ToString("N")),
-                new Claim("jti", Guid.NewGuid().ToString("N"))
-            ]),
+            Subject = new ClaimsIdentity(claims),
             NotBefore = nbf.UtcDateTime,
             IssuedAt = nbf.UtcDateTime,
             Expires = (expiresAt ?? now.AddMinutes(60)).UtcDateTime,

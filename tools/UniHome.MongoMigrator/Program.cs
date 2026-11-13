@@ -19,7 +19,8 @@ const string Usage =
       dotnet run --project tools/UniHome.MongoMigrator -- verify --database <nombre>
       dotnet run --project tools/UniHome.MongoMigrator -- promote --database unihome_desarrollo --confirm-database unihome_desarrollo --approval-ref <referencia>
 
-    audit, plan y verify aceptan --migration-credential para leer con la credencial
+    audit, plan, apply y verify aceptan --version <M01-001|M03-001>; el valor
+    predeterminado es M01-001. audit, plan y verify aceptan --migration-credential para leer con la credencial
     técnica. La migración ordinaria solo escribe en unihome_modelo_pruebas o en una
     base incluida en UNIHOME_MIGRATION_ALLOWED_DATABASES. unihome_desarrollo solo
     puede promoverse con el comando promote, autorización específica y credencial
@@ -120,7 +121,11 @@ try
     stage = MongoExecutionStage.DatabaseSelection;
     var selectedDatabase = command == "promote" ? databaseName : databaseName.Trim();
     var database = client.GetDatabase(selectedDatabase);
-    var runner = new MongoMigrationRunner(database, MongoIdentityMigration.Definition);
+    var versionOption = GetOption(args, "--version");
+    var selectedMigration = string.IsNullOrWhiteSpace(versionOption)
+        ? MongoIdentityMigration.Definition
+        : MongoMigrationRegistry.Default.GetRequired(versionOption);
+    var runner = new MongoMigrationRunner(database, selectedMigration);
 
     stage = command == "promote"
         ? MongoExecutionStage.Promotion
@@ -183,8 +188,9 @@ static string? GetOption(string[] args, string name)
 static async Task<int> AuditAsync(MongoMigrationRunner runner)
 {
     var audit = await runner.AuditAsync();
+    var managedCollections = MongoMigrationRegistry.Default.ManagedCollections;
     var externalCollections = audit.Collections
-        .Where(collection => !MongoIdentityMigration.ManagedCollections.Contains(collection.Name))
+        .Where(collection => !managedCollections.Contains(collection.Name))
         .Where(collection => !string.Equals(
             collection.Name,
             MongoIdentitySchema.MigrationLedgerCollection,
@@ -322,7 +328,13 @@ static bool PrintVerification(MongoMigrationVerification verification)
     Console.WriteLine($"Migración: {verification.Version}");
     Console.WriteLine($"Registrada: {verification.Applied}");
     Console.WriteLine($"Checksum coincide: {verification.ChecksumMatches}");
-    Console.WriteLine($"Índices M01 coinciden: {verification.IndexesMatch}");
+    var indexLabel = string.Equals(
+        verification.Version,
+        MongoIdentityMigration.Version,
+        StringComparison.Ordinal)
+        ? "M01"
+        : verification.Version;
+    Console.WriteLine($"Índices {indexLabel} coinciden: {verification.IndexesMatch}");
     Console.WriteLine($"Escrituras pendientes: {verification.PendingWrites.Count}");
 
     foreach (var issue in verification.Issues)
@@ -330,8 +342,9 @@ static bool PrintVerification(MongoMigrationVerification verification)
         Console.WriteLine($"Problema: {issue}");
     }
 
+    var managedCollections = MongoMigrationRegistry.Default.ManagedCollections;
     var externalCollections = verification.Collections
-        .Where(collection => !MongoIdentityMigration.ManagedCollections.Contains(collection.Name))
+        .Where(collection => !managedCollections.Contains(collection.Name))
         .Where(collection => !string.Equals(
             collection.Name,
             MongoIdentitySchema.MigrationLedgerCollection,

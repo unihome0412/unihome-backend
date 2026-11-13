@@ -1,0 +1,142 @@
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
+using MongoDB.Driver;
+using UniHome.Application.Identity.Exceptions;
+using UniHome.Application.Universities.Abstractions;
+using UniHome.Application.Universities.Exceptions;
+using UniHome.Domain.Universities;
+
+namespace UniHome.Infrastructure.Persistence.Mongo.Universities;
+
+/// <summary>
+/// Adaptador MongoDB del catálogo M03. El índice único sobre el nombre
+/// normalizado decide los duplicados de forma atómica; la búsqueda solo devuelve
+/// universidades activas y el límite se aplica en la consulta. La cobertura real
+/// se ejerce en <c>MongoUniversityPersistenceTests</c> (opt-in); se excluye del
+/// reporte unitario para no declarar cobertura ficticia de MongoDB.
+/// </summary>
+[ExcludeFromCodeCoverage]
+internal sealed class MongoUniversityRepository : IUniversityRepository
+{
+    private const int DuplicateKeyCode = 11000;
+
+    private readonly MongoDbClientProvider _clientProvider;
+    private readonly ILogger<MongoUniversityRepository> _logger;
+
+    public MongoUniversityRepository(
+        MongoDbClientProvider clientProvider,
+        ILogger<MongoUniversityRepository> logger)
+    {
+        _clientProvider = clientProvider;
+        _logger = logger;
+    }
+
+    public async Task AddAsync(
+        University university,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(university);
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            await collection
+                .InsertOneAsync(ToDocument(university), cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (MongoWriteException exception) when (IsDuplicateKey(exception))
+        {
+            throw new DuplicateUniversityException();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<IReadOnlyList<University>> SearchActiveAsync(
+        string normalizedTerm,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(normalizedTerm);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UniversityDocument>.Filter.And(
+                Builders<UniversityDocument>.Filter.Eq(
+                    document => document.IsActive,
+                    true),
+                Builders<UniversityDocument>.Filter.Regex(
+                    document => document.NormalizedName,
+                    new BsonRegularExpression(Regex.Escape(normalizedTerm))));
+
+            var documents = await collection
+                .Find(filter)
+                .Sort(Builders<UniversityDocument>.Sort.Ascending(
+                    document => document.NormalizedName))
+                .Limit(limit)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents.Select(ToDomain).ToArray();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    private async Task<IMongoCollection<UniversityDocument>> GetCollectionAsync(
+        CancellationToken cancellationToken)
+    {
+        if (!_clientProvider.IsConfigured)
+        {
+            throw new StorageUnavailableException();
+        }
+
+        var collection = _clientProvider
+            .GetDatabase()
+            .GetCollection<UniversityDocument>(MongoUniversitySchema.Collection);
+        await MongoIdentitySchemaGuard.EnsureAsync(collection, cancellationToken).ConfigureAwait(false);
+        return collection;
+    }
+
+    private static bool IsDuplicateKey(MongoWriteException exception) =>
+        exception.WriteError?.Code == DuplicateKeyCode;
+
+    private static UniversityDocument ToDocument(University university) =>
+        new()
+        {
+            Id = university.Id.ToString("N", CultureInfo.InvariantCulture),
+            NameAndCampus = university.NameAndCampus,
+            NormalizedName = university.NormalizedName,
+            IsActive = university.IsActive,
+            CreatedAt = university.CreatedAt.UtcDateTime
+        };
+
+    private static University ToDomain(UniversityDocument document) =>
+        University.Restore(
+            Guid.ParseExact(document.Id, "N"),
+            document.NameAndCampus,
+            document.IsActive,
+            new DateTimeOffset(
+                DateTime.SpecifyKind(document.CreatedAt, DateTimeKind.Utc)));
+
+    private void LogStorageFailure(MongoException exception)
+    {
+        // Nunca se registra el nombre, el correo ni la conexión.
+        _logger.LogWarning(
+            "La operación de universidades en MongoDB falló. Tipo={ExceptionType} TraceId={TraceId}",
+            exception.GetType().FullName,
+            Activity.Current?.Id);
+    }
+}

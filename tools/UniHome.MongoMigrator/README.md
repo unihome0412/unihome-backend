@@ -1,10 +1,11 @@
 # UniHome.MongoMigrator
 
-Herramienta manual y versionada para auditar, planificar y verificar la migración
-`M01-001` de `cuentas` y `sesiones_refresh`, y para ejecutar una promoción explícita
-a `unihome_desarrollo` bajo controles separados. No forma parte de la API, no se
-invoca durante `dotnet test` y no imprime la cadena de conexión, correos, códigos,
-tokens ni documentos.
+Herramienta manual y versionada para auditar, planificar y verificar las
+migraciones `M01-001` de `cuentas`/`sesiones_refresh` y `M03-001` de
+`universidades`, y para ejecutar una promoción explícita a `unihome_desarrollo`
+bajo controles separados. No forma parte de la API, no se invoca durante
+`dotnet test` y no imprime la cadena de conexión, correos, códigos, tokens ni
+documentos.
 
 ## Seguridad
 
@@ -55,8 +56,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
   --approval-ref "<REFERENCIA_DE_APROBACION>"
 ```
 
-`--version M01-001` es opcional; el valor predeterminado es M01-001. No se admiten
-alias, mayúsculas distintas, espacios ni nombres parciales.
+`--version M01-001|M03-001` es opcional; el valor predeterminado es M01-001. No se
+admiten alias, mayúsculas distintas, espacios ni nombres parciales.
 
 ## Alcance
 
@@ -68,7 +69,14 @@ La migración crea, si faltan:
 - `migraciones` con la versión en `_id` (unicidad nativa de MongoDB) y el
   checksum de la definición.
 
-El TTL solo elimina sesiones vencidas; la autorización de una sesión se comprueba
+`M03-001` crea, si faltan:
+
+- `universidades` con `ux_universidades_nombre_normalizado` único sobre
+  `nombreNormalizado`, usado por HU-075 para rechazar duplicados y buscar sin
+  acentos ni mayúsculas.
+
+Las migraciones M01 y M03 se seleccionan con `--version`; no se aplican en
+cascada. El TTL solo elimina sesiones vencidas; la autorización de una sesión se comprueba
 siempre en el backend. No se crean validadores JSON para M01 porque el contrato no
 los define.
 

@@ -65,4 +65,21 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
         Assert.True(paths.TryGetProperty("/api/v1/auth/recuperacion/confirmacion", out var resetConfirm));
         Assert.True(resetConfirm.TryGetProperty("post", out _));
     }
+
+    [Fact]
+    public async Task OpenApi_DebeIncluirLosEndpointsDeUniversidadesDeM03()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty("/api/v1/admin/universidades", out var create));
+        Assert.True(create.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/universidades", out var search));
+        Assert.True(search.TryGetProperty("get", out _));
+    }
 }

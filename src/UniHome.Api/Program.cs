@@ -18,6 +18,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
+using UniHome.Api.Authorization;
 using UniHome.Api.Configuration;
 using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
@@ -30,6 +31,8 @@ using UniHome.Application.Identity.Logout;
 using UniHome.Application.Identity.PasswordRecovery;
 using UniHome.Application.Identity.RefreshSessions;
 using UniHome.Application.Identity.RegisterAccount;
+using UniHome.Application.Universities.CreateUniversity;
+using UniHome.Application.Universities.SearchUniversities;
 using UniHome.Domain.Accounts;
 using UniHome.Infrastructure;
 using UniHome.Infrastructure.Configuration;
@@ -121,6 +124,8 @@ builder.Services.AddScoped<ResendConfirmationService>();
 builder.Services.AddScoped<DeleteAccountService>();
 builder.Services.AddScoped<RequestPasswordResetService>();
 builder.Services.AddScoped<ConfirmPasswordResetService>();
+builder.Services.AddScoped<CreateUniversityService>();
+builder.Services.AddScoped<SearchUniversitiesService>();
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -185,7 +190,23 @@ builder.Services
         };
     });
 
-builder.Services.AddAuthorization();
+builder.Services
+    .AddOptions<AdminAccessOptions>()
+    .Bind(builder.Configuration.GetSection(AdminAccessOptions.SectionName))
+    .Validate(
+        options => AdminAccessOptions.AreValidAccountIds(options.AccountIds),
+        $"{AdminAccessOptions.SectionName}:AccountIds contiene identificadores inválidos.")
+    .ValidateOnStart();
+
+builder.Services.AddSingleton<IAuthorizationHandler, AdminAccessHandler>();
+
+builder.Services
+    .AddAuthorizationBuilder()
+    .AddPolicy(AdminAccessOptions.PolicyName, policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.AddRequirements(new AdminAccessRequirement());
+    });
 
 builder.Services.Configure<AuthRateLimitOptions>(
     builder.Configuration.GetSection(AuthRateLimitOptions.SectionName));

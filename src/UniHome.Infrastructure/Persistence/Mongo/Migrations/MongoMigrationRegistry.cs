@@ -1,3 +1,5 @@
+using UniHome.Infrastructure.Persistence.Mongo.Universities;
+
 namespace UniHome.Infrastructure.Persistence.Mongo.Migrations;
 
 /// <summary>
@@ -8,7 +10,7 @@ namespace UniHome.Infrastructure.Persistence.Mongo.Migrations;
 public sealed class MongoMigrationRegistry
 {
     public static MongoMigrationRegistry Default { get; } =
-        new([MongoIdentityMigration.Definition]);
+        new([MongoIdentityMigration.Definition, MongoUniversityMigration.Definition]);
 
     public MongoMigrationRegistry(IEnumerable<MongoMigrationDefinition> migrations)
     {
@@ -61,9 +63,13 @@ public sealed class MongoMigrationRegistry
         }
 
         Migrations = ordered;
+        ManagedCollections = collections.Keys.ToHashSet(StringComparer.Ordinal);
     }
 
     public IReadOnlyList<MongoMigrationDefinition> Migrations { get; }
+
+    /// <summary>Colecciones de negocio administradas por alguna migración.</summary>
+    public IReadOnlySet<string> ManagedCollections { get; }
 
     public MongoMigrationDefinition GetRequired(string version)
     {
