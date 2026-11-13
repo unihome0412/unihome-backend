@@ -8,6 +8,11 @@ public interface IUnitRepository
 
     Task<Unit?> FindByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<Unit?> FindByPhotoStorageKeyAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<Unit?>(null);
+
     Task<bool> UpdateServicesAsync(
         Guid id,
         Guid propertyId,

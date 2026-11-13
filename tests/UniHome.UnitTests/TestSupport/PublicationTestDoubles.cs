@@ -50,6 +50,12 @@ internal sealed class FakeUnitRepository : IUnitRepository
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.SingleOrDefault(unit => unit.Id == id));
 
+    public Task<Unit?> FindByPhotoStorageKeyAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items.SingleOrDefault(unit =>
+            unit.Photos.Any(photo => photo.StorageKey == storageKey)));
+
     public Task<bool> UpdateServicesAsync(
         Guid id,
         Guid propertyId,
@@ -158,6 +164,17 @@ internal sealed class FakeUnitPhotoStorage : IUnitPhotoStorage
         Deleted.Add(storageKey);
         return Task.CompletedTask;
     }
+
+    public Task<UnitPhotoContent?> ReadAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<UnitPhotoContent?>(
+            Saved.Contains(storageKey)
+                ? new UnitPhotoContent(
+                    new MemoryStream([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], writable: false),
+                    "image/png",
+                    8)
+                : null);
 
     public string GetReadUrl(string storageKey) => $"https://photos.test/{storageKey}";
 }
