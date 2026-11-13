@@ -62,17 +62,22 @@ El job `mongo-db-test` aplica M01-001, M03-001 y M05-001 en
 `unihome_ci_verificacion` y ejecuta la prueba real
 `MongoPublicationPersistenceTests`.
 
-## DEC-04 — almacenamiento de fotos
+## DEC-04 ? almacenamiento de fotos
 
-El contrato de EP-M05-03 está implementado con el puerto
-`IUnitPhotoStorage`, validación de tamaño, firma JPEG/PNG real y hash SHA-256.
-**No hay proveedor de blobs autorizado.** La implementación registrada en
-producción es fail-closed (`503`) y no escribe archivos en MongoDB, en el
-repositorio ni en disco local. Las pruebas usan un doble exclusivo de test.
+La decisi?n vigente es **Cloudinary Free** (ver
+[`dec-04-cloudinary.md`](dec-04-cloudinary.md)). El puerto `IUnitPhotoStorage`
+mantiene la validaci?n de tama?o, firma real, hash y ownership. El binario se
+sube como `authenticated`; MongoDB solo guarda el `public_id` de Cloudinary en
+`storageKey` y los metadatos de `unidades.fotos[]`.
 
-Por tanto, la carga de fotos queda **operativamente bloqueada** hasta que se
-apruebe DEC-04 y se configure el proveedor. No se declara lista para producción
-sin ese recurso.
+La entrega no expone la URL firmada de Cloudinary: `GetReadUrl` devuelve el proxy
+`GET /api/v1/fotos/{photoRef}`, que verifica la visibilidad/ownership antes de
+descargar el binario. Los borradores no son p?blicamente accesibles.
+
+Si faltan `Cloudinary__CloudName`, `Cloudinary__ApiKey` o
+`Cloudinary__ApiSecret`, se conserva el adaptador fail-closed (`503`); no se
+simula almacenamiento. La prueba real de Cloudinary permanece **PENDIENTE**
+hasta disponer de credenciales seguras y ejecutar el test opt-in.
 
 ## Gate Atlas
 

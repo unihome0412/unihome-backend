@@ -42,6 +42,12 @@ public static class DependencyInjection
             .AddOptions<MongoDbOptions>()
             .Bind(configuration.GetSection(MongoDbOptions.SectionName));
 
+        var cloudinaryOptions = configuration
+            .GetSection(CloudinaryOptions.SectionName)
+            .Get<CloudinaryOptions>() ?? new CloudinaryOptions();
+        services.Configure<CloudinaryOptions>(
+            configuration.GetSection(CloudinaryOptions.SectionName));
+
         services
             .AddOptions<VerificationCodeOptions>()
             .Bind(configuration.GetSection(VerificationCodeOptions.SectionName));

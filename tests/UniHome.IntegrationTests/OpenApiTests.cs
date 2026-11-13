@@ -136,6 +136,11 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             "/api/v1/publicaciones/primera/terminos",
             out var terms));
         Assert.True(terms.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/fotos/{photoRef}",
+            out var photo));
+        Assert.True(photo.TryGetProperty("get", out _));
     }
 
     [Fact]

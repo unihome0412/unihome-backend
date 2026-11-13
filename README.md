@@ -111,14 +111,17 @@ panel son responsabilidad de Android; el backend entrega los indicadores y
 revalida cada ruta administrativa.
 
 Sprint 2 / M05: `POST /api/v1/propiedades`, `POST /api/v1/propiedades/{id}/unidades`,
-`POST /api/v1/unidades/{id}/fotos`, `PUT /api/v1/unidades/{id}/servicios`,
+`POST /api/v1/unidades/{id}/fotos` y `GET /api/v1/fotos/{photoRef}`, `PUT /api/v1/unidades/{id}/servicios`,
 `PUT /api/v1/unidades/{id}/zona-reglas`, `GET /api/v1/unidades/{id}/vista-previa` y
 `POST /api/v1/publicaciones/primera/terminos`. Todas las rutas requieren Bearer y
 verifican que el recurso pertenezca al titular. La edad se recalcula en servidor.
 La unidad nace en `Borrador`; no se implementó el envío a revisión de Sprint 4.
-La carga de fotos usa un puerto de almacenamiento; **DEC-04 sigue pendiente**, por lo
-que sin proveedor autorizado responde `503` y no se declara funcionalidad de fotos
-lista para producción. Detalle en [`docs/mongodb-m05.md`](docs/mongodb-m05.md).
+La carga de fotos usa **Cloudinary Free** mediante `IUnitPhotoStorage`; las im?genes
+se suben como `authenticated` y se entregan por `GET /api/v1/fotos/{photoRef}`, no por
+una URL de Cloudinary. Si faltan `Cloudinary__CloudName`, `Cloudinary__ApiKey` o
+`Cloudinary__ApiSecret`, el endpoint falla cerrado con `503`. La prueba real opt-in
+sigue **PENDIENTE** de credenciales seguras. Detalle en
+[`docs/dec-04-cloudinary.md`](dec-04-cloudinary.md).
 
 Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
 `contrasena` y `confirmacionPerdidaInformacion: true`. Hace borrado lógico
@@ -221,7 +224,7 @@ sobre `nombreNormalizado`. La migración versionada `M03-001` crea la colección
 diverge. Detalle en [`docs/mongodb-m03.md`](docs/mongodb-m03.md).
 
 M05 usa `propiedades`, `unidades` y `aceptaciones_terminos` con la migración
-`M05-001`; las fotos guardan solo metadatos y el binario depende de DEC-04. Detalle en
+`M05-001`; las fotos guardan solo metadatos y el binario se almacena en Cloudinary. Detalle en
 [`docs/mongodb-m05.md`](docs/mongodb-m05.md).
 
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
@@ -489,9 +492,13 @@ declara listo para el primer despliegue hasta completar esos pasos.
   `ux_universidades_nombre_normalizado`; no se modificó Atlas.
 - La allowlist `Admin__AccountIds` es un mecanismo provisional hasta que M13 defina
   la provisión, auditoría y revocación formales de administradores.
-- **DEC-04 pendiente:** no hay proveedor de blobs autorizado. La carga de fotos M05
-  está implementada con validación y metadatos, pero falla cerrada con `503` hasta
-  aprobar/configurar el proveedor; no se usó almacenamiento simulado en producción.
+- **DEC-04 resuelto en c?digo con Cloudinary Free:** las fotos se suben como
+  `authenticated` y se entregan mediante `GET /api/v1/fotos/{photoRef}`; la URL
+  firmada de Cloudinary y las credenciales no salen del backend. Sin
+  `Cloudinary__CloudName`, `Cloudinary__ApiKey` o `Cloudinary__ApiSecret`, el
+  almacenamiento falla cerrado con `503`. La prueba real opt-in est? **PENDIENTE**
+  de credenciales seguras. Detalle en
+  [`docs/dec-04-cloudinary.md`](docs/dec-04-cloudinary.md).
 - El Sprint 2 no implementa el envío a revisión ni el expediente de M06 (HU-013/HU-027,
   Sprint 4); las unidades permanecen en `Borrador`.
 - El perfil devuelve `etiquetaCuenta=UsuarioUniHome` y `vinculadoAUnidad=false`

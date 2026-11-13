@@ -64,6 +64,31 @@ internal sealed class MongoUnitRepository : IUnitRepository
         }
     }
 
+    public async Task<Unit?> FindByPhotoStorageKeyAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storageKey);
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var document = await collection
+                .Find(Builders<UnitDocument>.Filter.ElemMatch(
+                    unit => unit.Photos,
+                    photo => photo.StorageKey == storageKey))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return document is null ? null : ToDomain(document);
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<bool> UpdateServicesAsync(
         Guid id,
         Guid propertyId,

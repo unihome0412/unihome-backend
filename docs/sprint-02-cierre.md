@@ -1,5 +1,9 @@
 # Sprint 2 — Cierre backend M05
 
+> **Actualizaci?n posterior:** DEC-04 se resolvi? en c?digo con Cloudinary Free en
+> `feature/dec-04-cloudinary-storage`; ver [`dec-04-cloudinary.md`](dec-04-cloudinary.md).
+> Este documento conserva el estado hist?rico del Sprint 2.
+
 **Rama:** `feature/sprint-02-backend-integral`  
 **Base:** `main` posterior al merge del Sprint 1 (`baba9c22afec47e42809296a93c2385a91ecd278`)  
 **Alcance:** propiedades, unidades, fotografías, servicios, zona/reglas, vista previa y términos. No incluye HU-013/HU-027 de Sprint 4.
