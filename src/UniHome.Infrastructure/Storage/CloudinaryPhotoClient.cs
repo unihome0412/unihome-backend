@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using CloudinaryDotNet;
 using CloudinaryDotNet.Actions;
 using Microsoft.Extensions.Options;
@@ -15,7 +16,8 @@ namespace UniHome.Infrastructure.Storage;
 [ExcludeFromCodeCoverage]
 internal sealed class CloudinaryPhotoClient : ICloudinaryPhotoClient, IDisposable
 {
-    private const int MaxDownloadBytes = 10 * 1024 * 1024;
+    private const int MaxDownloadBytes = 6 * 1024 * 1024;
+    private const string CloudinaryDeliveryHost = "res.cloudinary.com";
 
     private readonly Cloudinary _cloudinary;
     private readonly HttpClient _httpClient;
@@ -36,7 +38,11 @@ internal sealed class CloudinaryPhotoClient : ICloudinaryPhotoClient, IDisposabl
             }
         };
 
-        _httpClient = new HttpClient
+        _httpClient = new HttpClient(new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            AutomaticDecompression = DecompressionMethods.None
+        })
         {
             Timeout = value.Timeout
         };
@@ -100,36 +106,70 @@ internal sealed class CloudinaryPhotoClient : ICloudinaryPhotoClient, IDisposabl
         {
             var signedUrl = _cloudinary.Api.UrlImgUp
                 .Type("authenticated")
+                .Secure(true)
                 .Signed(true)
                 .BuildUrl(publicId);
 
+            var deliveryUri = CreateTrustedDeliveryUri(signedUrl);
+
             using var response = await _httpClient
-                .GetAsync(signedUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .GetAsync(deliveryUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            if (response.StatusCode == HttpStatusCode.NotFound)
             {
                 return new CloudinaryDownload(404, null, null);
             }
 
-            if (!response.IsSuccessStatusCode)
+            if ((int)response.StatusCode is >= 300 and < 400 ||
+                !response.IsSuccessStatusCode)
             {
                 throw new CloudinaryProviderException();
             }
 
-            var content = await response.Content
-                .ReadAsByteArrayAsync(cancellationToken)
+            var contentLength = response.Content.Headers.ContentLength;
+            if (contentLength is > MaxDownloadBytes)
+            {
+                throw new CloudinaryProviderException();
+            }
+
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            if (string.IsNullOrWhiteSpace(mediaType) ||
+                !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new CloudinaryProviderException();
+            }
+
+            await using var responseStream = await response.Content
+                .ReadAsStreamAsync(cancellationToken)
                 .ConfigureAwait(false);
+            using var buffer = new MemoryStream();
+            var chunk = new byte[81920];
+            var total = 0;
 
-            if (content.Length > MaxDownloadBytes)
+            while (true)
             {
-                throw new CloudinaryProviderException();
+                var read = await responseStream
+                    .ReadAsync(chunk, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (read == 0)
+                {
+                    break;
+                }
+
+                total += read;
+                if (total > MaxDownloadBytes)
+                {
+                    throw new CloudinaryProviderException();
+                }
+
+                await buffer
+                    .WriteAsync(chunk.AsMemory(0, read), cancellationToken)
+                    .ConfigureAwait(false);
             }
 
-            return new CloudinaryDownload(
-                200,
-                content,
-                response.Content.Headers.ContentType?.MediaType);
+            return new CloudinaryDownload(200, buffer.ToArray(), mediaType);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -182,6 +222,21 @@ internal sealed class CloudinaryPhotoClient : ICloudinaryPhotoClient, IDisposabl
         {
             throw new CloudinaryProviderException(exception);
         }
+    }
+
+    internal static Uri CreateTrustedDeliveryUri(string signedUrl)
+    {
+        if (!Uri.TryCreate(signedUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps ||
+            !string.Equals(
+                uri.Host,
+                CloudinaryDeliveryHost,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CloudinaryProviderException();
+        }
+
+        return uri;
     }
 
     public void Dispose() => _httpClient.Dispose();

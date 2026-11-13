@@ -1,3 +1,4 @@
+using System.Net;
 using Microsoft.Extensions.Options;
 using UniHome.Infrastructure.Configuration;
 using UniHome.Infrastructure.Storage;
@@ -6,28 +7,31 @@ using UniHome.IntegrationTests.TestSupport;
 namespace UniHome.IntegrationTests;
 
 /// <summary>
-/// Prueba real de Cloudinary Free. Si faltan credenciales seguras se omite y se
-/// reporta como PENDIENTE, nunca como aprobada.
+/// Prueba real de Cloudinary Free. Si faltan credenciales se omite y se reporta
+/// como PENDIENTE; si se activa con la bandera y faltan credenciales, falla.
 /// </summary>
 public sealed class CloudinaryPersistenceTests
 {
-    private static readonly byte[] Png =
-        [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
+    // PNG RGB 2x2 auténtico, sin texto, EXIF ni datos personales.
+    private static readonly byte[] Png = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR42mP4z8DAAMb//0MZUA4Aep8J9x7TI9wAAAAASUVORK5CYII=");
 
     [CloudinaryIntegrationFact]
     public async Task SubidaLecturaYEliminacionReales_DebenFuncionar()
     {
+        var credentials = CloudinaryIntegrationEnvironment.RequireConfiguration();
         var options = Options.Create(new CloudinaryOptions
         {
-            CloudName = CloudinaryIntegrationEnvironment.CloudName,
-            ApiKey = CloudinaryIntegrationEnvironment.ApiKey,
-            ApiSecret = CloudinaryIntegrationEnvironment.ApiSecret,
+            CloudName = credentials.CloudName,
+            ApiKey = credentials.ApiKey,
+            ApiSecret = credentials.ApiSecret,
             Folder = "unihome/integration-tests",
             TimeoutSeconds = 30
         });
         using var client = new CloudinaryPhotoClient(options);
         var storage = new CloudinaryUnitPhotoStorage(client, options);
         string? storageKey = null;
+        string? authenticatedUrl = null;
 
         try
         {
@@ -45,9 +49,23 @@ public sealed class CloudinaryPersistenceTests
             await using var downloaded = content.Content;
             using var memory = new MemoryStream();
             await downloaded.CopyToAsync(memory);
-            Assert.NotEmpty(memory.ToArray());
+            Assert.Equal(Png, memory.ToArray());
 
-            Assert.Contains("/api/v1/fotos/", storage.GetReadUrl(stored.StorageKey));
+            authenticatedUrl = storage.GetReadUrl(stored.StorageKey);
+            Assert.Contains("/api/v1/fotos/", authenticatedUrl);
+
+            // La URL directa sin firma no debe entregar el asset authenticated.
+            var unsignedUrl =
+                $"https://res.cloudinary.com/{Uri.EscapeDataString(credentials.CloudName)}" +
+                $"/image/authenticated/{stored.StorageKey}";
+            using var http = new HttpClient(new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false
+            });
+            using var unsignedResponse = await http.GetAsync(unsignedUrl);
+            Assert.Contains(
+                unsignedResponse.StatusCode,
+                new[] { HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden, HttpStatusCode.NotFound });
         }
         finally
         {

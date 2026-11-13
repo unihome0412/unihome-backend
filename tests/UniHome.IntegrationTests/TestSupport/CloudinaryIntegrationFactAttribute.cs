@@ -5,7 +5,9 @@ public sealed class CloudinaryIntegrationFactAttribute : FactAttribute
 {
     public CloudinaryIntegrationFactAttribute()
     {
-        if (!CloudinaryIntegrationEnvironment.IsConfigured)
+        // Sin la bandera explícita la prueba queda PENDIENTE. Si la bandera está
+        // activa, no se omite: RequireConfiguration falla si faltan credenciales.
+        if (!CloudinaryIntegrationEnvironment.IsRunRequested)
         {
             Skip = CloudinaryIntegrationEnvironment.SkipReason;
         }

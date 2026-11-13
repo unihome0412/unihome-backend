@@ -165,3 +165,29 @@ Si faltan `CloudName`, `ApiKey` o `ApiSecret`, se registra
   despliegue; no se modificó Azure.
 - Reconciliar la evaluación Azure de PR #35 y actualizar ese PR en un cambio
   posterior autorizado; no se tocó PR #35.
+
+
+## 11. Actualizaci?n de validaci?n real
+
+- El test usa un PNG RGB 2x2 aut?ntico (77 bytes), sin texto, EXIF ni datos
+  personales; ya no usa el PNG incompleto de nueve bytes.
+- Si `UNIHOME_RUN_CLOUDINARY_INTEGRATION_TESTS=1` y faltan credenciales, el test
+  **falla expl?citamente**. Solo queda `SKIP`/PENDIENTE cuando la bandera no est?
+  activa. Un skip nunca se reporta como PASS.
+- El proxy exige HTTPS, host exacto `res.cloudinary.com`, no sigue redirecciones,
+  exige `Content-Type image/*`, limita la descarga a 6 MB y aplica timeout.
+- La prueba real tambi?n comprueba que la URL directa sin firma no entrega el
+  asset authenticated.
+
+Comandos locales exactos (User Secrets):
+
+```powershell
+dotnet user-secrets set "Cloudinary:CloudName" "<cloud>" --project src/UniHome.Api
+dotnet user-secrets set "Cloudinary:ApiKey" "<key>" --project src/UniHome.Api
+dotnet user-secrets set "Cloudinary:ApiSecret" "<secret>" --project src/UniHome.Api
+$env:UNIHOME_RUN_CLOUDINARY_INTEGRATION_TESTS = "1"
+dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj `
+  --filter "FullyQualifiedName~CloudinaryPersistenceTests"
+```
+
+No se ejecutaron estas credenciales en esta m?quina porque no est?n configuradas.
