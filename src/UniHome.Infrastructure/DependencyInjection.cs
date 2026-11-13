@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Abstractions.Storage;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Identity.Exceptions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Publications.Abstractions;
 using UniHome.Application.Units.Abstractions;
@@ -42,9 +44,6 @@ public static class DependencyInjection
             .AddOptions<MongoDbOptions>()
             .Bind(configuration.GetSection(MongoDbOptions.SectionName));
 
-        var cloudinaryOptions = configuration
-            .GetSection(CloudinaryOptions.SectionName)
-            .Get<CloudinaryOptions>() ?? new CloudinaryOptions();
         services.Configure<CloudinaryOptions>(
             configuration.GetSection(CloudinaryOptions.SectionName));
 
@@ -132,7 +131,41 @@ public static class DependencyInjection
         services.AddSingleton<IPropertyRepository, MongoPropertyRepository>();
         services.AddSingleton<IUnitRepository, MongoUnitRepository>();
         services.AddSingleton<ITermsAcceptanceRepository, MongoTermsAcceptanceRepository>();
-        services.AddSingleton<IUnitPhotoStorage, UnconfiguredUnitPhotoStorage>();
+        services.AddHttpContextAccessor();
+
+        // La decisi?n se eval?a al resolver, no al construir el contenedor: as? la
+        // configuraci?n del host (incluidos tests y User Secrets) se aplica antes
+        // de elegir el adaptador y nunca hay dos implementaciones compitiendo.
+        services.AddSingleton<ICloudinaryPhotoClient>(serviceProvider =>
+        {
+            var options = serviceProvider
+                .GetRequiredService<IOptions<CloudinaryOptions>>()
+                .Value;
+
+            if (!options.IsConfigured)
+            {
+                throw new StorageUnavailableException();
+            }
+
+            return new CloudinaryPhotoClient(Options.Create(options));
+        });
+
+        services.AddSingleton<IUnitPhotoStorage>(serviceProvider =>
+        {
+            var options = serviceProvider
+                .GetRequiredService<IOptions<CloudinaryOptions>>()
+                .Value;
+
+            if (!options.IsConfigured)
+            {
+                return new UnconfiguredUnitPhotoStorage();
+            }
+
+            return new CloudinaryUnitPhotoStorage(
+                serviceProvider.GetRequiredService<ICloudinaryPhotoClient>(),
+                Options.Create(options),
+                serviceProvider.GetService<IHttpContextAccessor>());
+        });
         services.AddSingleton<IPasswordHasher, AspNetCorePasswordHasher>();
         services.AddSingleton<IDummyPasswordHashProvider, DummyPasswordHashProvider>();
         services.AddSingleton<ISystemClock, SystemClock>();
