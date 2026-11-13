@@ -74,6 +74,37 @@ internal sealed class MongoPropertyRepository : IPropertyRepository
         }
     }
 
+    public async Task<IReadOnlyList<Property>> FindByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var stringIds = ids
+                .Select(id => id.ToString("N", CultureInfo.InvariantCulture))
+                .ToArray();
+            var documents = await collection
+                .Find(Builders<PropertyDocument>.Filter.In(document => document.Id, stringIds))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents.Select(ToDomain).ToArray();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     private async Task<IMongoCollection<PropertyDocument>> GetCollectionAsync(
         CancellationToken cancellationToken)
     {

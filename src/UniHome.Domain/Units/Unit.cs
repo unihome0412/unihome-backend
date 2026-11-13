@@ -40,7 +40,8 @@ public sealed class Unit
         IReadOnlyList<ServiceCharge> services,
         IReadOnlyList<UnitPhoto> photos,
         PublicationState publicationState,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        UnitAvailability availability)
     {
         Id = id;
         PropertyId = propertyId;
@@ -62,6 +63,7 @@ public sealed class Unit
         _photos = [.. photos];
         PublicationState = publicationState;
         CreatedAt = createdAt;
+        Availability = availability;
     }
 
     public Guid Id { get; }
@@ -83,6 +85,7 @@ public sealed class Unit
     public IReadOnlyList<ServiceCharge> Services => _services.AsReadOnly();
     public IReadOnlyList<UnitPhoto> Photos => _photos.AsReadOnly();
     public PublicationState PublicationState { get; }
+    public UnitAvailability Availability { get; }
     public DateTimeOffset CreatedAt { get; }
 
     public static Unit Create(
@@ -148,7 +151,8 @@ public sealed class Unit
             [],
             [],
             PublicationState.Borrador,
-            now);
+            now,
+            UnitAvailability.Disponible);
     }
 
     public static Unit Restore(
@@ -171,7 +175,8 @@ public sealed class Unit
         IEnumerable<ServiceCharge>? services,
         IEnumerable<UnitPhoto>? photos,
         PublicationState publicationState,
-        DateTimeOffset createdAt) =>
+        DateTimeOffset createdAt,
+        UnitAvailability availability = UnitAvailability.Disponible) =>
         new(
             id,
             propertyId,
@@ -192,7 +197,8 @@ public sealed class Unit
             services?.ToArray() ?? [],
             photos?.ToArray() ?? [],
             publicationState,
-            createdAt);
+            createdAt,
+            availability);
 
     public void ConfigureServices(IEnumerable<ServiceCharge> services)
     {

@@ -8,6 +8,22 @@ public interface IUnitRepository
 
     Task<Unit?> FindByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<Unit>> FindByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Candidatos públicos de M04: publicación Aprobada y disponibilidad
+    /// Disponible (los documentos anteriores a M09 sin campo se consideran
+    /// disponibles). Precio/ocupación/paraQuién se filtran en MongoDB.
+    /// </summary>
+    Task<IReadOnlyList<Unit>> ListPublicCandidatesAsync(
+        Guid universityId,
+        decimal? maxPriceMxn,
+        bool onlyIndividual,
+        ForWhom? forWhom,
+        CancellationToken cancellationToken = default);
+
     Task<bool> UpdateServicesAsync(
         Guid id,
         Guid propertyId,

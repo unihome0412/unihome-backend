@@ -139,6 +139,53 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
+    public async Task OpenApi_DebeIncluirLosEndpointsDeM04YM07()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty("/api/v1/exploracion/mapa", out var map));
+        Assert.True(map.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/exploracion/lista", out var list));
+        Assert.True(list.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/tarjeta",
+            out var card));
+        Assert.True(card.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/ficha",
+            out var detail));
+        Assert.True(detail.TryGetProperty("get", out var detailGet));
+        Assert.True(detailGet.TryGetProperty("security", out var detailSecurity));
+        Assert.Contains(
+            detailSecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/favoritos", out var favorites));
+        Assert.True(favorites.TryGetProperty("get", out var favoritesGet));
+        Assert.True(favoritesGet.TryGetProperty("security", out var favoritesSecurity));
+        Assert.Contains(
+            favoritesSecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/favoritos/{unitId}",
+            out var favoriteById));
+        Assert.True(favoriteById.TryGetProperty("put", out _));
+        Assert.True(favoriteById.TryGetProperty("delete", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/exploracion/mapa", out var publicMap));
+        Assert.False(publicMap.GetProperty("get").TryGetProperty("security", out _));
+    }
+
+    [Fact]
     public async Task OpenApi_DebeIncluirElPerfilDeM02()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");

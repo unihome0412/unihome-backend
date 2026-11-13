@@ -1,6 +1,7 @@
 using MongoDB.Bson;
 using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
+using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
 
@@ -9,7 +10,7 @@ namespace UniHome.UnitTests.Infrastructure;
 public sealed class MongoMigrationRegistryTests
 {
     [Fact]
-    public void RegistroPorDefecto_DebeContenerM01M03YM05EnOrden()
+    public void RegistroPorDefecto_DebeContenerM01M03M05YM07EnOrden()
     {
         var registry = MongoMigrationRegistry.Default;
 
@@ -17,17 +18,20 @@ public sealed class MongoMigrationRegistryTests
             [
                 MongoIdentityMigration.Version,
                 MongoUniversityMigration.Version,
-                MongoPublicationMigration.Version
+                MongoPublicationMigration.Version,
+                MongoExplorationMigration.Version
             ],
             registry.Migrations.Select(migration => migration.Version));
         Assert.Equal(MongoIdentityMigration.Definition.Checksum, registry.Migrations[0].Checksum);
         Assert.Equal(MongoUniversityMigration.Definition.Checksum, registry.Migrations[1].Checksum);
         Assert.Equal(MongoPublicationMigration.Definition.Checksum, registry.Migrations[2].Checksum);
+        Assert.Equal(MongoExplorationMigration.Definition.Checksum, registry.Migrations[3].Checksum);
         Assert.Contains(MongoIdentitySchema.AccountsCollection, registry.ManagedCollections);
         Assert.Contains(MongoUniversitySchema.Collection, registry.ManagedCollections);
         Assert.Contains(MongoPublicationSchema.PropertiesCollection, registry.ManagedCollections);
         Assert.Contains(MongoPublicationSchema.UnitsCollection, registry.ManagedCollections);
         Assert.Contains(MongoPublicationSchema.TermsCollection, registry.ManagedCollections);
+        Assert.Contains(MongoExplorationSchema.FavoritesCollection, registry.ManagedCollections);
     }
 
     [Fact]

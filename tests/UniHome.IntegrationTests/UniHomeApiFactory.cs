@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Publications.Abstractions;
@@ -60,6 +61,8 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     public InMemoryTermsAcceptanceRepository Terms { get; } = new();
 
     public InMemoryUnitPhotoStorage PhotoStorage { get; } = new();
+
+    public InMemoryFavoriteRepository Favorites { get; } = new();
 
     public CapturingVerificationEmailSender EmailSender { get; } = new();
 
@@ -136,6 +139,9 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
             services.RemoveAll<IUnitPhotoStorage>();
             services.AddSingleton<IUnitPhotoStorage>(PhotoStorage);
+
+            services.RemoveAll<IUnitFavoriteRepository>();
+            services.AddSingleton<IUnitFavoriteRepository>(Favorites);
 
             services.RemoveAll<IVerificationEmailSender>();
             services.AddSingleton<IVerificationEmailSender>(EmailSender);

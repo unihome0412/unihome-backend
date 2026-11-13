@@ -29,6 +29,12 @@ internal sealed class FakePropertyRepository : IPropertyRepository
         Guid id,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.SingleOrDefault(property => property.Id == id));
+
+    public Task<IReadOnlyList<Property>> FindByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Property>>(
+            Items.Where(property => ids.Contains(property.Id)).ToArray());
 }
 
 internal sealed class FakeUnitRepository : IUnitRepository
@@ -49,6 +55,32 @@ internal sealed class FakeUnitRepository : IUnitRepository
         Guid id,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.SingleOrDefault(unit => unit.Id == id));
+
+    public Task<IReadOnlyList<Unit>> FindByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Unit>>(
+            Items.Where(unit => ids.Contains(unit.Id)).ToArray());
+
+    public Task<IReadOnlyList<Unit>> ListPublicCandidatesAsync(
+        Guid universityId,
+        decimal? maxPriceMxn,
+        bool onlyIndividual,
+        ForWhom? forWhom,
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<Unit> items = Items
+            .Where(unit => unit.UniversityId == universityId)
+            .Where(unit => unit.PublicationState == PublicationState.Aprobada)
+            .Where(unit => unit.Availability == UnitAvailability.Disponible)
+            .Where(unit => maxPriceMxn is null || unit.PricePerPlace <= maxPriceMxn)
+            .Where(unit => !onlyIndividual || unit.Occupancy == Occupancy.Individual)
+            .Where(unit => forWhom is null || unit.ForWhom == forWhom)
+            .OrderBy(unit => unit.PricePerPlace)
+            .ThenBy(unit => unit.Id)
+            .ToArray();
+        return Task.FromResult(items);
+    }
 
     public Task<bool> UpdateServicesAsync(
         Guid id,
