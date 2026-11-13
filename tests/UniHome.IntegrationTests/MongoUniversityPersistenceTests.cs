@@ -93,6 +93,69 @@ public sealed class MongoUniversityPersistenceTests
                 new { nombreYCampus = $"  {name.ToUpperInvariant()}  " });
             Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
 
+            using var adminList = await http.GetAsync(
+                "/api/v1/admin/universidades?page=1&pageSize=100");
+            Assert.Equal(HttpStatusCode.OK, adminList.StatusCode);
+            Assert.True(adminList.Headers.TryGetValues("X-Total-Count", out _));
+            using var adminListJson = JsonDocument.Parse(
+                await adminList.Content.ReadAsStringAsync());
+            Assert.Contains(
+                adminListJson.RootElement.EnumerateArray(),
+                item => item.GetProperty("id").GetGuid() == universityId.Value);
+
+            var updatedName = $"{name} Renombrada";
+            using var updated = await http.PutAsJsonAsync(
+                $"/api/v1/admin/universidades/{universityId.Value}",
+                new { nombreYCampus = updatedName });
+            Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
+
+            var storedAfterUpdate = await universities
+                .Find(new BsonDocument("_id", universityId.Value.ToString("N")))
+                .FirstOrDefaultAsync();
+            Assert.NotNull(storedAfterUpdate);
+            Assert.Equal(updatedName, storedAfterUpdate["nombreYCampus"].AsString);
+            Assert.Equal(
+                University.Normalize(updatedName),
+                storedAfterUpdate["nombreNormalizado"].AsString);
+
+            using var inactive = await http.PutAsJsonAsync(
+                $"/api/v1/admin/universidades/{universityId.Value}/estado",
+                new { activa = false });
+            Assert.Equal(HttpStatusCode.OK, inactive.StatusCode);
+            using var inactiveJson = JsonDocument.Parse(await inactive.Content.ReadAsStringAsync());
+            Assert.False(inactiveJson.RootElement.GetProperty("activa").GetBoolean());
+
+            using var hidden = await http.GetAsync(
+                $"/api/v1/universidades?buscar={Uri.EscapeDataString(updatedName)}");
+            using var hiddenJson = JsonDocument.Parse(await hidden.Content.ReadAsStringAsync());
+            Assert.DoesNotContain(
+                hiddenJson.RootElement.EnumerateArray(),
+                item => item.GetProperty("id").GetGuid() == universityId.Value);
+
+            using var adminListInactive = await http.GetAsync(
+                "/api/v1/admin/universidades?page=1&pageSize=100");
+            using var adminListInactiveJson = JsonDocument.Parse(
+                await adminListInactive.Content.ReadAsStringAsync());
+            Assert.Contains(
+                adminListInactiveJson.RootElement.EnumerateArray(),
+                item => item.GetProperty("id").GetGuid() == universityId.Value &&
+                        !item.GetProperty("activa").GetBoolean());
+
+            using var active = await http.PutAsJsonAsync(
+                $"/api/v1/admin/universidades/{universityId.Value}/estado",
+                new { activa = true });
+            Assert.Equal(HttpStatusCode.OK, active.StatusCode);
+            using var activeJson = JsonDocument.Parse(await active.Content.ReadAsStringAsync());
+            Assert.True(activeJson.RootElement.GetProperty("activa").GetBoolean());
+
+            using var visibleAgain = await http.GetAsync(
+                $"/api/v1/universidades?buscar={Uri.EscapeDataString(updatedName)}");
+            using var visibleAgainJson = JsonDocument.Parse(
+                await visibleAgain.Content.ReadAsStringAsync());
+            Assert.Contains(
+                visibleAgainJson.RootElement.EnumerateArray(),
+                item => item.GetProperty("id").GetGuid() == universityId.Value);
+
             http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
                 "Bearer",
                 JwtTestTokenFactory.Create(normalId, Guid.NewGuid()));
@@ -101,6 +164,9 @@ public sealed class MongoUniversityPersistenceTests
                 "/api/v1/admin/universidades",
                 new { nombreYCampus = $"Universidad No Autorizada {Guid.NewGuid():N}" });
             Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+
+            using var forbiddenList = await http.GetAsync("/api/v1/admin/universidades");
+            Assert.Equal(HttpStatusCode.Forbidden, forbiddenList.StatusCode);
         }
         finally
         {

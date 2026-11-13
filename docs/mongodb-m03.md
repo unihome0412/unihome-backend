@@ -5,11 +5,12 @@
 - `POST /api/v1/admin/universidades` (EP-M03-02): alta administrativa de una
   universidad con el campo único `nombreYCampus`.
 - `GET /api/v1/universidades?buscar=` (EP-M03-01): búsqueda pública de hasta 10
-  universidades activas, sin distinguir mayúsculas ni acentos. Se incluye porque
-  el criterio de aceptación de HU-075 exige que la universidad aparezca de
-  inmediato en el buscador.
-- No se implementaron listado administrativo, edición, activación ni
-  desactivación de HU-077.
+  universidades activas, sin distinguir mayúsculas ni acentos.
+- `GET /api/v1/admin/universidades` (EP-M03-03): listado paginado de activas e
+  inactivas, con `X-Total-Count`.
+- `PUT /api/v1/admin/universidades/{id}` (EP-M03-04): edición de nombre y campus.
+- `PUT /api/v1/admin/universidades/{id}/estado` (EP-M03-05): activación o
+  desactivación lógica; no existe borrado físico.
 
 ## Autorización
 
@@ -43,7 +44,8 @@ Colección: `universidades`.
 
 Migración versionada: **`M03-001`**. Crea la colección y el índice único. La API
 no ejecuta DDL; solo verifica los índices en modo lectura y falla cerrada si
-faltan o divergen.
+faltan o divergen. HU-077 reutiliza `M03-001`: editar y activar/desactivar no
+requieren cambios de esquema, por lo que no se creó otra migración.
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- apply `
@@ -54,7 +56,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- verify `
 
 El job `mongo-db-test` aplica `M01-001` y `M03-001` en la base efímera
 `unihome_ci_verificacion`, verifica ledger, checksum e índices y ejecuta la prueba
-real `MongoUniversityPersistenceTests`.
+real `MongoUniversityPersistenceTests`, que cubre alta, listado, edición,
+duplicado, desactivación, reactivación y búsqueda.
 
 ## Riesgo de conciliación con Atlas
 

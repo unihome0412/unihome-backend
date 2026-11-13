@@ -4,10 +4,10 @@ using System.Text;
 namespace UniHome.Domain.Universities;
 
 /// <summary>
-/// Universidad del catálogo M03 (HU-075). El nombre y el campus se capturan en un
-/// único campo; la forma normalizada sin acentos ni mayúsculas se usa para
-/// detectar duplicados y alimentar la búsqueda. La desactivación pertenece a
-/// HU-077 y no se expone todavía.
+/// Universidad del catálogo M03 (HU-075/HU-077). El nombre y el campus se capturan
+/// en un único campo; la forma normalizada sin acentos ni mayúsculas se usa para
+/// detectar duplicados y alimentar la búsqueda. La entidad nunca se borra: solo se
+/// desactiva para conservar referencias históricas.
 /// </summary>
 public sealed class University
 {
@@ -29,11 +29,11 @@ public sealed class University
 
     public Guid Id { get; }
 
-    public string NameAndCampus { get; }
+    public string NameAndCampus { get; private set; }
 
-    public string NormalizedName { get; }
+    public string NormalizedName { get; private set; }
 
-    public bool IsActive { get; }
+    public bool IsActive { get; private set; }
 
     public DateTimeOffset CreatedAt { get; }
 
@@ -57,8 +57,35 @@ public sealed class University
     }
 
     /// <summary>
+    /// HU-077: renombra la universidad y recalcula su forma normalizada. La
+    /// validación es la misma del alta para no abrir una vía de duplicados.
+    /// </summary>
+    public void Rename(string? nameAndCampus)
+    {
+        var valid = RequireValid(nameAndCampus);
+        var normalized = Normalize(valid);
+
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new ArgumentException(
+                "El nombre y campus no contiene caracteres válidos.",
+                nameof(nameAndCampus));
+        }
+
+        NameAndCampus = CollapseWhitespace(valid);
+        NormalizedName = normalized;
+    }
+
+    /// <summary>
+    /// HU-077: activa o desactiva sin borrar el documento. La búsqueda pública
+    /// excluye las universidades inactivas.
+    /// </summary>
+    public void SetActive(bool isActive) => IsActive = isActive;
+
+    /// <summary>
     /// Normaliza mayúsculas, acentos y espacios para comparar nombres de forma
-    /// estable entre la creación y la búsqueda pública (HU-007/HU-075).
+    /// estable entre la creación, la edición y la búsqueda pública
+    /// (HU-007/HU-075/HU-077).
     /// </summary>
     public static string Normalize(string value)
     {

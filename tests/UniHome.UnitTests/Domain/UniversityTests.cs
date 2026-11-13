@@ -71,4 +71,38 @@ public sealed class UniversityTests
         Assert.Throws<ArgumentException>(() =>
             University.Restore(Guid.Empty, "Universidad", true, Now));
     }
+
+    [Fact]
+    public void Rename_DebeActualizarNombreYNormalizacion()
+    {
+        var university = University.Create("Universidad del Norte", Now);
+
+        university.Rename("  Universidad Autónoma   del Norte  ");
+
+        Assert.Equal("Universidad Autónoma del Norte", university.NameAndCampus);
+        Assert.Equal("universidad autonoma del norte", university.NormalizedName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Rename_SinNombreYCampus_DebeRechazarse(string? value)
+    {
+        var university = University.Create("Universidad del Norte", Now);
+
+        Assert.Throws<ArgumentException>(() => university.Rename(value));
+        Assert.Equal("Universidad del Norte", university.NameAndCampus);
+    }
+
+    [Fact]
+    public void SetActive_DebeCambiarEstadoSinBorrar()
+    {
+        var university = University.Create("Universidad del Norte", Now);
+
+        university.SetActive(false);
+
+        Assert.False(university.IsActive);
+        Assert.Equal("Universidad del Norte", university.NameAndCampus);
+    }
 }

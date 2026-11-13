@@ -20,14 +20,16 @@ internal static class AuthTestHelpers
         string email,
         AccountStatus status = AccountStatus.Active,
         bool emailConfirmed = true,
-        Guid? id = null)
+        Guid? id = null,
+        DateOnly? birthDate = null)
     {
         var account = TestSupport.TestAccountFactory.Create(
             email,
             Password,
             status,
             emailConfirmed,
-            id);
+            id,
+            birthDate);
 
         await factory.Accounts.AddAsync(account);
         return account;

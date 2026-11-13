@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -161,6 +162,217 @@ public sealed class AdminUniversitiesEndpointTests : IClassFixture<UniHomeApiFac
     }
 
     [Fact]
+    public async Task Listar_ComoAdmin_DebeIncluirActivasEInactivasYTotalPaginado()
+    {
+        await AuthenticateAsAdminAsync();
+        var activeName = $"Universidad Activa {Guid.NewGuid():N}";
+        var inactiveName = $"Universidad Inactiva {Guid.NewGuid():N}";
+        var active = await CreateUniversityAsync(activeName);
+        await _factory.Universities.AddAsync(University.Restore(
+            Guid.NewGuid(),
+            inactiveName,
+            isActive: false,
+            DateTimeOffset.UtcNow));
+
+        using var response = await _client.GetAsync(
+            "/api/v1/admin/universidades?page=1&pageSize=100");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("X-Total-Count", out var totals));
+        Assert.True(int.Parse(totals.Single(), CultureInfo.InvariantCulture) >= 2);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = document.RootElement.EnumerateArray().ToArray();
+        Assert.Contains(items, item => item.GetProperty("id").GetGuid() == active.Id);
+        Assert.Contains(
+            items,
+            item => item.GetProperty("nombreYCampus").GetString() == inactiveName &&
+                    !item.GetProperty("activa").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Listar_ConPaginacionInvalida_DebeResponder400()
+    {
+        await AuthenticateAsAdminAsync();
+
+        using var response = await _client.GetAsync(
+            "/api/v1/admin/universidades?page=0&pageSize=101");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(document.RootElement
+            .GetProperty("errors")
+            .TryGetProperty("page", out _));
+        Assert.True(document.RootElement
+            .GetProperty("errors")
+            .TryGetProperty("pageSize", out _));
+    }
+
+    [Fact]
+    public async Task Listar_SinToken_DebeResponder401()
+    {
+        using var response = await _client.GetAsync("/api/v1/admin/universidades");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Editar_ComoAdmin_DebeActualizarYReflejarEnBusqueda()
+    {
+        await AuthenticateAsAdminAsync();
+        var original = $"Universidad Original {Guid.NewGuid():N}";
+        var updated = $"Universidad Renombrada {Guid.NewGuid():N}";
+        var university = await CreateUniversityAsync(original);
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{university.Id}",
+            new { nombreYCampus = updated });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(updated, document.RootElement.GetProperty("nombreYCampus").GetString());
+
+        using var search = await _client.GetAsync(
+            $"/api/v1/universidades?buscar={Uri.EscapeDataString(updated)}");
+        using var searchDocument = JsonDocument.Parse(await search.Content.ReadAsStringAsync());
+        Assert.Contains(
+            searchDocument.RootElement.EnumerateArray(),
+            item => item.GetProperty("id").GetGuid() == university.Id);
+
+        using var oldSearch = await _client.GetAsync(
+            $"/api/v1/universidades?buscar={Uri.EscapeDataString(original)}");
+        using var oldDocument = JsonDocument.Parse(await oldSearch.Content.ReadAsStringAsync());
+        Assert.DoesNotContain(
+            oldDocument.RootElement.EnumerateArray(),
+            item => item.GetProperty("id").GetGuid() == university.Id);
+    }
+
+    [Fact]
+    public async Task Editar_DuplicadoNormalizado_DebeResponder409()
+    {
+        await AuthenticateAsAdminAsync();
+        var first = await CreateUniversityAsync($"Universidad Uno {Guid.NewGuid():N}");
+        var secondName = $"Universidad Dos {Guid.NewGuid():N}";
+        await CreateUniversityAsync(secondName);
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{first.Id}",
+            new { nombreYCampus = secondName.ToUpperInvariant() });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Editar_Inexistente_DebeResponder404()
+    {
+        await AuthenticateAsAdminAsync();
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{Guid.NewGuid()}",
+            new { nombreYCampus = "Universidad Inexistente" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Editar_SinPrivilegioAdmin_DebeResponder403()
+    {
+        var email = AuthTestHelpers.UniqueEmail();
+        await AuthTestHelpers.SeedAccountAsync(_factory, email);
+        using var login = await AuthTestHelpers.LoginAsync(_client, email);
+        var tokens = await AuthTestHelpers.ReadTokensAsync(login);
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{Guid.NewGuid()}",
+            new { nombreYCampus = "Universidad No Autorizada" });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CambiarEstado_Desactivar_DebeOcultarDeBusquedaYConservarEnAdmin()
+    {
+        await AuthenticateAsAdminAsync();
+        var name = $"Universidad Desactivable {Guid.NewGuid():N}";
+        var university = await CreateUniversityAsync(name);
+
+        using var deactivate = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{university.Id}/estado",
+            new { activa = false });
+
+        Assert.Equal(HttpStatusCode.OK, deactivate.StatusCode);
+        using var deactivateDocument = JsonDocument.Parse(
+            await deactivate.Content.ReadAsStringAsync());
+        Assert.False(deactivateDocument.RootElement.GetProperty("activa").GetBoolean());
+
+        using var search = await _client.GetAsync(
+            $"/api/v1/universidades?buscar={Uri.EscapeDataString(name)}");
+        using var searchDocument = JsonDocument.Parse(await search.Content.ReadAsStringAsync());
+        Assert.DoesNotContain(
+            searchDocument.RootElement.EnumerateArray(),
+            item => item.GetProperty("id").GetGuid() == university.Id);
+
+        using var adminList = await _client.GetAsync(
+            "/api/v1/admin/universidades?page=1&pageSize=100");
+        using var adminDocument = JsonDocument.Parse(
+            await adminList.Content.ReadAsStringAsync());
+        Assert.Contains(
+            adminDocument.RootElement.EnumerateArray(),
+            item => item.GetProperty("id").GetGuid() == university.Id &&
+                    !item.GetProperty("activa").GetBoolean());
+
+        using var reactivate = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{university.Id}/estado",
+            new { activa = true });
+
+        Assert.Equal(HttpStatusCode.OK, reactivate.StatusCode);
+        using var reactivateDocument = JsonDocument.Parse(
+            await reactivate.Content.ReadAsStringAsync());
+        Assert.True(reactivateDocument.RootElement.GetProperty("activa").GetBoolean());
+
+        using var searchAgain = await _client.GetAsync(
+            $"/api/v1/universidades?buscar={Uri.EscapeDataString(name)}");
+        using var searchAgainDocument = JsonDocument.Parse(
+            await searchAgain.Content.ReadAsStringAsync());
+        Assert.Contains(
+            searchAgainDocument.RootElement.EnumerateArray(),
+            item => item.GetProperty("id").GetGuid() == university.Id);
+    }
+
+    [Fact]
+    public async Task CambiarEstado_Inexistente_DebeResponder404()
+    {
+        await AuthenticateAsAdminAsync();
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{Guid.NewGuid()}/estado",
+            new { activa = false });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CambiarEstado_ConClaimAdminFalso_DebeResponder403()
+    {
+        var email = AuthTestHelpers.UniqueEmail();
+        var account = await AuthTestHelpers.SeedAccountAsync(_factory, email);
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            JwtTestTokenFactory.Create(
+                account.Id,
+                Guid.NewGuid(),
+                includeAdminClaim: true));
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/v1/admin/universidades/{Guid.NewGuid()}/estado",
+            new { activa = false });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Buscar_DebeIgnorarAcentosMayusculasYLimitarA10()
     {
         for (var index = 0; index < 15; index++)
@@ -214,6 +426,20 @@ public sealed class AdminUniversitiesEndpointTests : IClassFixture<UniHomeApiFac
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Empty(document.RootElement.EnumerateArray());
+    }
+
+    private async Task<University> CreateUniversityAsync(string name)
+    {
+        using var response = await _client.PostAsJsonAsync(
+            "/api/v1/admin/universidades",
+            new { nombreYCampus = name });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var id = document.RootElement.GetProperty("id").GetGuid();
+
+        return await _factory.Universities.FindByIdAsync(id)
+            ?? throw new InvalidOperationException("La universidad creada no quedó en el repositorio.");
     }
 
     private async Task AuthenticateAsAdminAsync()

@@ -59,6 +59,65 @@ internal sealed class MongoUniversityRepository : IUniversityRepository
         }
     }
 
+    public async Task<University?> FindByIdAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var document = await collection
+                .Find(ByIdFilter(id))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return document is null ? null : ToDomain(document);
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<UniversityPage> ListAsync(
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(page);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(pageSize);
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var total = await collection
+                .CountDocumentsAsync(
+                    Builders<UniversityDocument>.Filter.Empty,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            var skip = (int)Math.Min((long)(page - 1) * pageSize, int.MaxValue);
+            var documents = await collection
+                .Find(Builders<UniversityDocument>.Filter.Empty)
+                .Sort(Builders<UniversityDocument>.Sort.Ascending(
+                    document => document.NormalizedName))
+                .Skip(skip)
+                .Limit(pageSize)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return new UniversityPage(
+                documents.Select(ToDomain).ToArray(),
+                total);
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<IReadOnlyList<University>> SearchActiveAsync(
         string normalizedTerm,
         int limit,
@@ -95,6 +154,67 @@ internal sealed class MongoUniversityRepository : IUniversityRepository
         }
     }
 
+    public async Task<bool> UpdateNameAndCampusAsync(
+        University university,
+        string expectedNormalizedName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(university);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedNormalizedName);
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UniversityDocument>.Filter.And(
+                ByIdFilter(university.Id),
+                Builders<UniversityDocument>.Filter.Eq(
+                    document => document.NormalizedName,
+                    expectedNormalizedName));
+            var update = Builders<UniversityDocument>.Update
+                .Set(document => document.NameAndCampus, university.NameAndCampus)
+                .Set(document => document.NormalizedName, university.NormalizedName);
+
+            var result = await collection
+                .UpdateOneAsync(filter, update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            return result.MatchedCount == 1;
+        }
+        catch (MongoWriteException exception) when (IsDuplicateKey(exception))
+        {
+            throw new DuplicateUniversityException();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<bool> SetActiveAsync(
+        Guid id,
+        bool isActive,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var update = Builders<UniversityDocument>.Update
+                .Set(document => document.IsActive, isActive);
+
+            var result = await collection
+                .UpdateOneAsync(ByIdFilter(id), update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            return result.MatchedCount == 1;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     private async Task<IMongoCollection<UniversityDocument>> GetCollectionAsync(
         CancellationToken cancellationToken)
     {
@@ -112,6 +232,11 @@ internal sealed class MongoUniversityRepository : IUniversityRepository
 
     private static bool IsDuplicateKey(MongoWriteException exception) =>
         exception.WriteError?.Code == DuplicateKeyCode;
+
+    private static FilterDefinition<UniversityDocument> ByIdFilter(Guid id) =>
+        Builders<UniversityDocument>.Filter.Eq(
+            document => document.Id,
+            id.ToString("N", CultureInfo.InvariantCulture));
 
     private static UniversityDocument ToDocument(University university) =>
         new()

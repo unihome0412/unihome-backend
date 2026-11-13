@@ -102,5 +102,45 @@ public sealed class OpenApiDocumentTests : IClassFixture<SwaggerEnabledApiFactor
             .GetProperty("get");
 
         Assert.False(searchUniversities.TryGetProperty("security", out _));
+
+        var listUniversities = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/admin/universidades")
+            .GetProperty("get");
+
+        Assert.True(listUniversities.TryGetProperty("security", out var listSecurity));
+        Assert.Contains(
+            listSecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        var editUniversity = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/admin/universidades/{id}")
+            .GetProperty("put");
+
+        Assert.True(editUniversity.TryGetProperty("security", out var editSecurity));
+        Assert.Contains(
+            editSecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        var changeStatus = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/admin/universidades/{id}/estado")
+            .GetProperty("put");
+
+        Assert.True(changeStatus.TryGetProperty("security", out var statusSecurity));
+        Assert.Contains(
+            statusSecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        var profile = root
+            .GetProperty("paths")
+            .GetProperty("/api/v1/perfil/mi-perfil")
+            .GetProperty("get");
+
+        Assert.True(profile.TryGetProperty("security", out var profileSecurity));
+        Assert.Contains(
+            profileSecurity.EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
     }
 }
