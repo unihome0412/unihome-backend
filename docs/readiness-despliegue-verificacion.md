@@ -214,3 +214,18 @@ No se ejecuta hasta recibir autorizaciones independientes para:
 
 La secuencia de despliegue, rollback y pruebas HTTPS está en el Gate entregado
 por la sesión; este documento no autoriza ninguna escritura.
+
+## 9. Incidente exit 139 (2026-11-16)
+
+La revisión `unihome-api--sha-43797185023-2` (SHA
+`3e947dcb87d678a39bb22112649a61c154dd1e13`) arrancó y terminó cinco veces con
+exit code 139. `ContainerAppConsoleLogs_CL` demuestra que no fue un SIGSEGV
+nativo: el proceso lanzó `InvalidOperationException` en `Program.cs` porque
+`Proxy__TrustForwardedHeaders=true` no tenía `Proxy__KnownProxies` ni
+`Proxy__KnownNetworks`.
+
+El ingress de Container Apps se conecta al proceso por loopback. La corrección
+es configurar `Proxy__KnownProxies__0=127.0.0.1` y
+`Proxy__KnownProxies__1=::1`; el workflow de CD los fija al crear la revisión y
+el job `container-smoke` verifica la imagen real antes de habilitar el
+despliegue. No se debe desactivar la validación ni relajar las sondas.

@@ -29,8 +29,19 @@ class GateTests(unittest.TestCase):
             "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
         needs["docker-build"] = {"result": "skipped"}
         needs["container-lint"] = {"result": "skipped"}
+        needs["container-smoke"] = {"result": "skipped"}
         _, issues = evaluate(needs, True, {"UNIHOME_ENABLE_DOCKER": "true"}, "pull_request")
-        self.assertEqual(2, len(issues))
+        self.assertEqual(3, len(issues))
+
+    def test_container_smoke_exitoso_cumple(self):
+        needs = self._base_needs()
+        needs["docker-build"] = {"result": "success"}
+        needs["container-lint"] = {"result": "success"}
+        needs["container-smoke"] = {"result": "success"}
+        required, issues = evaluate(
+            needs, True, {"UNIHOME_ENABLE_DOCKER": "true"}, "pull_request")
+        self.assertEqual([], issues)
+        self.assertIn("container-smoke", required)
 
     def test_fallo_en_prueba_obligatoria_bloquea(self):
         needs = {x: {"result": "success"} for x in (
