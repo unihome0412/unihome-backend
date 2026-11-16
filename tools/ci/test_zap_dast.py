@@ -52,6 +52,13 @@ OPERATIONS = [
     ("GET", "/api/v1/unidades/{unitId}/vista-previa", True),
     ("PUT", "/api/v1/unidades/{unitId}/zona-reglas", True),
     ("GET", "/api/v1/universidades", False),
+    ("GET", "/api/v1/exploracion/mapa", False),
+    ("GET", "/api/v1/exploracion/lista", False),
+    ("GET", "/api/v1/unidades/{unitId}/tarjeta", False),
+    ("GET", "/api/v1/unidades/{unitId}/ficha", True),
+    ("PUT", "/api/v1/favoritos/{unitId}", True),
+    ("GET", "/api/v1/favoritos", True),
+    ("DELETE", "/api/v1/favoritos/{unitId}", True),
 ]
 
 
@@ -226,6 +233,16 @@ class FakeHttpClient:
             return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/zona-reglas"):
             return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+        if base in ("/api/v1/exploracion/mapa", "/api/v1/exploracion/lista"):
+            return 200, b"[]"
+        if base.startswith("/api/v1/unidades/") and base.endswith("/tarjeta"):
+            return 200, b'{"id":"' + str(uuid.uuid4()).encode() + b'"}'
+        if base.startswith("/api/v1/unidades/") and base.endswith("/ficha"):
+            return 200, b'{"id":"' + str(uuid.uuid4()).encode() + b'"}'
+        if base == "/api/v1/favoritos":
+            return 200, b"[]"
+        if base.startswith("/api/v1/favoritos/"):
+            return 204, b""
         if base.startswith("/api/v1/unidades/") and base.endswith("/fotos"):
             return 200, b'{"totalFotos":1}'
         if base.startswith("/api/v1/unidades/") and base.endswith("/vista-previa"):
@@ -261,9 +278,32 @@ class FakeZapApi:
 
 
 class ZapDastTests(unittest.TestCase):
-    def test_openapi_operations_incluyen_23_operaciones_y_auth(self):
+    def test_publicar_fixture_sin_contenedor_falla(self):
+        with patch.dict(zap_dast.os.environ, {}, clear=True):
+            with self.assertRaises(DastError):
+                zap_dast._publish_unit_for_exploration(str(uuid.uuid4()))
+
+    def test_publicar_fixture_marca_unidad_aprobada_y_disponible(self):
+        with patch.dict(
+            zap_dast.os.environ,
+            {
+                "MONGO_CONTAINER_ID": "mongo-container",
+                "MONGO_DAST_DATABASE": "unihome_dast",
+            },
+            clear=False,
+        ), patch.object(zap_dast.subprocess, "run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stderr="")
+            zap_dast._publish_unit_for_exploration(str(uuid.uuid4()))
+
+        command = run.call_args.args[0]
+        self.assertEqual("docker", command[0])
+        self.assertEqual("mongosh", command[3])
+        self.assertIn("estadoPublicacion", command[-1])
+        self.assertIn("estadoOcupacion", command[-1])
+
+    def test_openapi_operations_incluyen_30_operaciones_y_auth(self):
         operations = parse_openapi_operations(SPEC)
-        self.assertEqual(23, len(operations))
+        self.assertEqual(30, len(operations))
         auth = {(item["method"], item["path"]) for item in operations if item["auth"]}
         self.assertIn(("POST", "/api/v1/auth/logout"), auth)
         self.assertIn(("DELETE", "/api/v1/cuentas/mi-cuenta"), auth)
@@ -288,7 +328,7 @@ class ZapDastTests(unittest.TestCase):
         ]
         coverage = build_coverage(operations, records)
         self.assertEqual(3, coverage["openapi_visited"])
-        self.assertEqual(20, len(coverage["missing"]))
+        self.assertEqual(27, len(coverage["missing"]))
         self.assertEqual(0, len(coverage["support_routes"]))
 
     def test_cobertura_detecta_ruta_no_visitada(self):
@@ -591,17 +631,19 @@ class ZapDastTests(unittest.TestCase):
                          return_value="123456"),
             patch.object(zap_dast, "wait_for_password_reset_token",
                          return_value="reset-token"),
+            patch.object(zap_dast, "_publish_unit_for_exploration",
+                         return_value=None),
         ):
             result = zap_dast.run_scan(args)
         return result, output
 
-    def test_run_scan_genera_evidencia_y_cobertura_23_de_23(self):
+    def test_run_scan_genera_evidencia_y_cobertura_30_de_30(self):
         result, output = self._run_scan()
         self.assertEqual(0, result)
         summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
         self.assertEqual("PASS", summary["status"])
-        self.assertEqual(23, summary["coverage"]["openapi_operations"])
-        self.assertEqual(23, summary["coverage"]["openapi_visited"])
+        self.assertEqual(30, summary["coverage"]["openapi_operations"])
+        self.assertEqual(30, summary["coverage"]["openapi_visited"])
         self.assertEqual([], summary["coverage"]["missing"])
         self.assertTrue((output / "dast-report.md").exists())
         self.assertTrue((output / "zap-report.html").exists())

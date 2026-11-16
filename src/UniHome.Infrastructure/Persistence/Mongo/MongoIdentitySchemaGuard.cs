@@ -2,6 +2,7 @@ using MongoDB.Bson;
 using MongoDB.Driver;
 using UniHome.Application.Identity.Exceptions;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
+using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
@@ -20,7 +21,8 @@ internal static class MongoIdentitySchemaGuard
         .. MongoIdentityMigration.Definition.Collections,
         MongoPasswordResetIndexes.Definition,
         MongoUniversityIndexes.Definition,
-        .. MongoPublicationIndexes.Definitions
+        .. MongoPublicationIndexes.Definitions,
+        MongoExplorationIndexes.Definition
     ];
 
     public static async Task EnsureAsync<TDocument>(

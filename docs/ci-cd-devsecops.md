@@ -24,7 +24,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Job | Variable de repositorio | Otro requisito | Evento permitido |
 |---|---|---|---|
 | SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
-| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M01-002, M03-001 y M05-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
+| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M01-002, M03-001, M05-001 y M07-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Cloudinary Integration | `UNIHOME_ENABLE_CLOUDINARY_INTEGRATION=true` | Environment protegido `cloudinary-integration` y secretos dedicados `CLOUDINARY_INTEGRATION_CLOUD_NAME`, `CLOUDINARY_INTEGRATION_API_KEY`, `CLOUDINARY_INTEGRATION_API_SECRET`; el test real sube un PNG sintético y limpia el asset en `finally` | Solo manual y con aprobación |
 | Docker Build + Dockle + Container Smoke | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen. El smoke arranca la imagen real con MongoDB efímero y configuración de Production, exige `/health/live` y `/health/ready` en 200, proceso vivo y ausencia de exit 139/errores fatales | PR, push main, manual |
@@ -38,7 +38,7 @@ comprobación. El certificado es efímero, se monta como CA de confianza en el
 contenedor y el proceso se detiene en el paso de limpieza. No se usan secretos
 reales ni red externa.
 
-**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. Las migraciones `M01-001`, `M01-002`, `M03-001` y `M05-001` se aplican únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
+**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. Las migraciones `M01-001`, `M01-002`, `M03-001`, `M05-001` y `M07-001` se aplican únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
 
 ### DAST ZAP baseline pasivo
 
@@ -49,7 +49,7 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
 - Levanta una API efímera en `http://127.0.0.1:5088`, un MongoDB Community
   8.0.34 fijado por digest como servicio del runner y un SMTP de captura local
   con STARTTLS en `127.0.0.1:587`. La base `unihome_dast` se inicializa con
-  M01-001, M01-002, M03-001 y M05-001 y se destruye al final. No usa Atlas, Brevo, Azure,
+  M01-001, M01-002, M03-001, M05-001 y M07-001 y se destruye al final. No usa Atlas, Brevo, Azure,
   puertos públicos ni credenciales reales. La CA efímera del SMTP no publica CRL/OCSP, por lo
   que solo en este job se configura `Smtp__CheckCertificateRevocation=false`;
   el valor predeterminado del código sigue siendo `true` y STARTTLS sigue
@@ -76,17 +76,19 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
   PR/push no se exige y el Hardening Report lo muestra como `skipped` no
   aprobado. El gate de Hardening aplica la misma regla de rama.
 
-**Verificación real (10 de noviembre de 2026):** ejecución manual
+**Verificación histórica (10 de noviembre de 2026):** ejecución manual
 [42772939746](https://github.com/unihome0412/unihome-backend/actions/runs/42772939746),
 commit `01893d3`, job `dast-zap` en verde con estado **PASS**, 7/7 operaciones
-OpenAPI visitadas, 26 mensajes procesados por ZAP, 0 Critical, 0 High, 0 Medium,
-0 Low y 2 informativas (aplicación web moderna y respuesta de sesión). Se
-publicaron `zap-report.html`, `zap-report.json`, `zap-report.md`,
-`dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza; la
-limpieza confirmó API y SMTP detenidos, contenedor ZAP eliminado y base
-`unihome_dast` borrada. `PR Quality Gate` y `Hardening Report` terminaron en
-verde. SonarCloud quedó `skipped` por ser una ejecución manual desde
-`feature/*`, comportamiento esperado y no exigido por el gate.
+OpenAPI de ese momento visitadas, 26 mensajes procesados por ZAP, 0 Critical,
+0 High, 0 Medium, 0 Low y 2 informativas. Se publicaron `zap-report.html`,
+`zap-report.json`, `zap-report.md`, `dast-report.md`, `route-coverage.json` y
+evidencias de arranque/limpieza.
+
+**Sprint 3:** el job exige ahora **30/30 operaciones** OpenAPI. Las 7 rutas
+M04/M07 se visitan con un fixture público sembrado **solo** en la base efímera
+`unihome_dast`; el fixture se marca `Aprobada`/`Disponible` mediante `mongosh`
+porque M06 aún no existe. La ejecución real de 30/30 queda **PENDIENTE_CI**; no
+se declara PASS hasta que GitHub Actions la produzca.
 
 **Alcance pendiente y riesgos:** el análisis pasivo no demuestra lógica de
 negocio ni autorización a nivel de objeto; la cobertura se limita a las rutas
@@ -103,7 +105,7 @@ El job `restler-fuzzing` usa Microsoft RESTler **v9.3.1**, commit
 en el runner. No se usa una imagen móvil ni un servicio remoto.
 
 - Reutiliza la API ASP.NET Core en `127.0.0.1:5088`, MongoDB 8.0.34 efímero con
-  M01-001, M01-002, M03-001 y M05-001, y el SMTP de captura local con STARTTLS en
+  M01-001, M01-002, M03-001, M05-001 y M07-001, y el SMTP de captura local con STARTTLS en
   `127.0.0.1:587`.
 - Prepara dos cuentas sintéticas: una confirmada para login/refresh y otra
   pendiente de confirmar para ejercer el endpoint con un código real capturado
@@ -135,16 +137,18 @@ en el runner. No se usa una imagen móvil ni un servicio remoto.
   HTTP 5xx/bug bucket. Un 401/403 no se considera vulnerabilidad por sí mismo,
   pero tampoco se cuenta como prueba funcional válida.
 
-**Verificación real (10 de noviembre de 2026):** ejecución manual
+**Verificación histórica (10 de noviembre de 2026):** ejecución manual
 [42794026111](https://github.com/unihome0412/unihome-backend/actions/runs/42794026111),
 commit `fe22365`, job `restler-fuzzing` en verde con estado **PASS**:
-Compile/Test/Fuzz-lean exit `0`, 7/7 operaciones OpenAPI intentadas y con al
-menos una respuesta 2xx, 2.054 solicitudes y 16 secuencias observadas, 0 HTTP
-5xx y 0 bug buckets. Códigos observados: 200, 201, 202, 204, 400, 401, 409 y
-413. La limpieza confirmó API/SMTP detenidos y base `unihome_restler` borrada.
-`PR Quality Gate` y `Hardening Report` terminaron en verde. Las respuestas 401,
-409 y 413 son parte del fuzzing esperado y no se contaron como pruebas válidas;
-registro y refresh obtuvieron 2xx en Test y variantes no exitosas en Fuzz-lean.
+Compile/Test/Fuzz-lean exit `0`, 7/7 operaciones OpenAPI de ese momento
+intentadas y con al menos una respuesta 2xx, 2.054 solicitudes y 16 secuencias
+observadas, 0 HTTP 5xx y 0 bug buckets.
+
+**Sprint 3:** el catálogo ahora tiene **30 operaciones**. La preparación crea una
+universidad, propiedad y unidad sintéticas, publica la unidad solo en la base
+efímera `unihome_restler` y añade diccionarios para `universidadId`, `unitId` y
+los filtros de exploración. RESTler debe intentar las 7 rutas M04/M07; la
+ejecución real 30/30 queda **PENDIENTE_CI** y no se declara PASS anticipado.
 
 ### Contrato OpenAPI de Gender
 
@@ -154,11 +158,12 @@ se rechazan. El generador nativo de OpenAPI 3.1.1 describía el componente como
 `integer`; el documento ahora lo corrige a `type: string` con `enum` de nombres.
 `OpenApiGenderContractTests` comprueba el documento generado y contrasta una
 solicitud real con string (201) y con entero (400). No cambia el comportamiento
-HTTP ni se modificó el DTO para ocultar la discrepancia. Verificación real:
+HTTP ni se modificó el DTO para ocultar la discrepancia. Verificación histórica:
 [42850339456](https://github.com/unihome0412/unihome-backend/actions/runs/42850339456),
-`contract-test` con 10/10 pruebas OpenAPI aprobadas; el resto de controles
-manuales (DAST, RESTler, MongoDB CI, Stryker, Docker/Dockle, Hardening y PR
-Quality Gate) también terminó en verde.
+`contract-test` con 10/10 pruebas OpenAPI aprobadas. **Sprint 3** añade pruebas
+de las 7 rutas M04/M07, query camelCase, `universidadId` requerido y enums
+string; el contrato actual queda **PENDIENTE_CI** hasta la ejecución de GitHub
+Actions.
 
 ### Pact de proveedor (pendiente de contratos reales)
 
@@ -225,22 +230,25 @@ dotnet stryker --config-file stryker-config.json
   `M03-001` y `M05-001` con `UniHome.MongoMigrator` y se verifican ledger,
   checksum e índices antes de las pruebas.
 - `MongoIdentityPersistenceTests`, `MongoPasswordResetPersistenceTests`,
-  `MongoUniversityPersistenceTests`, `MongoPublicationPersistenceTests` y
+  `MongoUniversityPersistenceTests`, `MongoPublicationPersistenceTests`, `MongoExplorationPersistenceTests` y
   `MongoPromotionLockPersistenceTests` se ejecutan contra MongoDB real; el correo
   se sustituye por un doble en memoria y las fotos usan el doble de DEC-04. No se
   envían correos ni se escribe almacenamiento externo real.
-- Un script valida el TRX: exige las cinco pruebas, rechaza `NotExecuted`, falla
+- Un script valida el TRX: exige las seis pruebas, rechaza `NotExecuted`, falla
   si hay cero resultados, si la inicialización no terminó o si el paso de pruebas
   no fue exitoso. El resumen incluye versión, base, conteos, duración,
   inicialización y resultado final.
 - Evidencia: `mongodb-ci-results` con el TRX, la salida de migración/verificación
   y el resumen Markdown. El contenedor se destruye al finalizar el job y la base
   temporal se elimina explícitamente.
-- Verificación real (13 de noviembre de 2026):
+- Verificación histórica (13 de noviembre de 2026):
   [ejecución manual 43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
   commit de código `f51ac10`, job `mongo-db-test` en verde, TRX con 4 pruebas
-  ejecutadas y aprobadas, 0 fallidas, 0 omitidas, M01-001 y M03-001 válidas y
-  limpieza confirmada.
+  ejecutadas y aprobadas, 0 fallidas, 0 omitidas y limpieza confirmada.
+- **Sprint 3:** el job aplica también M01-002 y M07-001 y exige la prueba
+  `MongoExplorationPersistenceTests`. La siguiente ejecución real debe mostrar
+  **6/6 pruebas** (identidad, promoción, recuperación, universidades,
+  publicaciones y exploración/favoritos); queda **PENDIENTE_CI**.
 
 ## CD Azure preparado (sin despliegue)
 
@@ -303,6 +311,6 @@ Las pruebas activadas en un contexto admisible pasan a ser **obligatorias** para
 - Esta entrega se validó sintácticamente (YAML), con pruebas de la lógica del quality gate y comprobación de archivos y referencias. La integración de Stryker.NET se validó localmente con .NET 10 y una ejecución real de mutaciones; el primer run de GitHub Actions sigue siendo la validación del pipeline completo.
 - Semgrep usa reglas externas y una versión de CLI instalada al ejecutar: para un pipeline reproducible de producción habrá que fijar versiones/digests y comprobar la licencia/costos aplicables.
 - Dockle usa un binario oficial descargado de GitHub; fijar y validar su checksum antes de exigirlo en producción.
-- Pact tiene soporte de proveedor preparado, pero no hay contratos reales del consumidor Android; el job debe permanecer desactivado y no se declara aprobado. RESTler ya fue verificado con ejecución real. Stryker.NET tiene configuración versionada y línea base local verificada. MongoDB CI fue verificado en la ejecución manual `43395389178`: job `mongo-db-test` en verde, 4/4 pruebas reales, 0 omitidas, migraciones M01-001 y M03-001 válidas y artefacto `mongodb-ci-results`; la base temporal y el contenedor se destruyeron al finalizar.
+- Pact tiene soporte de proveedor preparado, pero no hay contratos reales del consumidor Android; el job debe permanecer desactivado y no se declara aprobado. RESTler ya fue verificado con ejecución real. Stryker.NET tiene configuración versionada y línea base local verificada. MongoDB CI fue verificado en la ejecución manual `43395389178`: job `mongo-db-test` en verde, 4/4 pruebas reales, 0 omitidas, migraciones M01-001, M03-001, M05-001 y M07-001 válidas y artefacto `mongodb-ci-results`; la base temporal y el contenedor se destruyeron al finalizar.
 - Si el CI que actualmente está en GitHub fue modificado **después** del ZIP del 6 de noviembre, no aplicar el paquete a ciegas: reconciliar las diferencias antes.
 - Conservar `.local-sdd/` únicamente en local. `AGENTS.md`, `opencode.json`, `memoria.md` del SDD tampoco deben subir. La documentación técnica de CI en este paquete sí puede versionarse.

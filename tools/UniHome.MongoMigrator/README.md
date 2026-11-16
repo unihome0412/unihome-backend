@@ -60,10 +60,10 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
   --version M01-002
 ```
 
-`--version M01-001|M01-002|M03-001|M05-001` es opcional; el valor predeterminado
-es M01-001. No se admiten alias, may?sculas distintas, espacios ni nombres
-parciales. La secuencia para `unihome_verificacion` es M01-001, M01-002, M03-001 y
-M05-001; no se promueve una versi?n si falta la anterior.
+`--version M01-001|M01-002|M03-001|M05-001|M07-001` es opcional; el valor
+predeterminado es M01-001. No se admiten alias, mayúsculas distintas, espacios ni
+nombres parciales. La secuencia para `unihome_verificacion` es M01-001, M01-002,
+M03-001, M05-001 y M07-001; no se promueve una versión si falta la anterior.
 
 ## Alcance
 
@@ -87,13 +87,19 @@ La migración crea, si faltan:
   `nombreNormalizado`, usado por HU-075 para rechazar duplicados y buscar sin
   acentos ni mayúsculas.
 
+`M07-001` crea, si faltan:
+
+- `favoritos` con `ux_favoritos_cuenta_unidad` ?nico y
+  `ix_favoritos_cuenta_fecha` para el listado paginado.
+
 `M05-001` crea, si faltan:
 
 - `propiedades`, `unidades` y `aceptaciones_terminos` con sus índices de
   propietario, búsqueda, duplicado de propiedad y unicidad de términos.
 
-Las migraciones se seleccionan con `--version`; no se aplican en cascada. La
-promoci?n incremental exige las versiones anteriores. El TTL solo elimina sesiones vencidas; la autorización de una sesión se comprueba
+Las migraciones M01, M03, M05 y M07 se seleccionan con `--version`; no se aplican
+en cascada. La promoción incremental exige las versiones anteriores. El TTL solo
+elimina sesiones vencidas; la autorización de una sesión se comprueba
 siempre en el backend. No se crean validadores JSON para M01 porque el contrato no
 los define.
 

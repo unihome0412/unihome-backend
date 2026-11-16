@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Publications.Abstractions;
@@ -65,6 +66,15 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     internal InMemoryCloudinaryPhotoClient CloudinaryClient { get; } = new();
 
     protected virtual bool UseCloudinaryStorage => false;
+
+    /// <summary>
+    /// Los dobles de exploración se desactivan solo para verificar el fail-closed
+    /// 503 cuando MongoDB no está configurado. La identidad sigue en memoria para
+    /// poder emitir un JWT válido sin depender de MongoDB.
+    /// </summary>
+    protected virtual bool UseInMemoryExploration => true;
+
+    public InMemoryFavoriteRepository Favorites { get; } = new();
 
     public CapturingVerificationEmailSender EmailSender { get; } = new();
 
@@ -140,14 +150,17 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IPasswordResetRepository>();
             services.AddSingleton<IPasswordResetRepository>(PasswordResets);
 
-            services.RemoveAll<IUniversityRepository>();
-            services.AddSingleton<IUniversityRepository>(Universities);
+            if (UseInMemoryExploration)
+            {
+                services.RemoveAll<IUniversityRepository>();
+                services.AddSingleton<IUniversityRepository>(Universities);
 
-            services.RemoveAll<IPropertyRepository>();
-            services.AddSingleton<IPropertyRepository>(Properties);
+                services.RemoveAll<IPropertyRepository>();
+                services.AddSingleton<IPropertyRepository>(Properties);
 
-            services.RemoveAll<IUnitRepository>();
-            services.AddSingleton<IUnitRepository>(Units);
+                services.RemoveAll<IUnitRepository>();
+                services.AddSingleton<IUnitRepository>(Units);
+            }
 
             services.RemoveAll<ITermsAcceptanceRepository>();
             services.AddSingleton<ITermsAcceptanceRepository>(Terms);
@@ -161,6 +174,12 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
             {
                 services.RemoveAll<IUnitPhotoStorage>();
                 services.AddSingleton<IUnitPhotoStorage>(PhotoStorage);
+            }
+
+            if (UseInMemoryExploration)
+            {
+                services.RemoveAll<IUnitFavoriteRepository>();
+                services.AddSingleton<IUnitFavoriteRepository>(Favorites);
             }
 
             services.RemoveAll<IVerificationEmailSender>();

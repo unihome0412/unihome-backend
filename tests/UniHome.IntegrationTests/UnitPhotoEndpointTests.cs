@@ -65,6 +65,35 @@ public sealed class UnitPhotoEndpointTests : IClassFixture<UniHomeApiFactory>
     }
 
     [Fact]
+    public async Task FotoOcupada_SoloDebeEntregarseAlPropietario()
+    {
+        var owner = await SeedAccountAsync();
+        var other = await SeedAccountAsync();
+        var (_, key) = await SeedUnitWithPhotoAsync(
+            owner.Id,
+            PublicationState.Aprobada,
+            UnitAvailability.Ocupado);
+        var reference = PhotoReference.Encode(key);
+
+        using var anonymous = await _client.GetAsync($"/api/v1/fotos/{reference}");
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(other));
+        using var foreign = await _client.GetAsync($"/api/v1/fotos/{reference}");
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(owner));
+        using var own = await _client.GetAsync($"/api/v1/fotos/{reference}");
+        Assert.Equal(HttpStatusCode.OK, own.StatusCode);
+        Assert.Contains("no-store", own.Headers.CacheControl?.ToString());
+        Assert.Contains("private", own.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
     public async Task FotoInexistente_DebeResponder404()
     {
         using var unknownReference = await _client.GetAsync(
@@ -87,7 +116,8 @@ public sealed class UnitPhotoEndpointTests : IClassFixture<UniHomeApiFactory>
 
     private async Task<(Unit Unit, string StorageKey)> SeedUnitWithPhotoAsync(
         Guid ownerId,
-        PublicationState state)
+        PublicationState state,
+        UnitAvailability availability = UnitAvailability.Disponible)
     {
         var property = Property.Create(
             ownerId,
@@ -134,7 +164,8 @@ public sealed class UnitPhotoEndpointTests : IClassFixture<UniHomeApiFactory>
                     DateTimeOffset.UtcNow)
             ],
             state,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            availability);
         await _factory.Units.AddAsync(unit);
         return (unit, stored.StorageKey);
     }

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import urllib.parse
 import uuid
@@ -161,6 +162,44 @@ def _create_unit(http: HttpClient, token: str, property_id: str) -> str:
     return identifier
 
 
+def _publish_unit_for_exploration(unit_id: str) -> None:
+    """Publica el fixture M04/M07 en la base efímera de RESTler.
+
+    M06 no existe en Sprint 3; el job usa una base exclusiva y desechable. Si
+    no se recibe el contenedor (por ejemplo, en pruebas locales) no se hace
+    nada. En CI se exige el fixture para que las rutas públicas tengan datos.
+    """
+    container = os.environ.get("MONGO_CONTAINER_ID", "").strip()
+    database = os.environ.get("MONGO_RESTLER_DATABASE", "").strip()
+
+    if not container or not database:
+        return
+
+    try:
+        normalized = uuid.UUID(unit_id).hex
+    except ValueError as error:
+        raise RuntimeError("El alta de unidad devolvió un id no válido.") from error
+
+    script = (
+        f'const database = db.getSiblingDB({json.dumps(database)});'
+        f'const result = database.unidades.updateOne('
+        f'{{_id: {json.dumps(normalized)}}},'
+        f'{{$set: {{estadoPublicacion: "Aprobada", estadoOcupacion: "Disponible"}}}});'
+        'if (result.matchedCount !== 1) {'
+        '  throw new Error("fixture M04 no encontrado");'
+        '}'
+    )
+    completed = subprocess.run(
+        ["docker", "exec", container, "mongosh", "--quiet", "--eval", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if completed.returncode != 0:
+        raise RuntimeError("No se pudo publicar el fixture M04 en MongoDB efímero.")
+
+
 def _upload_photo_and_read_ref(
     http: HttpClient,
     token: str,
@@ -241,6 +280,14 @@ def build_private_dictionaries(data: SyntheticData) -> dict[str, dict[str, Any]]
             "longitud": "-99.1332",
         }),
         "unit": _custom_dictionary({"propertyId": data.property_id}),
+        "exploration-query": _custom_dictionary({
+            "universidadId": data.university_id,
+            "precioMaxMxn": "4500",
+            "soloIndividual": "true",
+            "paraQuien": "Mixto",
+            "page": "1",
+            "pageSize": "20",
+        }),
         "services": _custom_dictionary({"unitId": data.unit_id}),
         "zone": _custom_dictionary({"unitId": data.unit_id}),
         "unit-path": _custom_dictionary({"unitId": data.unit_id}),
@@ -381,6 +428,7 @@ def _provision_synthetic_data(http: HttpClient) -> SyntheticData:
     university_id = _create_university(http, admin_access)
     property_id = _create_property(http, admin_access, university_id)
     unit_id = _create_unit(http, admin_access, property_id)
+    _publish_unit_for_exploration(unit_id)
     photo_ref = _upload_photo_and_read_ref(http, admin_access, unit_id)
 
     confirm_email = f"restler.confirm.{uuid.uuid4().hex}@uni.edu"
@@ -490,6 +538,11 @@ def prepare() -> dict[str, Any]:
         "/api/v1/unidades/{unitId}/zona-reglas": dictionary_paths["zone"],
         "/api/v1/unidades/{unitId}/fotos": dictionary_paths["unit-path"],
         "/api/v1/unidades/{unitId}/vista-previa": dictionary_paths["unit-path"],
+        "/api/v1/unidades/{unitId}/tarjeta": dictionary_paths["unit-path"],
+        "/api/v1/unidades/{unitId}/ficha": dictionary_paths["unit-path"],
+        "/api/v1/exploracion/mapa": dictionary_paths["exploration-query"],
+        "/api/v1/exploracion/lista": dictionary_paths["exploration-query"],
+        "/api/v1/favoritos/{unitId}": dictionary_paths["unit-path"],
         "/api/v1/fotos/{photoRef}": dictionary_paths["photo"],
     }
 

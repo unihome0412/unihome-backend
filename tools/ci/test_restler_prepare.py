@@ -122,6 +122,10 @@ class RestlerPrepareTests(unittest.TestCase):
         self.assertEqual(
             DATA.unit_id,
             dictionaries["services"]["restler_custom_payload"]["unitId"][0])
+        exploration = dictionaries["exploration-query"]["restler_custom_payload"]
+        self.assertEqual(DATA.university_id, exploration["universidadId"][0])
+        self.assertEqual("Mixto", exploration["paraQuien"][0])
+        self.assertEqual("true", exploration["soloIndividual"][0])
 
     def test_compile_dictionary_fija_ids_y_no_duplica_quotes(self):
         dictionary = prepare.build_compile_dictionary(DATA)

@@ -1,13 +1,13 @@
 # DEC-04 — Cloudinary para fotografías de unidades
 
-**Estado:** proveedor elegido por el usuario: **Cloudinary Free**  
-**Rama de implementación:** `feature/dec-04-cloudinary-storage`  
+**Estado:** proveedor elegido por el usuario: **Cloudinary Free**
+**Rama de implementación:** `feature/dec-04-cloudinary-storage`
 **Alcance:** sustituir el fail-closed de `IUnitPhotoStorage` por almacenamiento y entrega reales, sin cambiar el endpoint `POST /api/v1/unidades/{unitId}/fotos`.
 
-> Esta decisión reemplaza la recomendación Azure Blob Storage que figura en la
-> evaluación histórica de PR #35. Esa evaluación no se reescribe en este PR; la
-> conciliación documental de PR #35 queda pendiente para después de integrar
-> Cloudinary, tal como se solicitó. Azure no fue modificado.
+> Esta decisión reemplaza la recomendación Azure Blob Storage que figuraba en la
+> evaluación histórica de PR #35. En Sprint 3 esa evaluación se marcó como
+> **cerrada/superada** y ya no se presenta como implementación vigente. Azure no
+> fue modificado.
 
 ## 1. Decisión y razón
 
@@ -68,8 +68,9 @@ transformaciones. El límite real debe monitorearse en la consola de Cloudinary.
   visibilidad en cada request; no se depende de que una URL firmada expire.
 - Borradores: solo el propietario autenticado. Sin sesión: `401`; otro usuario:
   `404`.
-- Unidades aprobadas: entrega pública; si dejan de ser públicas, la URL antigua
-  deja de funcionar en el siguiente request.
+- Unidades aprobadas **y disponibles**: entrega pública; si pasan a `Ocupado`,
+  `Mantenimiento` o dejan de estar aprobadas, la URL antigua deja de funcionar
+  en el siguiente request y solo el propietario puede leerla.
 - No se exponen correo, teléfono ni datos privados en la respuesta de imagen.
 - EXIF/GPS se elimina con `fl_strip_profile`.
 
@@ -123,9 +124,9 @@ Si faltan `CloudName`, `ApiKey` o `ApiSecret`, se registra
   JPG/PNG, ownership, hash y primera foto principal.
 - `Unit.fotos[].storageKey` conserva el public_id de Cloudinary.
 - M05 preview usa `GetReadUrl`, por lo que recibe la URL del proxy.
-- M04/M07 (PR #35) usan el mismo puerto y `UnitPhotoUrlResolver`; al integrarse
-  recibirán la misma URL de proxy sin cambio de contrato. No se modifica el PR
-  #35 en este trabajo.
+- M04/M07 usan el mismo puerto y `UnitPhotoUrlResolver`; Sprint 3 conserva la URL
+  del proxy sin cambiar el contrato. El código quedó preparado en el PR #35, sin
+  fusionarlo ni desplegarlo.
 - No se requiere migración MongoDB: el campo `storageKey` ya existe en M05-001.
   No se altera el checksum de M05-001.
 
@@ -163,8 +164,8 @@ Si faltan `CloudName`, `ApiKey` o `ApiSecret`, se registra
 - Ejecutar la prueba real opt-in y documentar PASS real.
 - Configurar `Cloudinary__PublicBaseUrl` en Container Apps cuando se autorice el
   despliegue; no se modificó Azure.
-- Reconciliar la evaluación Azure de PR #35 y actualizar ese PR en un cambio
-  posterior autorizado; no se tocó PR #35.
+- La evaluación Azure de PR #35 quedó marcada como histórica/superada en
+  `docs/dec-04-storage-evaluation.md`. El PR #35 sigue preparado y sin fusionar.
 
 
 ## 11. Actualizaci?n de validaci?n real

@@ -230,12 +230,26 @@ sobre `nombreNormalizado`. La migración versionada `M03-001` crea la colección
 índice; el adaptador verifica el esquema en modo lectura y falla cerrada si falta o
 diverge. Detalle en [`docs/mongodb-m03.md`](docs/mongodb-m03.md).
 
+M07 usa `favoritos` (`accountId`, `unitId`, `createdAt`) con índice único
+`ux_favoritos_cuenta_unidad` y la migración `M07-001`; no cambia M05-001. Detalle
+en [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
+
 M05 usa `propiedades`, `unidades` y `aceptaciones_terminos` con la migración
 `M05-001`; las fotos guardan solo metadatos y el binario se almacena en Cloudinary. Detalle en
 [`docs/mongodb-m05.md`](docs/mongodb-m05.md).
 
+Sprint 3 / M04-M07: `GET /api/v1/exploracion/mapa`, `GET /api/v1/exploracion/lista`,
+`GET /api/v1/unidades/{id}/tarjeta`, `GET /api/v1/unidades/{id}/ficha`,
+`PUT/DELETE /api/v1/favoritos/{id}` y `GET /api/v1/favoritos`. Mapa, lista y tarjeta
+son públicos (la tarjeta acepta Bearer opcional para `esFavorito`); ficha y favoritos
+exigen sesión. Solo se exponen unidades Aprobadas y Disponibles. HU-007 reutiliza la
+búsqueda M03 existente. No se expone correo ni teléfono del arrendador. La distancia
+usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
+[`docs/sprint-03-cierre.md`](docs/sprint-03-cierre.md) y
+[`docs/mongodb-m07.md`](docs/mongodb-m07.md).
+
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001`, `M03-001` y `M05-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001`, `M05-001` y `M07-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -246,6 +260,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M03-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M05-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M05-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M07-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M07-001
 ```
 
 La migración ordinaria solo escribe en `unihome_modelo_pruebas` o en una base incluida
@@ -354,9 +370,10 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 `UNIHOME_ENABLE_MONGO_CI=true`) levanta MongoDB Community 8.0.34 dentro del runner
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
-`unihome_ci_verificacion`, se aplican `M01-001`, `M03-001` y `M05-001` a esa base
-temporal y las pruebas reales de identidad, recuperación de contraseña, universidades,
-publicaciones y bloqueo distribuido se ejecutan con TRX. El job falla
+`unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`
+y `M07-001` a esa base temporal y las pruebas reales de identidad, recuperación de
+contraseña, universidades, publicaciones, exploración/favoritos y bloqueo distribuido
+se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
 La ejecución manual de verificación
@@ -367,8 +384,8 @@ commit de código `f51ac10`) dejó 4/4 pruebas reales aprobadas, 0 omitidas,
 El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
 `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
-`127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M03-001 y M05-001, y un
-SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+`127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M01-002, M03-001,
+M05-001 y M07-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
 confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
 operación documentada y publica `zap-report.html`, `zap-report.json`,
 `dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el
@@ -512,6 +529,10 @@ declara listo para el primer despliegue hasta completar esos pasos.
   [`docs/dec-04-cloudinary.md`](docs/dec-04-cloudinary.md).
 - El Sprint 2 no implementa el envío a revisión ni el expediente de M06 (HU-013/HU-027,
   Sprint 4); las unidades permanecen en `Borrador`.
+- M04/M07 requieren que M06 apruebe publicaciones para que existan unidades públicas
+  reales; `arrendadorVerificado` permanece `false` hasta la verificación de M06.
+- La ubicación de universidad no se administra por M03; sin ella la distancia es null
+  y un filtro `distanciaMaxKm` responde 400. Se requiere carga controlada.
 - El perfil devuelve `etiquetaCuenta=UsuarioUniHome` y `vinculadoAUnidad=false`
   mientras M05/M06/M09 no existan. Son indicadores derivados, no estados
   persistidos; deberán conectarse a esos módulos sin cambiar el contrato.

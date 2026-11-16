@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Abstractions.Storage;
+using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Identity.Exceptions;
 using UniHome.Application.Properties.Abstractions;
@@ -15,6 +16,7 @@ using UniHome.Infrastructure.Email;
 using UniHome.Infrastructure.Identity;
 using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Accounts;
+using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Properties;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
@@ -155,6 +157,7 @@ public static class DependencyInjection
         services.AddSingleton<IPropertyRepository, MongoPropertyRepository>();
         services.AddSingleton<IUnitRepository, MongoUnitRepository>();
         services.AddSingleton<ITermsAcceptanceRepository, MongoTermsAcceptanceRepository>();
+        services.AddSingleton<IUnitFavoriteRepository, MongoFavoriteRepository>();
         services.AddHttpContextAccessor();
 
         // La decisi?n se eval?a al resolver, no al construir el contenedor: as? la

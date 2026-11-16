@@ -387,7 +387,7 @@ def render_markdown(
         "- ERROR si la compilación, alguna pasada Test/Fuzz o la cobertura de operaciones falla.",
         "- FAIL si aparece un HTTP 5xx o un bug bucket; no se ocultan ni se desactivan checkers.",
         "- WARN si una operación fue intentada pero no obtuvo 2xx (por ejemplo, multipart no soportado).",
-        "- PASS solo con las 23 operaciones intentadas, autenticación válida y sin 5xx/bugs.",
+        f"- PASS solo con las {len(rows)} operaciones intentadas, autenticación válida y sin 5xx/bugs.",
     ]
     if technical_errors:
         lines += ["", "## Errores técnicos", ""] + [f"- {error}" for error in technical_errors]

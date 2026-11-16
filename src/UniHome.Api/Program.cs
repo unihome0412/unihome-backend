@@ -24,6 +24,8 @@ using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Exploration;
+using UniHome.Application.Favorites;
 using UniHome.Application.Identity.ConfirmEmail;
 using UniHome.Application.Identity.DeleteAccount;
 using UniHome.Application.Identity.Login;
@@ -144,6 +146,13 @@ builder.Services.AddScoped<AddUnitPhotosService>();
 builder.Services.AddScoped<ConfigureUnitServicesService>();
 builder.Services.AddScoped<ConfigureUnitZoneRulesService>();
 builder.Services.AddScoped<GetUnitPreviewService>();
+builder.Services.AddScoped<UnitPhotoUrlResolver>();
+builder.Services.AddScoped<ExploreUnitsService>();
+builder.Services.AddScoped<GetUnitCardService>();
+builder.Services.AddScoped<GetUnitDetailService>();
+builder.Services.AddScoped<AddFavoriteService>();
+builder.Services.AddScoped<RemoveFavoriteService>();
+builder.Services.AddScoped<ListFavoritesService>();
 builder.Services.AddScoped<AcceptTermsService>();
 builder.Services.AddScoped<CreateUniversityService>();
 builder.Services.AddScoped<ListUniversitiesService>();
@@ -540,6 +549,40 @@ builder.Services.AddOpenApi("v1", options =>
     options.AddOperationTransformer((operation, context, _) =>
     {
         var relativePath = context.Description.RelativePath?.TrimStart('/');
+
+        // universidadId es obligatorio en el contrato de exploración. El DTO lo
+        // declara nullable para poder responder 400 con ProblemDetails; el
+        // documento OpenAPI debe reflejar la obligatoriedad real.
+        if (string.Equals(relativePath, "api/v1/exploracion/mapa", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(relativePath, "api/v1/exploracion/lista", StringComparison.OrdinalIgnoreCase))
+        {
+            var universityParameter = operation.Parameters?
+                .FirstOrDefault(parameter =>
+                    string.Equals(parameter.Name, "universidadId", StringComparison.OrdinalIgnoreCase));
+
+            if (universityParameter is OpenApiParameter openApiParameter)
+            {
+                openApiParameter.Required = true;
+            }
+
+            foreach (var parameter in operation.Parameters ?? [])
+            {
+                if (parameter.Schema is not OpenApiSchema schema)
+                {
+                    continue;
+                }
+
+                if (string.Equals(parameter.Name, "page", StringComparison.OrdinalIgnoreCase))
+                {
+                    schema.Minimum = "1";
+                }
+                else if (string.Equals(parameter.Name, "pageSize", StringComparison.OrdinalIgnoreCase))
+                {
+                    schema.Minimum = "1";
+                    schema.Maximum = "100";
+                }
+            }
+        }
 
         if (string.Equals(
                 relativePath,

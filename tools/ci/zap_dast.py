@@ -23,6 +23,7 @@ import os
 import re
 import secrets
 import string
+import subprocess
 import sys
 import time
 import urllib.error
@@ -973,6 +974,46 @@ def _response_id(payload: bytes, operation: str) -> str:
     return identifier
 
 
+def _publish_unit_for_exploration(unit_id: str) -> None:
+    """Publica el fixture M04/M07 directamente en la base efímera.
+
+    M06 no forma parte del Sprint 3 y no existe un endpoint para aprobar una
+    publicación. El job DAST usa una base exclusiva y desechable, por lo que el
+    fixture se marca Aprobada/Disponible solo para poder ejercer los endpoints
+    públicos y autenticados con respuestas 2xx. No se ejecuta en producción.
+    """
+    container = os.environ.get("MONGO_CONTAINER_ID", "").strip()
+    database = os.environ.get("MONGO_DAST_DATABASE", "").strip()
+
+    if not container or not database:
+        raise DastError(
+            "Faltan MONGO_CONTAINER_ID/MONGO_DAST_DATABASE para publicar el fixture M04.")
+
+    try:
+        normalized = uuid.UUID(unit_id).hex
+    except ValueError as error:
+        raise DastError("El alta de unidad devolvió un id no válido.") from error
+
+    script = (
+        f'const database = db.getSiblingDB({json.dumps(database)});'
+        f'const result = database.unidades.updateOne('
+        f'{{_id: {json.dumps(normalized)}}},'
+        f'{{$set: {{estadoPublicacion: "Aprobada", estadoOcupacion: "Disponible"}}}});'
+        'if (result.matchedCount !== 1) {'
+        '  throw new Error("fixture M04 no encontrado");'
+        '}'
+    )
+    completed = subprocess.run(
+        ["docker", "exec", container, "mongosh", "--quiet", "--eval", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if completed.returncode != 0:
+        raise DastError("No se pudo publicar el fixture M04 en MongoDB efímero.")
+
+
 def run_scan(args: argparse.Namespace) -> int:
     target = args.target.rstrip("/")
     output = Path(OUTPUT_DIR)
@@ -1163,6 +1204,33 @@ def run_scan(args: argparse.Namespace) -> int:
         "POST", "/api/v1/publicaciones/primera/terminos",
         body={"versionTerminos": TERMS_VERSION},
         token=access_a, expected={200}, auth=True, note="aceptación términos")
+
+    # M04/M07: el fixture se marca público en la base efímera porque M06 aún no
+    # existe. Así ZAP visita las siete operaciones con respuestas 2xx reales.
+    _publish_unit_for_exploration(unit_id)
+    http.request(
+        "GET", f"/api/v1/exploracion/mapa?universidadId={university_id}",
+        expected={200}, note="exploración mapa")
+    http.request(
+        "GET",
+        f"/api/v1/exploracion/lista?universidadId={university_id}"
+        "&precioMaxMxn=4500&soloIndividual=true&paraQuien=Mixto",
+        expected={200}, note="exploración lista y filtros")
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/tarjeta",
+        expected={200}, note="tarjeta pública")
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/ficha",
+        token=access_a, expected={200}, auth=True, note="ficha autenticada")
+    http.request(
+        "PUT", f"/api/v1/favoritos/{unit_id}",
+        token=access_a, expected={204}, auth=True, note="alta favorito")
+    http.request(
+        "GET", "/api/v1/favoritos",
+        token=access_a, expected={200}, auth=True, note="lista favoritos")
+    http.request(
+        "DELETE", f"/api/v1/favoritos/{unit_id}",
+        token=access_a, expected={204}, auth=True, note="baja favorito")
 
     # M01: recuperación de contraseña con token real capturado por SMTP.
     http.request(

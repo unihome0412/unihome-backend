@@ -58,3 +58,11 @@ public enum ServiceMode
     Incluido,
     Aparte
 }
+
+/// <summary>Estado derivado de ARQ-003; M09 lo recalcular? desde los v?nculos.</summary>
+public enum UnitAvailability
+{
+    Disponible,
+    Ocupado,
+    Mantenimiento
+}

@@ -53,4 +53,18 @@ public sealed class InMemoryPropertyRepository : IPropertyRepository
             return Task.FromResult(property);
         }
     }
+
+    public Task<IReadOnlyList<Property>> FindByIdsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<Property> items = _properties
+                .Where(pair => ids.Contains(pair.Key))
+                .Select(pair => pair.Value)
+                .ToArray();
+            return Task.FromResult(items);
+        }
+    }
 }

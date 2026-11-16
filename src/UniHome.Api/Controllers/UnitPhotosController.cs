@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Units.Photos;
 using UniHome.Domain.Properties;
+using UniHome.Domain.Units;
 
 namespace UniHome.Api.Controllers;
 
@@ -52,7 +53,8 @@ public sealed class UnitPhotosController : AuthenticatedControllerBase
                 "La fotografía no existe.");
         }
 
-        var isPublic = unit.PublicationState == PublicationState.Aprobada;
+        var isPublic = unit.PublicationState == PublicationState.Aprobada &&
+                       unit.Availability == UnitAvailability.Disponible;
 
         if (!isPublic)
         {
