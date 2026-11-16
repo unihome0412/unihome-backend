@@ -215,6 +215,10 @@ class RestlerReportTests(unittest.TestCase):
             summary = json.loads(
                 (root / "artifacts" / "restler-results.json").read_text(encoding="utf-8"))
             self.assertEqual("WARN", summary["status"])
+            markdown = (root / "artifacts" / "restler-summary.md").read_text(
+                encoding="utf-8")
+            self.assertIn("## Operaciones sin 2xx", markdown)
+            self.assertIn("se conserva como WARN", markdown)
 
 
 if __name__ == "__main__":
