@@ -26,10 +26,17 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
 | Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M01-002, M03-001 y M05-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
+| Cloudinary Integration | `UNIHOME_ENABLE_CLOUDINARY_INTEGRATION=true` | Environment protegido `cloudinary-integration` y secretos dedicados `CLOUDINARY_INTEGRATION_CLOUD_NAME`, `CLOUDINARY_INTEGRATION_API_KEY`, `CLOUDINARY_INTEGRATION_API_SECRET`; el test real sube un PNG sintético y limpia el asset en `finally` | Solo manual y con aprobación |
 | Docker Build + Dockle + Container Smoke | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen. El smoke arranca la imagen real con MongoDB efímero y configuración de Production, exige `/health/live` y `/health/ready` en 200, proceso vivo y ausencia de exit 139/errores fatales | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Verificador de proveedor PactNet 5.0.1 con API Kestrel aislada; requiere contratos JSON reales del consumidor Android en `pacts/`; sin ellos **falla** y permanece desactivado | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
+
+El Container Smoke levanta un stub HTTPS local de Upstash en `127.0.0.1` para
+que `/health/ready` evalúe Redis sin usar el servicio real ni desactivar la
+comprobación. El certificado es efímero, se monta como CA de confianza en el
+contenedor y el proceso se detiene en el paso de limpieza. No se usan secretos
+reales ni red externa.
 
 **Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. Las migraciones `M01-001`, `M01-002`, `M03-001` y `M05-001` se aplican únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
 
@@ -103,10 +110,13 @@ en el runner. No se usa una imagen móvil ni un servicio remoto.
   del SMTP. El token provider de RESTler crea una cuenta nueva y hace
   registro, confirmación y login reales en cada refresco.
 - El OpenAPI 3.1 original se conserva. Para compatibilidad con RESTler se genera
-  una copia OpenAPI 3.0.3 que solo convierte tipos union `null` a `nullable`;
+  una copia OpenAPI 3.0.3 que convierte tipos union `null` a `nullable`;
   `openapi-transformation.json` registra cada cambio y verifica que las rutas y
   métodos sean idénticos. No se elimina ningún endpoint ni se oculta un error
-  del contrato.
+  del contrato. La preparación aborta si el POST de fotos no declara
+  `multipart/form-data`, `Fotos` como array de binarios y su codificación
+  repetible; no se inventa tráfico ni se omite esa operación. Los 12 enums
+  públicos se validan como string.
 - Ejecuta **Compile**, **Test/Smoke** y **Fuzz-lean**. No se usa `fuzz` ni
   fuzzing exhaustivo. Límites: `max_combinations=3`, `max_sequence_length=2`,
   `max_request_execution_time=20s`, timeout de shell por etapa, sin checkers

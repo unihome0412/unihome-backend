@@ -26,6 +26,10 @@ public sealed class InMemoryDistributedRateLimiter : IDistributedRateLimiter
         _clock = clock ?? new Identity.SystemClock();
     }
 
+    public Task<RateLimiterReadiness> CheckReadinessAsync(
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(RateLimiterReadiness.Ready());
+
     public Task<RateLimitResult> CheckAndIncrementAsync(
         string partitionKey,
         int permitLimit,

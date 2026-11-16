@@ -107,6 +107,25 @@ class GateTests(unittest.TestCase):
             needs, True, {"UNIHOME_ENABLE_MUTATION": "true"}, "pull_request")
         self.assertEqual([], issues)
 
+    def test_cloudinary_manual_skipped_bloquea_cuando_esta_habilitado(self):
+        needs = self._base_needs()
+        needs["cloudinary-integration"] = {"result": "skipped"}
+        required, issues = evaluate(
+            needs, True,
+            {"UNIHOME_ENABLE_CLOUDINARY_INTEGRATION": "true"},
+            "workflow_dispatch", "refs/heads/feature/cloudinary")
+        self.assertIn("cloudinary-integration", required)
+        self.assertTrue(any("cloudinary-integration" in issue for issue in issues))
+
+    def test_cloudinary_pr_skipped_no_bloquea(self):
+        needs = self._base_needs()
+        needs["cloudinary-integration"] = {"result": "skipped"}
+        _, issues = evaluate(
+            needs, True,
+            {"UNIHOME_ENABLE_CLOUDINARY_INTEGRATION": "true"},
+            "pull_request", "refs/pull/15/merge")
+        self.assertEqual([], issues)
+
     def test_dast_manual_feature_success_cumple(self):
         needs = self._base_needs()
         needs["dast-zap"] = {"result": "success"}
@@ -197,7 +216,14 @@ class GateTests(unittest.TestCase):
     def test_mongo_only_no_exige_controles_manuales_omitidos(self):
         needs = self._base_needs()
         needs["mongo-db-test"] = {"result": "success"}
-        for job in ("mutation-test", "pact-contract", "dast-zap", "restler-fuzzing"):
+        suppressed = (
+            "mutation-test",
+            "pact-contract",
+            "cloudinary-integration",
+            "dast-zap",
+            "restler-fuzzing",
+        )
+        for job in suppressed:
             needs[job] = {"result": "skipped"}
         required, issues = evaluate(
             needs,
@@ -206,6 +232,7 @@ class GateTests(unittest.TestCase):
                 "UNIHOME_ENABLE_MONGO_CI": "true",
                 "UNIHOME_ENABLE_MUTATION": "true",
                 "UNIHOME_ENABLE_PACT": "true",
+                "UNIHOME_ENABLE_CLOUDINARY_INTEGRATION": "true",
                 "UNIHOME_ENABLE_ZAP": "true",
                 "UNIHOME_ENABLE_RESTLER": "true",
             },
@@ -215,7 +242,7 @@ class GateTests(unittest.TestCase):
         )
         self.assertEqual([], issues)
         self.assertIn("mongo-db-test", required)
-        for job in ("mutation-test", "pact-contract", "dast-zap", "restler-fuzzing"):
+        for job in suppressed:
             self.assertNotIn(job, required)
 
     def test_mongo_only_exige_mongo_aprobado(self):
@@ -281,6 +308,15 @@ class GateTests(unittest.TestCase):
         self.assertIn(proxy_1, block)
         self.assertIn("Reproducir el fallo sin Proxy__KnownProxies", block)
         self.assertIn("Proxy:TrustForwardedHeaders", block)
+
+        # Readiness evalúa Redis: el smoke levanta un stub HTTPS local aislado,
+        # no usa Upstash real ni desactiva la comprobación.
+        self.assertIn("tools/ci/smoke_upstash_stub.py", block)
+        self.assertIn("SSL_CERT_FILE=/tmp/unihome-smoke-upstash-ca.crt", block)
+        self.assertIn(
+            'Redis__RestUrl="https://127.0.0.1:${SMOKE_UPSTASH_PORT}"',
+            block,
+        )
 
         # El CD debe seguir fijando los proxies loopback y el fail-fast.
         deploy = text[text.index("  deploy-azure:"):]

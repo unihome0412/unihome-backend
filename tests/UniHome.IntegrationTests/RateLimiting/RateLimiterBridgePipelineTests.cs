@@ -22,6 +22,10 @@ public sealed class RateLimiterBridgePipelineTests
         {
             return Task.FromResult(NextResult);
         }
+
+        public Task<RateLimiterReadiness> CheckReadinessAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RateLimiterReadiness.Ready());
     }
 
     [Fact]

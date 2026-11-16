@@ -291,7 +291,7 @@ jobs:
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
           -c Release --no-build --no-restore
-          --filter "FullyQualifiedName~OpenApiTests|FullyQualifiedName~OpenApiDocumentTests|FullyQualifiedName~OpenApiGenderContractTests|FullyQualifiedName~SwaggerUiTests"
+          --filter "FullyQualifiedName~OpenApi|FullyQualifiedName~SwaggerUiTests|FullyQualifiedName~HealthReadinessTests"
           --logger "trx;LogFileName=openapi-contract.trx"
           --results-directory TestResults/contracts
       - name: Guardar contratos verificados
@@ -664,6 +664,57 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Job manual y opcional: usa credenciales Cloudinary dedicadas y un environment
+  # protegido para exigir aprobación humana. No se ejecuta en PR/push ni crea secretos.
+  cloudinary-integration:
+    name: Cloudinary Integration (manual, credenciales dedicadas)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_CLOUDINARY_INTEGRATION == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.run_mongo_only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: cloudinary-integration
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Exigir credenciales dedicadas sin imprimirlas
+        env:
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_INTEGRATION_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_INTEGRATION_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_INTEGRATION_API_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDINARY_CLOUD_NAME" || { echo "::error::Falta CLOUDINARY_INTEGRATION_CLOUD_NAME"; exit 1; }
+          test -n "$CLOUDINARY_API_KEY" || { echo "::error::Falta CLOUDINARY_INTEGRATION_API_KEY"; exit 1; }
+          test -n "$CLOUDINARY_API_SECRET" || { echo "::error::Falta CLOUDINARY_INTEGRATION_API_SECRET"; exit 1; }
+      - name: Restore y build
+        run: |
+          dotnet restore UniHome.Backend.slnx --locked-mode
+          dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
+      - name: Ejecutar prueba real opt-in con limpieza en finally
+        env:
+          UNIHOME_RUN_CLOUDINARY_INTEGRATION_TESTS: '1'
+          Cloudinary__CloudName: ${{ secrets.CLOUDINARY_INTEGRATION_CLOUD_NAME }}
+          Cloudinary__ApiKey: ${{ secrets.CLOUDINARY_INTEGRATION_API_KEY }}
+          Cloudinary__ApiSecret: ${{ secrets.CLOUDINARY_INTEGRATION_API_SECRET }}
+        run: |
+          dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj \
+            --configuration Release --no-build --no-restore \
+            --filter "FullyQualifiedName~CloudinaryPersistenceTests" \
+            --logger "trx;LogFileName=cloudinary-integration.trx" \
+            --results-directory TestResults/cloudinary
+      - name: Publicar evidencia
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloudinary-integration-results
+          path: TestResults/cloudinary/**/*.trx
+          if-no-files-found: warn
+          retention-days: 7
+
   docker-build:
     name: Docker Build (sin push ni Azure)
     needs: detect-changes
@@ -728,6 +779,8 @@ jobs:
     env:
       SMOKE_CONTAINER: unihome-smoke
       SMOKE_DATABASE: unihome_smoke
+      SMOKE_UPSTASH_PORT: '8079'
+      SMOKE_UPSTASH_PID_FILE: /tmp/unihome-smoke-upstash.pid
       MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
       MongoDb__DatabaseName: unihome_smoke
       MongoDb__ServerSelectionTimeoutSeconds: '5'
@@ -798,6 +851,46 @@ jobs:
           fi
           grep -F "Proxy:TrustForwardedHeaders" smoke-negative.log
           grep -F "Proxy:KnownProxies o Proxy:KnownNetworks" smoke-negative.log
+      - name: Preparar stub HTTPS local de Upstash para readiness
+        run: |
+          set -euo pipefail
+          CERT_DIR="$RUNNER_TEMP/unihome-smoke-upstash"
+          mkdir -p "$CERT_DIR"
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 \
+            -keyout "$CERT_DIR/ca-key.pem" -out "$CERT_DIR/ca-cert.pem" \
+            -subj "/CN=UniHome Smoke Upstash CA" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign"
+          openssl req -newkey rsa:2048 -sha256 -nodes \
+            -keyout "$CERT_DIR/server-key.pem" -out "$CERT_DIR/server.csr" \
+            -subj "/CN=127.0.0.1"
+          openssl x509 -req -in "$CERT_DIR/server.csr" \
+            -CA "$CERT_DIR/ca-cert.pem" -CAkey "$CERT_DIR/ca-key.pem" \
+            -CAcreateserial -out "$CERT_DIR/server-cert.pem" -days 1 -sha256 \
+            -extfile <(printf "subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
+          cat "$CERT_DIR/server-cert.pem" "$CERT_DIR/ca-cert.pem" \
+            > "$CERT_DIR/server-chain.pem"
+          cp "$CERT_DIR/ca-cert.pem" "$GITHUB_WORKSPACE/smoke-upstash-ca.crt"
+          chmod 644 "$GITHUB_WORKSPACE/smoke-upstash-ca.crt"
+          nohup python3 tools/ci/smoke_upstash_stub.py \
+            --host 127.0.0.1 --port "$SMOKE_UPSTASH_PORT" \
+            --cert "$CERT_DIR/server-chain.pem" --key "$CERT_DIR/server-key.pem" \
+            > "$GITHUB_WORKSPACE/smoke-upstash.log" 2>&1 &
+          echo $! > "$SMOKE_UPSTASH_PID_FILE"
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error --cacert "$CERT_DIR/ca-cert.pem" \
+              "https://127.0.0.1:${SMOKE_UPSTASH_PORT}/health" > /dev/null; then
+              echo "Stub HTTPS de Upstash disponible (intento ${attempt})."
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$SMOKE_UPSTASH_PID_FILE")" 2>/dev/null; then
+              cat "$GITHUB_WORKSPACE/smoke-upstash.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$GITHUB_WORKSPACE/smoke-upstash.log"
+          exit 1
       - name: Arrancar la imagen real con configuración equivalente a Azure
         run: |
           set -euo pipefail
@@ -815,8 +908,10 @@ jobs:
             -e VerificationCode__HmacSecret=unihome-smoke-hmac-secret-0123456789-abcdefghijklmnopqrstuvwxyz \
             -e Auth__RateLimit__IpHashSalt=unihome-smoke-ip-salt-0123456789-abcdefghijklmnopqrstuvwxyz \
             -e Redis__Enabled=true \
-            -e Redis__RestUrl=https://smoke.invalid \
+            -e Redis__RestUrl="https://127.0.0.1:${SMOKE_UPSTASH_PORT}" \
             -e Redis__RestToken=smoke-test-token \
+            -e SSL_CERT_FILE=/tmp/unihome-smoke-upstash-ca.crt \
+            -v "$GITHUB_WORKSPACE/smoke-upstash-ca.crt:/tmp/unihome-smoke-upstash-ca.crt:ro" \
             -e MongoDb__ConnectionString="$MongoDb__ConnectionString" \
             -e MongoDb__DatabaseName="$MongoDb__DatabaseName" \
             -e MongoDb__ServerSelectionTimeoutSeconds=5 \
@@ -893,8 +988,23 @@ jobs:
           docker logs "$SMOKE_CONTAINER" > artifacts/container-smoke/container.log 2>&1 || true
           docker inspect "$SMOKE_CONTAINER" > artifacts/container-smoke/container-inspect.json 2>&1 || true
           cp -f smoke-negative.log artifacts/container-smoke/negative.log 2>/dev/null || true
+          cp -f smoke-upstash.log artifacts/container-smoke/upstash.log 2>/dev/null || true
           cp -f live.json artifacts/container-smoke/live.json 2>/dev/null || true
           cp -f ready.json artifacts/container-smoke/ready.json 2>/dev/null || true
+          stub_stopped=false
+          if [ -f "$SMOKE_UPSTASH_PID_FILE" ]; then
+            stub_pid=$(cat "$SMOKE_UPSTASH_PID_FILE")
+            kill "$stub_pid" 2>/dev/null || true
+            for attempt in $(seq 1 10); do
+              if ! kill -0 "$stub_pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if kill -0 "$stub_pid" 2>/dev/null; then
+              echo "::error::El stub HTTPS de Upstash no se detuvo."
+              exit 1
+            fi
+            stub_stopped=true
+          fi
           {
             echo "# Container Smoke"
             echo ""
@@ -902,6 +1012,7 @@ jobs:
             echo "- Resultado: \`${{ job.status }}\`"
             echo "- Exit code del control negativo: \`${NEGATIVE_EXIT_CODE:-n/d}\`"
             echo "- Liveness/readiness: \`${live_ok:-false}\` / \`${ready_ok:-false}\`"
+            echo "- Stub HTTPS de Upstash detenido: \`$stub_stopped\`"
           } >> "$GITHUB_STEP_SUMMARY"
           docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
       - name: Publicar evidencia del contenedor
@@ -1865,7 +1976,7 @@ jobs:
 
   pr-quality-gate:
     name: PR Quality Gate (controles obligatorios)
-    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, container-smoke, dast-zap, restler-fuzzing]
+    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, cloudinary-integration, docker-build, container-lint, container-smoke, dast-zap, restler-fuzzing]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1879,6 +1990,7 @@ jobs:
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
       UNIHOME_ENABLE_PACT: ${{ vars.UNIHOME_ENABLE_PACT }}
+      UNIHOME_ENABLE_CLOUDINARY_INTEGRATION: ${{ vars.UNIHOME_ENABLE_CLOUDINARY_INTEGRATION }}
       UNIHOME_ENABLE_DOCKER: ${{ vars.UNIHOME_ENABLE_DOCKER }}
       UNIHOME_ENABLE_ZAP: ${{ vars.UNIHOME_ENABLE_ZAP }}
       UNIHOME_ENABLE_RESTLER: ${{ vars.UNIHOME_ENABLE_RESTLER }}
@@ -1889,7 +2001,7 @@ jobs:
 
   hardening-report:
     name: Hardening Report (Combinado)
-    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, container-smoke, dast-zap, restler-fuzzing, pr-quality-gate]
+    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, cloudinary-integration, docker-build, container-lint, container-smoke, dast-zap, restler-fuzzing, pr-quality-gate]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1903,6 +2015,7 @@ jobs:
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
       UNIHOME_ENABLE_PACT: ${{ vars.UNIHOME_ENABLE_PACT }}
+      UNIHOME_ENABLE_CLOUDINARY_INTEGRATION: ${{ vars.UNIHOME_ENABLE_CLOUDINARY_INTEGRATION }}
       UNIHOME_ENABLE_DOCKER: ${{ vars.UNIHOME_ENABLE_DOCKER }}
       UNIHOME_ENABLE_ZAP: ${{ vars.UNIHOME_ENABLE_ZAP }}
       UNIHOME_ENABLE_RESTLER: ${{ vars.UNIHOME_ENABLE_RESTLER }}

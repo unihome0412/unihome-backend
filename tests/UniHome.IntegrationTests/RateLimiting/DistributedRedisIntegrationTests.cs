@@ -32,6 +32,12 @@ public sealed class DistributedRedisIntegrationTests
                 ? Task.FromResult(RateLimitResult.ServiceUnavailable("Simulated Redis Outage"))
                 : Task.FromResult(RateLimitResult.Allowed(0, TimeSpan.Zero));
         }
+
+        public Task<RateLimiterReadiness> CheckReadinessAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(_isUnavailable
+                ? RateLimiterReadiness.Unavailable("Simulated Redis Outage")
+                : RateLimiterReadiness.Ready());
     }
 
     private sealed class CustomRateLimitApiFactory : UniHomeApiFactory
@@ -158,6 +164,10 @@ public sealed class DistributedRedisIntegrationTests
                 ? RateLimitResult.Allowed(InvocationCount, TimeSpan.FromSeconds(60))
                 : RateLimitResult.Exceeded(InvocationCount, TimeSpan.FromSeconds(45)));
         }
+
+        public Task<RateLimiterReadiness> CheckReadinessAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(RateLimiterReadiness.Ready());
     }
 
     [Fact]

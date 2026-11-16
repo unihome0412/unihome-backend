@@ -15,6 +15,7 @@ public sealed record ValidatedUnitPhoto(
 public static class UnitPhotoValidator
 {
     public const long MaxBytesPerPhoto = 5 * 1024 * 1024;
+    public const long MaxRequestBytes = 52 * 1024 * 1024;
 
     public static ValidatedUnitPhoto Validate(UnitPhotoUpload upload)
     {

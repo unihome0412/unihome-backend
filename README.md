@@ -106,9 +106,12 @@ sin borrado). La búsqueda pública solo devuelve activas.
 Perfil (HU-002/HU-008): `GET /api/v1/perfil/mi-perfil` requiere Bearer y devuelve
 `nombreCompleto`, `correo`, `fechaNacimiento`, `genero`, `universidadActual`,
 `etiquetaCuenta`, `vinculadoAUnidad` y `puedePublicar`. No expone hash de
-contraseña ni claims administrativos. La barra de navegación y la visibilidad del
-panel son responsabilidad de Android; el backend entrega los indicadores y
-revalida cada ruta administrativa.
+contraseña ni claims administrativos. `universidadActual` permanece `null` porque
+M01 no persiste una asociación cuenta-universidad y M03 solo asocia
+`UniversidadId` a propiedades/unidades; la dependencia funcional es HU-087 y no
+se inventa una relación. La respuesta autenticada envía `Cache-Control: no-store`.
+La barra de navegación y la visibilidad del panel son responsabilidad de Android;
+el backend entrega los indicadores y revalida cada ruta administrativa.
 
 Sprint 2 / M05: `POST /api/v1/propiedades`, `POST /api/v1/propiedades/{id}/unidades`,
 `POST /api/v1/unidades/{id}/fotos` y `GET /api/v1/fotos/{photoRef}`, `PUT /api/v1/unidades/{id}/servicios`,
@@ -183,7 +186,11 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   por 60. Son umbrales provisionales pendientes de aprobación. El limitador usa el
   adaptador distribuido configurado: Upstash Redis cuando `Redis:Enabled=true` y el
   adaptador en memoria solo en Development/pruebas. Fuera de Development Redis es
-  obligatorio y las IP se seudonimizan con `Auth:RateLimit:IpHashSalt`.
+  obligatorio y las IP se seudonimizan con `Auth:RateLimit:IpHashSalt`. El timeout
+  por intento es `Redis:CommandTimeoutMs=2000`, con `Redis:MaxAttempts=2`,
+  `Redis:RetryDelayMs=100` y `Redis:ReadinessTimeoutMs=800`. Los fallos
+  transitorios se reintentan de forma acotada; FailClosed conserva el 503 y los
+  errores de autenticación/contrato no se reintentan.
 - Límite "por cuenta" de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
   (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como
@@ -283,7 +290,7 @@ en modo solo lectura; si falta una garantía crítica, la API no opera esa colec
 | Ruta | Semántica |
 |---|---|
 | `GET /health/live` | Proceso vivo. No consulta dependencias externas. |
-| `GET /health/ready` | Conectividad e índices M01 disponibles. Sin configuración o esquema válido responde `503`. |
+| `GET /health/ready` | MongoDB (conectividad e índices M01) y Redis/rate limiting distribuido disponibles. Sin configuración, esquema válido o Redis accesible responde `503`. |
 
 La colección externa `restablecimientos_contrasena` no forma parte de `M01-001`; su
 verificación de índices se ejecuta al invocar los endpoints de recuperación. Si falta
@@ -294,17 +301,21 @@ o diverge, HU-006 responde `503` y no se declara operativa.
 - Errores homogéneos con `ProblemDetails`, incluyendo `traceId` y `errors` en validaciones.
 - Excepciones no controladas: `500` genérico, sin stack trace.
 - Todas las respuestas incluyen `X-Content-Type-Options`, `X-Frame-Options`,
-  `Referrer-Policy`, `Permissions-Policy` y una CSP; las rutas de autenticación
-  y cuentas añaden `Cache-Control: no-store`. La CSP de Swagger UI permite sus
-  recursos propios e inline; el resto de la API usa `default-src 'none'`.
+  `Referrer-Policy`, `Permissions-Policy` y una CSP; las rutas de autenticación,
+  cuentas y perfil añaden `Cache-Control: no-store`. La CSP de Swagger UI permite
+  sus recursos propios e inline; el resto de la API usa `default-src 'none'`.
+  Fuera de Development, HSTS se emite para requests HTTPS con host público no
+  loopback y `X-Forwarded-Proto` confiable (`max-age=31536000; includeSubDomains`,
+  sin preload).
 - OpenAPI nativo de .NET 10 disponible solo en desarrollo: `GET /openapi/v1.json`.
   Incluye el esquema Bearer y marca `logout` como operación autenticada.
-- `Gender` se documenta como enum string (`Mujer`, `Hombre`,
-  `PrefiereNoDecir`), igual que el JSON real; los enteros se rechazan. La
-  corrección se aplica al documento OpenAPI sin cambiar el contrato HTTP.
-  Verificación: ejecución manual
-  [42850339456](https://github.com/unihome0412/unihome-backend/actions/runs/42850339456),
-  `contract-test` con 10/10 pruebas OpenAPI aprobadas.
+- Los 12 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
+  `Occupancy`, `ForWhom`, `BathroomType`, `FurnitureType`, `UnitTemplate`,
+  `ServiceName`, `ServiceMode`, `AccountLabel`) se documentan como string con sus
+  valores reales; los enteros se rechazan en runtime. `POST
+  /api/v1/unidades/{unitId}/fotos` se documenta como `multipart/form-data` con
+  `Fotos` repetible, array de binarios, JPEG/PNG, 10 fotos, 5 MB por archivo y
+  52 MB por solicitud.
 - Registro: `400` por validación, `409` por correo duplicado (provisional, DEC-09
   pendiente), `413` por cuerpo excesivo y `503` si MongoDB no está disponible.
 - Login: `400` por datos inválidos, `401` genérico, `403` por cuenta no confirmada o
