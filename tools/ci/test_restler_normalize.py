@@ -1,7 +1,12 @@
 """Pruebas de la conversión OpenAPI 3.1 -> 3.0 para RESTler."""
 import unittest
 
-from restler.normalize_openapi import convert, operation_keys, report
+from restler.normalize_openapi import (
+    NormalizationError,
+    convert,
+    operation_keys,
+    report,
+)
 
 
 class NormalizeOpenApiTests(unittest.TestCase):
@@ -42,6 +47,8 @@ class NormalizeOpenApiTests(unittest.TestCase):
             "paths": {"/x": {"post": {}}},
             "components": {"schemas": {
                 "UnitType": {"type": "integer"},
+                "Gender": {"type": "integer"},
+                "AccountLabel": {"type": "integer"},
                 "Request": {
                     "type": "object",
                     "properties": {
@@ -50,6 +57,15 @@ class NormalizeOpenApiTests(unittest.TestCase):
                                 {"type": "null"},
                                 {"$ref": "#/components/schemas/UnitType"},
                             ]
+                        },
+                        "genero": {
+                            "oneOf": [
+                                {"type": "null"},
+                                {"$ref": "#/components/schemas/Gender"},
+                            ]
+                        },
+                        "etiquetaCuenta": {
+                            "$ref": "#/components/schemas/AccountLabel"
                         },
                         "latitud": {
                             "type": ["null", "number", "string"],
@@ -65,6 +81,12 @@ class NormalizeOpenApiTests(unittest.TestCase):
         self.assertEqual(
             "string",
             converted["components"]["schemas"]["UnitType"]["type"])
+        self.assertEqual(
+            ["Mujer", "Hombre", "PrefiereNoDecir"],
+            converted["components"]["schemas"]["Gender"]["enum"])
+        self.assertEqual(
+            ["UsuarioUniHome", "PublicacionEnRevision", "ConEspaciosPublicados"],
+            converted["components"]["schemas"]["AccountLabel"]["enum"])
         self.assertIn(
             "Habitacion",
             converted["components"]["schemas"]["UnitType"]["enum"])
@@ -133,6 +155,76 @@ class NormalizeOpenApiTests(unittest.TestCase):
         converted, changes = convert(source)
         self.assertEqual(set(), operation_keys(converted))
         self.assertEqual([], changes)
+
+    def test_conserva_multipart_de_fotos_con_array_binario(self):
+        source = {
+            "openapi": "3.1.1",
+            "paths": {"/api/v1/unidades/{unitId}/fotos": {"post": {
+                "requestBody": {"required": True, "content": {
+                    "multipart/form-data": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "Fotos": {
+                                    "type": "array",
+                                    "items": {"type": "string", "format": "binary"},
+                                },
+                            },
+                            "required": ["Fotos"],
+                        },
+                        "encoding": {"Fotos": {"style": "form", "explode": True}},
+                    },
+                }},
+            }}},
+        }
+
+        converted, _ = convert(source)
+
+        media = converted["paths"]["/api/v1/unidades/{unitId}/fotos"][
+            "post"]["requestBody"]["content"]["multipart/form-data"]
+        self.assertEqual(
+            "array", media["schema"]["properties"]["Fotos"]["type"])
+        self.assertEqual(
+            "binary",
+            media["schema"]["properties"]["Fotos"]["items"]["format"])
+
+    def test_rechaza_fotos_urlencoded(self):
+        source = {
+            "openapi": "3.1.1",
+            "paths": {"/api/v1/unidades/{unitId}/fotos": {"post": {
+                "requestBody": {"content": {
+                    "application/x-www-form-urlencoded": {
+                        "schema": {"type": "object"},
+                    },
+                }},
+            }}},
+        }
+
+        with self.assertRaises(NormalizationError):
+            convert(source)
+
+    def test_rechaza_fotos_sin_binario(self):
+        source = {
+            "openapi": "3.1.1",
+            "paths": {"/api/v1/unidades/{unitId}/fotos": {"post": {
+                "requestBody": {"content": {
+                    "multipart/form-data": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "Fotos": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                }},
+            }}},
+        }
+
+        with self.assertRaises(NormalizationError):
+            convert(source)
 
     def test_convert_no_oculta_un_error_de_operaciones(self):
         class BadDict(dict):

@@ -38,6 +38,26 @@ public sealed class ForwardedHeadersTests :
     }
 
     [Fact]
+    public async Task ConHttpsReenviado_EmiteHstsConPoliticaAcotada()
+    {
+        using var client = CreateNoRedirectClient(_enabled);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/health/live");
+        request.Headers.Add("X-Forwarded-Proto", "https");
+        // HSTS excluye localhost por diseño; se usa el host público equivalente
+        // al ingress de Azure para verificar la cabecera real.
+        request.Headers.Host = "unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io";
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var hsts = response.Headers.GetValues("Strict-Transport-Security").Single();
+        Assert.Contains("max-age=31536000", hsts, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("includeSubDomains", hsts, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("preload", hsts, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ConHttpReenviado_Redirige()
     {
         using var client = CreateNoRedirectClient(_enabled);

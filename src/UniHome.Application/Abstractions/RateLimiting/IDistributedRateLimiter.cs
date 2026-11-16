@@ -21,9 +21,31 @@ public sealed record RateLimitResult(
 }
 
 /// <summary>
+/// Resultado de la comprobación de disponibilidad del almacén de rate limiting.
+/// No contiene credenciales, URLs ni mensajes de excepción.
+/// </summary>
+public sealed record RateLimiterReadiness(bool IsReady, string? Detail = null)
+{
+    public static RateLimiterReadiness Ready() => new(true);
+
+    public static RateLimiterReadiness Unavailable(string? detail = null) =>
+        new(false, detail);
+}
+
+/// <summary>
+/// Puerto de disponibilidad del almacén distribuido que respalda el rate limiting.
+/// readiness lo consume para no declarar lista la API si Redis es obligatorio y falla.
+/// </summary>
+public interface IRateLimiterReadinessProbe
+{
+    Task<RateLimiterReadiness> CheckReadinessAsync(
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// Contrato para el rate limiting distribuido compartido entre réplicas.
 /// </summary>
-public interface IDistributedRateLimiter
+public interface IDistributedRateLimiter : IRateLimiterReadinessProbe
 {
     /// <summary>
     /// Evalúa e incrementa atómicamente el contador para la clave especificada.

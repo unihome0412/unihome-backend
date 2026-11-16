@@ -137,7 +137,11 @@ Variables necesarias:
     host y token para su API REST HTTPS).
 - `Auth__RateLimit__IpHashSalt`, mínimo 16 caracteres; usar un valor aleatorio de
   32+ caracteres.
-- Opcional: `Redis__CommandTimeoutMs`; el valor por defecto es 250 ms.
+- `Redis__CommandTimeoutMs=2000` es el valor por defecto y el recomendado para el
+  próximo Gate de configuración. Sustituye los 250 ms que provocaron
+  `TaskCanceledException` y 503 intermitentes en el primer login tras inactividad.
+- Opcionales acotados: `Redis__MaxAttempts=2`, `Redis__RetryDelayMs=100` y
+  `Redis__ReadinessTimeoutMs=800`. No usar reintentos ilimitados.
 - La política por defecto es `FailClosed`; no cambiarla a `FailOpen` sin
   aprobación de seguridad.
 
@@ -148,9 +152,14 @@ Procedimiento si no existe la base Upstash:
 3. Crear secretos en la Container App existente para el token/URI y para la sal
    de IP. No reutilizar la sal de otro entorno.
 4. Referenciar los secretos desde las variables anteriores.
-5. Validar arranque y una operación de login real; `/health/ready` no comprueba
-   Redis por sí solo.
-6. Verificar que un fallo de Redis devuelve 503 y no crea contadores locales.
+5. Validar arranque y una operación de login real; `/health/ready` ahora incluye
+   la comprobación `redis` con PING de 800 ms y responde `503` si el almacén
+   distribuido no está disponible. `/health/live` sigue sin depender de Redis.
+6. Verificar que un fallo de Redis devuelve 503 y no crea contadores locales. La
+   sonda de Azure no se modifica en este cambio; el PING queda por debajo de su
+   timeout habitual y los fallos breves no retiran la réplica de inmediato por
+   `failureThreshold`. Si el Gate confirma otro `timeoutSeconds`, ajustar solo
+   `Redis__ReadinessTimeoutMs` por debajo de ese valor.
 
 No crear otra Container App, otro servicio Azure ni contratar un plan pago.
 

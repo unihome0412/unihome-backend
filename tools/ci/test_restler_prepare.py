@@ -40,6 +40,24 @@ SPEC = {
         for _, path in OPERATIONS
     },
 }
+SPEC["paths"]["/api/v1/unidades/{unitId}/fotos"]["post"]["requestBody"] = {
+    "required": True,
+    "content": {
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "Fotos": {
+                        "type": "array",
+                        "items": {"type": "string", "format": "binary"},
+                    },
+                },
+                "required": ["Fotos"],
+            },
+            "encoding": {"Fotos": {"style": "form", "explode": True}},
+        },
+    },
+}
 
 DATA = prepare.SyntheticData(
     register_email="reg@uni.edu",

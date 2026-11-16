@@ -21,6 +21,12 @@ class NormalizationError(RuntimeError):
 # enteros que el contrato rechaza. Solo se corrige la copia derivada y el
 # cambio queda registrado en openapi-transformation.json.
 STRING_ENUMS = {
+    "Gender": ["Mujer", "Hombre", "PrefiereNoDecir"],
+    "AccountLabel": [
+        "UsuarioUniHome",
+        "PublicacionEnRevision",
+        "ConEspaciosPublicados",
+    ],
     "PropertyType": ["Casa", "Departamento", "Edificio"],
     "UnitType": ["Habitacion", "Departamento", "Estudio"],
     "Occupancy": ["Individual", "Compartida"],
@@ -49,6 +55,8 @@ STRING_ENUMS = {
     "PublicationState": ["Borrador", "EnRevision", "Aprobada", "Rechazada"],
 }
 TYPE_PREFERENCE = ("integer", "number", "boolean", "string", "array", "object")
+PHOTOS_PATH = "/api/v1/unidades/{unitId}/fotos"
+PHOTOS_FIELD = "Fotos"
 
 
 def operation_keys(document: dict[str, Any]) -> set[tuple[str, str]]:
@@ -208,10 +216,66 @@ def _fix_string_enums(document: dict[str, Any]) -> list[dict[str, Any]]:
     return changes
 
 
+def _validate_multipart_photos(document: dict[str, Any]) -> None:
+    """Evita fuzzear fotos con un contrato distinto al runtime.
+
+    El endpoint real exige multipart/form-data con Fotos como array de binarios.
+    Si el documento fuente declara urlencoded o un tipo distinto, se aborta la
+    preparación en vez de inventar tráfico o perder cobertura silenciosamente.
+    """
+    item = (document.get("paths") or {}).get(PHOTOS_PATH)
+    operation = item.get("post") if isinstance(item, dict) else None
+    if not isinstance(operation, dict):
+        return
+
+    request_body = operation.get("requestBody")
+    content = request_body.get("content") if isinstance(request_body, dict) else None
+    if not isinstance(content, dict):
+        raise NormalizationError(
+            "POST de fotos no declara requestBody; se esperaba multipart/form-data.")
+
+    if "application/x-www-form-urlencoded" in content:
+        raise NormalizationError(
+            "POST de fotos declara application/x-www-form-urlencoded; "
+            "el runtime exige multipart/form-data.")
+
+    media = content.get("multipart/form-data")
+    if not isinstance(media, dict):
+        raise NormalizationError(
+            "POST de fotos no declara multipart/form-data.")
+
+    schema = media.get("schema")
+    properties = schema.get("properties") if isinstance(schema, dict) else None
+    photos = properties.get(PHOTOS_FIELD) if isinstance(properties, dict) else None
+    if not isinstance(photos, dict) or photos.get("type") != "array":
+        raise NormalizationError(
+            f"POST de fotos no declara {PHOTOS_FIELD} como array.")
+
+    required = schema.get("required") if isinstance(schema, dict) else None
+    if not isinstance(required, list) or PHOTOS_FIELD not in required:
+        raise NormalizationError(
+            f"POST de fotos no declara {PHOTOS_FIELD} como obligatorio.")
+
+    photos_item = photos.get("items")
+    if (
+        not isinstance(photos_item, dict)
+        or photos_item.get("type") != "string"
+        or photos_item.get("format") != "binary"
+    ):
+        raise NormalizationError(
+            f"POST de fotos no declara {PHOTOS_FIELD} como binario.")
+
+    encoding = media.get("encoding")
+    if not isinstance(encoding, dict) or PHOTOS_FIELD not in encoding:
+        raise NormalizationError(
+            f"POST de fotos no declara la codificación repetible de {PHOTOS_FIELD}.")
+
+
 def convert(document: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Convierte tipos union 3.1 a nullable 3.0 y devuelve los cambios."""
     original_operations = operation_keys(document)
     converted = copy.deepcopy(document)
+    _validate_multipart_photos(converted)
     changes: list[dict[str, Any]] = _fix_string_enums(converted)
     changes += _relax_request_uuid_formats(converted)
     schemas = (converted.get("components") or {}).get("schemas") or {}

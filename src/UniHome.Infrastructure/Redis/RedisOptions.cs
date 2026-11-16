@@ -32,6 +32,17 @@ public sealed class RedisOptions
 {
     public const string SectionName = "Redis";
 
+    public const int DefaultCommandTimeoutMs = 2000;
+    public const int MinCommandTimeoutMs = 250;
+    public const int MaxCommandTimeoutMs = 10000;
+    public const int DefaultReadinessTimeoutMs = 800;
+    public const int MinReadinessTimeoutMs = 250;
+    public const int MaxReadinessTimeoutMs = 2000;
+    public const int DefaultMaxAttempts = 2;
+    public const int MaxAttemptsLimit = 3;
+    public const int DefaultRetryDelayMs = 100;
+    public const int MaxRetryDelayMs = 1000;
+
     /// <summary>
     /// Indica si el rate limiting distribuido con Redis está activo.
     /// Es estrictamente obligatorio en entornos distintos de Development para garantizar
@@ -56,10 +67,30 @@ public sealed class RedisOptions
     public string? RestToken { get; set; }
 
     /// <summary>
-    /// Timeout estricto en milisegundos para comandos de Redis.
-    /// El ADR-006 recomienda 250 ms para evitar el agotamiento de hilos en Kestrel.
+    /// Timeout por intento en milisegundos para comandos de Redis.
+    /// 250 ms fue demasiado bajo para el primer request HTTPS a Upstash y produjo
+    /// TaskCanceledException con 503 intermitentes. El valor acotado de 2000 ms
+    /// tolera la conexión TLS en frío sin dejar colgada la petición del cliente.
     /// </summary>
-    public int CommandTimeoutMs { get; set; } = 250;
+    public int CommandTimeoutMs { get; set; } = DefaultCommandTimeoutMs;
+
+    /// <summary>
+    /// Número máximo de intentos por comando ante fallos transitorios
+    /// (timeout, error de conexión o HTTP 408/425/429/5xx). Acotado a 3.
+    /// Los errores de autenticación o de contrato no se reintentan.
+    /// </summary>
+    public int MaxAttempts { get; set; } = DefaultMaxAttempts;
+
+    /// <summary>
+    /// Espera fija entre reintentos transitorios, en milisegundos. Acotada a 1000.
+    /// </summary>
+    public int RetryDelayMs { get; set; } = DefaultRetryDelayMs;
+
+    /// <summary>
+    /// Timeout en milisegundos para el PING de /health/ready. Se mantiene por
+    /// debajo del timeout de la sonda de Azure y no reintenta para no alargar el probe.
+    /// </summary>
+    public int ReadinessTimeoutMs { get; set; } = DefaultReadinessTimeoutMs;
 
     /// <summary>
     /// Política ante caídas o timeouts de Redis.

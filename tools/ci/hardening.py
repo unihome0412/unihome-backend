@@ -15,6 +15,7 @@ OPTIONAL = {
     "mongo-db-test": ("UNIHOME_ENABLE_MONGO_CI", {"workflow_dispatch"}),
     "mutation-test": ("UNIHOME_ENABLE_MUTATION", {"workflow_dispatch"}),
     "pact-contract": ("UNIHOME_ENABLE_PACT", {"workflow_dispatch"}),
+    "cloudinary-integration": ("UNIHOME_ENABLE_CLOUDINARY_INTEGRATION", {"workflow_dispatch"}),
     "docker-build": ("UNIHOME_ENABLE_DOCKER", {"pull_request", "push", "workflow_dispatch"}),
     "container-lint": ("UNIHOME_ENABLE_DOCKER", {"pull_request", "push", "workflow_dispatch"}),
     "container-smoke": ("UNIHOME_ENABLE_DOCKER", {"pull_request", "push", "workflow_dispatch"}),
@@ -31,7 +32,13 @@ OPTIONAL_REF_PATTERNS = {
 
 # En el dispatch dedicado solo se exige MongoDB entre los jobs manuales; el
 # workflow omite estos controles de forma explícita para ese modo.
-MONGO_ONLY_SUPPRESSED = {"mutation-test", "pact-contract", "dast-zap", "restler-fuzzing"}
+MONGO_ONLY_SUPPRESSED = {
+    "mutation-test",
+    "pact-contract",
+    "cloudinary-integration",
+    "dast-zap",
+    "restler-fuzzing",
+}
 
 
 def _ref_allowed(job: str, ref: str) -> bool:
@@ -96,6 +103,8 @@ def make_report(
         "(solo `workflow_dispatch` con `UNIHOME_ENABLE_ZAP=true` desde `main` o `feature/*`).",
         f"- RESTler manual: **{'obligatorio' if 'restler-fuzzing' in required else 'no exigido'}** "
         "(solo `workflow_dispatch` con `UNIHOME_ENABLE_RESTLER=true` desde `main` o `feature/*`).",
+        f"- Cloudinary real: **{'obligatorio' if 'cloudinary-integration' in required else 'no exigido'}** "
+        "(solo `workflow_dispatch`, environment protegido y credenciales dedicadas).",
         "",
         "| Job | Resultado | Obligatorio en esta ejecución |",
         "|---|---|---|",

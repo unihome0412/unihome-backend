@@ -452,6 +452,16 @@ builder.Services.AddRateLimiter(options =>
         });
 });
 
+builder.Services.AddHsts(options =>
+{
+    // Azure termina TLS en el ingress. La política se emite solo cuando la
+    // request ya es HTTPS (X-Forwarded-Proto confiable) y evita preload, que
+    // requiere autorización explícita sobre el dominio.
+    options.MaxAge = TimeSpan.FromDays(365);
+    options.IncludeSubDomains = true;
+    options.Preload = false;
+});
+
 builder.Services.AddProblemDetails(options =>
 {
     options.CustomizeProblemDetails = context =>
@@ -483,6 +493,9 @@ builder.Services
         tags: [HealthCheckTags.Live])
     .AddCheck<StorageHealthCheck>(
         "storage",
+        tags: [HealthCheckTags.Ready])
+    .AddCheck<RedisHealthCheck>(
+        "redis",
         tags: [HealthCheckTags.Ready]);
 
 builder.Services.AddOpenApi("v1", options =>
@@ -502,18 +515,23 @@ builder.Services.AddOpenApi("v1", options =>
             Description = "Token de acceso JWT emitido por POST /api/v1/auth/login."
         };
 
-        // El generador nativo describe el enum Gender como integer. El contrato
-        // HTTP, y el consumidor Android, usan los nombres string del enum; se
-        // corrige el componente después de generar los esquemas.
-        if (document.Components.Schemas is { } schemas &&
-            schemas.TryGetValue("Gender", out var rawGender) &&
-            rawGender is OpenApiSchema gender)
+        // El generador nativo describe todos los enums como integer. El contrato
+        // HTTP, y el consumidor Android, usan los nombres string; se corrige cada
+        // componente público después de generar los esquemas sin tocar el runtime.
+        if (document.Components.Schemas is { } schemas)
         {
-            gender.Type = JsonSchemaType.String;
-            gender.Format = null;
-            gender.Enum = Enum.GetNames<Gender>()
-                .Select(name => (JsonNode)JsonValue.Create(name)!)
-                .ToList();
+            foreach (var (name, enumType) in PublicApiEnums.Schemas)
+            {
+                if (schemas.TryGetValue(name, out var rawSchema) &&
+                    rawSchema is OpenApiSchema schema)
+                {
+                    schema.Type = JsonSchemaType.String;
+                    schema.Format = null;
+                    schema.Enum = Enum.GetNames(enumType)
+                        .Select(value => (JsonNode)JsonValue.Create(value)!)
+                        .ToList();
+                }
+            }
         }
 
         return Task.CompletedTask;
@@ -521,6 +539,20 @@ builder.Services.AddOpenApi("v1", options =>
 
     options.AddOperationTransformer((operation, context, _) =>
     {
+        var relativePath = context.Description.RelativePath?.TrimStart('/');
+
+        if (string.Equals(
+                relativePath,
+                UnitPhotosOpenApiContract.RelativePath,
+                StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                context.Description.HttpMethod,
+                UnitPhotosOpenApiContract.Method,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            UnitPhotosOpenApiContract.Apply(operation);
+        }
+
         var metadata = context.Description.ActionDescriptor.EndpointMetadata;
         var requiresAuthentication = metadata.OfType<IAuthorizeData>().Any() &&
             !metadata.OfType<IAllowAnonymous>().Any();
@@ -562,7 +594,8 @@ app.Use(async (context, next) =>
             : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
         if (path.StartsWithSegments("/api/v1/auth") ||
-            path.StartsWithSegments("/api/v1/cuentas"))
+            path.StartsWithSegments("/api/v1/cuentas") ||
+            path.StartsWithSegments("/api/v1/perfil"))
         {
             headers.CacheControl = "no-store";
         }

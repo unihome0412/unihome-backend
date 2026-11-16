@@ -33,6 +33,22 @@ public sealed class DistributedRateLimiterTests
         }
     }
 
+    private sealed class AsyncMockHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
+
+        public AsyncMockHttpMessageHandler(
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
+        {
+            _handler = handler;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            _handler(request, cancellationToken);
+    }
+
     [Fact]
     public async Task InstanciaUnica_RegistraCorrectamenteLosLimites()
     {
@@ -629,7 +645,10 @@ public sealed class DistributedRateLimiterTests
             Enabled = true,
             RestUrl = "https://mock-upstash.io",
             RestToken = "mock-token",
-            FailureMode = RedisFailureMode.FailClosed
+            FailureMode = RedisFailureMode.FailClosed,
+            // Esta prueba simula dos solicitudes HTTP separadas; el reintento
+            // interno dentro de una misma solicitud se cubre en otra prueba.
+            MaxAttempts = 1
         });
 
         var attempt = 0;
@@ -878,5 +897,349 @@ public sealed class DistributedRateLimiterTests
 
         var next = await limiter.CheckAndIncrementAsync(key, 5, TimeSpan.FromSeconds(60));
         Assert.Equal(1, next.CurrentCount);
+    }
+
+    [Fact]
+    public void RedisOptions_TimeoutPorDefecto_EsAcotadoYMayorQueElTimeoutQueProdujo503()
+    {
+        var options = new RedisOptions();
+
+        Assert.Equal(2000, options.CommandTimeoutMs);
+        Assert.Equal(2, options.MaxAttempts);
+        Assert.Equal(100, options.RetryDelayMs);
+        Assert.Equal(800, options.ReadinessTimeoutMs);
+        Assert.True(options.CommandTimeoutMs > 250);
+        Assert.True(options.MaxAttempts <= RedisOptions.MaxAttemptsLimit);
+    }
+
+    [Fact]
+    public async Task UpstashClient_TimeoutRealPorIntento_AplicaFailClosedSinEsperarTimeoutGlobal()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = "https://mock-upstash.io",
+            RestToken = "mock-token",
+            CommandTimeoutMs = 250,
+            MaxAttempts = 1,
+            FailureMode = RedisFailureMode.FailClosed
+        });
+
+        var handler = new AsyncMockHttpMessageHandler(async (_, cancellationToken) =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
+        using var httpClient = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(30)
+        };
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            httpClient);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var result = await client.CheckAndIncrementAsync(
+            "rl:auth-login:timeout",
+            5,
+            TimeSpan.FromSeconds(60));
+        stopwatch.Stop();
+
+        Assert.False(result.IsAllowed);
+        Assert.True(result.IsServiceUnavailable);
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(4),
+            $"El timeout por intento no se aplicó; transcurrió {stopwatch.Elapsed}.");
+    }
+
+    [Fact]
+    public async Task UpstashClient_FalloTransitorioHttp_ReintentaYRecuperaEnLaMismaSolicitud()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = "https://mock-upstash.io",
+            RestToken = "mock-token",
+            MaxAttempts = 2,
+            RetryDelayMs = 0,
+            FailureMode = RedisFailureMode.FailClosed
+        });
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler(_ =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { result = new long[] { 1, 1, 60 } }))
+            };
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            httpClient);
+
+        var result = await client.CheckAndIncrementAsync(
+            "rl:auth-login:retry",
+            5,
+            TimeSpan.FromSeconds(60));
+
+        Assert.True(result.IsAllowed);
+        Assert.False(result.IsServiceUnavailable);
+        Assert.Equal(2, attempts);
+    }
+
+    [Fact]
+    public async Task UpstashClient_TimeoutTransitorio_ReintentaYRecuperaEnLaMismaSolicitud()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = "https://mock-upstash.io",
+            RestToken = "mock-token",
+            CommandTimeoutMs = 250,
+            MaxAttempts = 2,
+            RetryDelayMs = 0,
+            FailureMode = RedisFailureMode.FailClosed
+        });
+
+        var attempts = 0;
+        var handler = new AsyncMockHttpMessageHandler(async (_, cancellationToken) =>
+        {
+            attempts++;
+            if (attempts == 1)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { result = new long[] { 1, 1, 60 } }))
+            };
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            httpClient);
+
+        var result = await client.CheckAndIncrementAsync(
+            "rl:auth-login:timeout-recovery",
+            5,
+            TimeSpan.FromSeconds(60));
+
+        Assert.True(result.IsAllowed);
+        Assert.False(result.IsServiceUnavailable);
+        Assert.Equal(2, attempts);
+    }
+
+    [Fact]
+    public async Task UpstashClient_ErroresNoTransitorios_NoSeReintentan()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = "https://mock-upstash.io",
+            RestToken = "mock-token",
+            MaxAttempts = 3,
+            RetryDelayMs = 0,
+            FailureMode = RedisFailureMode.FailClosed
+        });
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler(_ =>
+        {
+            attempts++;
+            return new HttpResponseMessage(HttpStatusCode.Unauthorized);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            httpClient);
+
+        var result = await client.CheckAndIncrementAsync(
+            "rl:auth-login:auth-error",
+            5,
+            TimeSpan.FromSeconds(60));
+
+        Assert.False(result.IsAllowed);
+        Assert.True(result.IsServiceUnavailable);
+        Assert.Equal(1, attempts);
+    }
+
+    [Fact]
+    public async Task UpstashClient_ReintentosAcotados_NoSonIlimitados()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = "https://mock-upstash.io",
+            RestToken = "mock-token",
+            MaxAttempts = 3,
+            RetryDelayMs = 0,
+            FailureMode = RedisFailureMode.FailClosed
+        });
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler(_ =>
+        {
+            attempts++;
+            return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            httpClient);
+
+        var result = await client.CheckAndIncrementAsync(
+            "rl:auth-login:bounded-retries",
+            5,
+            TimeSpan.FromSeconds(60));
+
+        Assert.False(result.IsAllowed);
+        Assert.True(result.IsServiceUnavailable);
+        Assert.Equal(3, attempts);
+    }
+
+    [Fact]
+    public async Task UpstashReadiness_PingPong_RetornaListo()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = "https://mock-upstash.io",
+            RestToken = "mock-token"
+        });
+
+        var handler = new MockHttpMessageHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { result = "PONG" }))
+            });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            httpClient);
+
+        var readiness = await client.CheckReadinessAsync();
+
+        Assert.True(readiness.IsReady);
+        Assert.Null(readiness.Detail);
+    }
+
+    [Fact]
+    public async Task UpstashReadiness_IndisponibilidadYRecuperacion_ReflejaElEstadoReal()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = "https://mock-upstash.io",
+            RestToken = "mock-token"
+        });
+
+        var attempts = 0;
+        var handler = new MockHttpMessageHandler(_ =>
+        {
+            attempts++;
+            return attempts == 1
+                ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { result = "PONG" }))
+                };
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            httpClient);
+
+        var unavailable = await client.CheckReadinessAsync();
+        var recovered = await client.CheckReadinessAsync();
+
+        Assert.False(unavailable.IsReady);
+        Assert.False(string.IsNullOrWhiteSpace(unavailable.Detail));
+        Assert.True(recovered.IsReady);
+        Assert.Equal(2, attempts);
+    }
+
+    [Fact]
+    public async Task UpstashReadiness_Timeout_RetornaNoListoConMensajeGenerico()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = "https://mock-upstash.io",
+            RestToken = "super-secret-token-12345",
+            ReadinessTimeoutMs = 250
+        });
+
+        var handler = new AsyncMockHttpMessageHandler(async (_, cancellationToken) =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
+        using var httpClient = new HttpClient(handler);
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            httpClient);
+
+        var readiness = await client.CheckReadinessAsync();
+
+        Assert.False(readiness.IsReady);
+        Assert.DoesNotContain("super-secret-token-12345", readiness.Detail ?? string.Empty);
+        Assert.DoesNotContain("mock-upstash", readiness.Detail ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UpstashReadiness_SinCredenciales_RetornaNoListo()
+    {
+        var options = Options.Create(new RedisOptions
+        {
+            Enabled = true,
+            RestUrl = string.Empty,
+            RestToken = string.Empty
+        });
+
+        using var client = new UpstashRedisDistributedRateLimiter(
+            options,
+            NullLogger<UpstashRedisDistributedRateLimiter>.Instance,
+            new HttpClient());
+
+        var readiness = await client.CheckReadinessAsync();
+
+        Assert.False(readiness.IsReady);
+        Assert.Contains("no está configurado", readiness.Detail);
+    }
+
+    [Fact]
+    public async Task InMemoryDistributedRateLimiter_Readiness_EsListo()
+    {
+        var limiter = new InMemoryDistributedRateLimiter();
+
+        var readiness = await limiter.CheckReadinessAsync();
+
+        Assert.True(readiness.IsReady);
     }
 }

@@ -61,7 +61,26 @@ public static class DependencyInjection
 
         services
             .AddOptions<RedisOptions>()
-            .Bind(configuration.GetSection(RedisOptions.SectionName));
+            .Bind(configuration.GetSection(RedisOptions.SectionName))
+            .Validate(
+                options => options.CommandTimeoutMs is >= RedisOptions.MinCommandTimeoutMs
+                    and <= RedisOptions.MaxCommandTimeoutMs,
+                $"{RedisOptions.SectionName}:CommandTimeoutMs debe estar entre " +
+                $"{RedisOptions.MinCommandTimeoutMs} y {RedisOptions.MaxCommandTimeoutMs}.")
+            .Validate(
+                options => options.MaxAttempts is >= 1 and <= RedisOptions.MaxAttemptsLimit,
+                $"{RedisOptions.SectionName}:MaxAttempts debe estar entre 1 y " +
+                $"{RedisOptions.MaxAttemptsLimit}.")
+            .Validate(
+                options => options.RetryDelayMs is >= 0 and <= RedisOptions.MaxRetryDelayMs,
+                $"{RedisOptions.SectionName}:RetryDelayMs debe estar entre 0 y " +
+                $"{RedisOptions.MaxRetryDelayMs}.")
+            .Validate(
+                options => options.ReadinessTimeoutMs is >= RedisOptions.MinReadinessTimeoutMs
+                    and <= RedisOptions.MaxReadinessTimeoutMs,
+                $"{RedisOptions.SectionName}:ReadinessTimeoutMs debe estar entre " +
+                $"{RedisOptions.MinReadinessTimeoutMs} y {RedisOptions.MaxReadinessTimeoutMs}.")
+            .ValidateOnStart();
 
         var redisSection = configuration.GetSection(RedisOptions.SectionName);
         var redisOptions = redisSection.Get<RedisOptions>() ?? new RedisOptions();
@@ -99,6 +118,11 @@ public static class DependencyInjection
         {
             services.AddSingleton<IDistributedRateLimiter, InMemoryDistributedRateLimiter>();
         }
+
+        // readiness consulta el mismo almacén que usa el rate limiting. En
+        // Development usa el adaptador en memoria; en Production, Upstash real.
+        services.AddSingleton<IRateLimiterReadinessProbe>(serviceProvider =>
+            serviceProvider.GetRequiredService<IDistributedRateLimiter>());
 
         // La sección Smtp es opcional para desarrollo y pruebas. Si existe
         // cualquier clave, se valida completa al arrancar y no se permite usar
