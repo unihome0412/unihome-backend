@@ -300,6 +300,11 @@ def build_engine_settings(
         "garbage_collector_cleanup_time": 30,
         "dyn_objects_cache_size": 5,
         "request_throttle_ms": 50,
+        # GET /api/v1/fotos/{photoRef} devuelve image/png. RESTler 9.3.1
+        # decodifica todo el socket como UTF-8 y aborta con UnicodeDecodeError.
+        # La opción oficial conserva status/headers y solo omite bytes no UTF-8;
+        # no desactiva checkers ni cambia la cobertura.
+        "ignore_decoding_failures": True,
         "time_budget": time_budget,
         "save_results_in_fixed_dirname": True,
         "custom_retry_settings": {

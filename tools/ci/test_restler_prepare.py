@@ -130,6 +130,7 @@ class RestlerPrepareTests(unittest.TestCase):
         self.assertEqual(3, settings["max_combinations"])
         self.assertEqual(5, settings["max_sequence_length"])
         self.assertEqual(20, settings["max_request_execution_time"])
+        self.assertTrue(settings["ignore_decoding_failures"])
         self.assertTrue(settings["save_results_in_fixed_dirname"])
         self.assertEqual(
             "acquire_token",
@@ -182,6 +183,10 @@ class RestlerPrepareTests(unittest.TestCase):
                 delete_settings["authentication"]["token"]["module"]["data"]["mode"])
             self.assertEqual(0.08, json.loads(
                 (state / "fuzz-settings.json").read_text(encoding="utf-8"))["time_budget"])
+            for name in ("test", "fuzz", "logout", "delete"):
+                settings = json.loads(
+                    (state / f"{name}-settings.json").read_text(encoding="utf-8"))
+                self.assertTrue(settings["ignore_decoding_failures"], name)
             for endpoint in (
                 "/api/v1/propiedades",
                 "/api/v1/propiedades/{propertyId}/unidades",

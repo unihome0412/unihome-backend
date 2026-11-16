@@ -306,6 +306,8 @@ def render_markdown(
         "(evita el bug de schedule de RESTler en smoke test), "
         "`max_request_execution_time=20s`, presupuesto de shell acotado.",
         "- **Checkers:** conjunto pasivo por defecto de RESTler; no se desactivan.",
+        "- **Respuestas binarias:** `ignore_decoding_failures=true` permite registrar "
+        "el status real de `GET /api/v1/fotos/{photoRef}`; no altera checkers ni cobertura.",
         "- **Aislamiento destructivo:** `logout` y `DELETE /cuentas/mi-cuenta` "
         "se ejecutan en pasadas Test separadas para no invalidar el token compartido.",
         f"- **Compile:** {'success' if compile_exit == 0 else 'ERROR'} "
@@ -356,6 +358,14 @@ def render_markdown(
             lines.append(f"- `{bug['name']}`: {bug['count']} ocurrencia(s).")
     else:
         lines.append("No se detectaron bug buckets ni violaciones de checkers.")
+    invalid = [row for row in rows if row["attempted"] and not row["valid"]]
+    if invalid:
+        lines += ["", "## Operaciones sin 2xx", ""]
+        for row in invalid:
+            codes = ", ".join(str(code) for code in row["status_codes"]) or "sin código"
+            lines.append(
+                f"- `{row['method']} {row['path']}`: intentada, códigos {codes}; "
+                "se conserva como WARN, sin ocultarla ni marcarla como 2xx.")
     lines += [
         "",
         "## Compatibilidad OpenAPI",
