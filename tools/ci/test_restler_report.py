@@ -23,37 +23,55 @@ def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+def write_task(root: Path, task: str, operations, *, name: str = "speccov.json") -> None:
+    entries = {}
+    for index, (method, endpoint) in enumerate(operations):
+        entries[f"{task}-{index}"] = {
+            "verb": method,
+            "endpoint": endpoint,
+            "valid": 1,
+            "status_code": "204" if method == "DELETE" else "200",
+            "invalid_due_to_500": 0,
+            "sample_request": {"request_headers": ["Authorization: Bearer abc.def.ghi"]},
+        }
+    write_json(
+        root / task / "RestlerResults" / "exp" / "logs" / name,
+        entries)
+    write_json(
+        root / task / "ResponseBuckets" / "runSummary.json",
+        {"codeCounts": {"200": 1}, "bugCount": 0})
+    write_json(
+        root / task / "RestlerResults" / "exp" / "logs" / "testing_summary.json",
+        {"bug_buckets": {}})
+    (root / task / "RestlerResults" / "exp" / "logs" / "main.txt").write_text(
+        "Sending: GET /x\nReceived: 200\n", encoding="utf-8")
+
+
 def build_work(root: Path, *, omit: tuple[str, str] | None = None) -> None:
     compile_dir = root / "Compile"
     compile_dir.mkdir(parents=True)
     (compile_dir / "grammar.py").write_text("# grammar\n", encoding="utf-8")
     (compile_dir / "config.json").write_text("{}\n", encoding="utf-8")
-    for task in ("Test", "FuzzLean"):
-        entries = {}
-        for index, (method, endpoint) in enumerate(OPERATIONS):
-            if (method, endpoint) == omit:
-                continue
-            entries[f"{task}-{index}"] = {
-                "verb": method,
-                "endpoint": endpoint,
-                "valid": 1,
-                "status_code": "204" if method == "DELETE" else "200",
-                "invalid_due_to_500": 0,
-                "sample_request": {"request_headers": ["Authorization: Bearer abc.def.ghi"]},
-            }
-        write_json(
-            root / task / "RestlerResults" / "exp" / "logs" / "speccov.json",
-            entries)
-        write_json(
-            root / task / "ResponseBuckets" / "runSummary.json",
-            {"codeCounts": {"200": 1}, "bugCount": 0})
-        write_json(
-            root / task / "RestlerResults" / "exp" / "logs" / "testing_summary.json",
-            {"bug_buckets": {}})
-        (root / task / "RestlerResults" / "exp" / "logs" / "main.txt").write_text(
-            "Sending: GET /x\nReceived: 200\n", encoding="utf-8")
-    (root / "Compile" / "StdOut.txt").write_text("compiled\n", encoding="utf-8")
-    for name in ("compile", "test", "fuzz-lean"):
+    (compile_dir / "StdOut.txt").write_text("compiled\n", encoding="utf-8")
+
+    main_operations = [
+        op for op in OPERATIONS
+        if op not in {("POST", "/api/v1/auth/logout"),
+                      ("DELETE", "/api/v1/cuentas/mi-cuenta")}
+        and op != omit
+    ]
+    fuzz_operations = [
+        op for op in main_operations
+        if op != omit
+    ]
+    write_task(root, "TestMain", main_operations)
+    write_task(root, "FuzzLean", fuzz_operations, name="speccov-min.json")
+    if omit != ("POST", "/api/v1/auth/logout"):
+        write_task(root, "TestLogout", [("POST", "/api/v1/auth/logout")])
+    if omit != ("DELETE", "/api/v1/cuentas/mi-cuenta"):
+        write_task(root, "TestDelete", [("DELETE", "/api/v1/cuentas/mi-cuenta")])
+
+    for name in ("compile", "test-main", "test-logout", "test-delete", "fuzz-lean"):
         (root / f"{name}-exit-code.txt").write_text("0\n", encoding="utf-8")
 
 
@@ -62,7 +80,7 @@ class RestlerReportTests(unittest.TestCase):
         text = (
             'Authorization: Bearer abc.def.ghi\n'
             '{"accessToken":"uno","refreshToken":"dos","contrasena":"tres"}\n'
-            r'{\"contraseña\":\"no\",\"codigo\":\"123456\"}'
+            r'{\"contraseña\":\"no\",\"codigo\":\"123456\",\"token\":\"reset-secret\"}'
         )
         sanitized = report.sanitize_text(text, {"synthetic-secret"})
         self.assertNotIn("abc.def.ghi", sanitized)
@@ -70,6 +88,7 @@ class RestlerReportTests(unittest.TestCase):
         self.assertNotIn('"dos"', sanitized)
         self.assertNotIn('"tres"', sanitized)
         self.assertNotIn("123456", sanitized)
+        self.assertNotIn("reset-secret", sanitized)
 
     def test_coverage_y_gate_pass(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -80,6 +99,7 @@ class RestlerReportTests(unittest.TestCase):
             with (
                 patch.object(report, "WORK_DIR", root),
                 patch.object(report, "STATE_DIR", root / "state"),
+                patch.object(report, "CI_STATE_DIR", root / "ci-state"),
                 patch.object(report, "ARTIFACTS_DIR", root / "artifacts"),
             ):
                 result = report.main()
@@ -89,6 +109,27 @@ class RestlerReportTests(unittest.TestCase):
             self.assertEqual("PASS", summary["status"])
             self.assertEqual(7, len(summary["routes"]))
             self.assertTrue(all(row["valid"] for row in summary["routes"]))
+            self.assertEqual([], summary["missing_operations"])
+
+    def test_speccov_min_es_evidencia_valida_para_fuzz_lean(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_work(root)
+            spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
+            write_json(root / "artifacts" / "openapi-original.json", spec)
+            with (
+                patch.object(report, "WORK_DIR", root),
+                patch.object(report, "STATE_DIR", root / "state"),
+                patch.object(report, "CI_STATE_DIR", root / "ci-state"),
+                patch.object(report, "ARTIFACTS_DIR", root / "artifacts"),
+            ):
+                result = report.main()
+            self.assertEqual(0, result)
+            summary = json.loads(
+                (root / "artifacts" / "restler-results.json").read_text(encoding="utf-8"))
+            self.assertTrue(any(
+                row["path"] == "/api/v1/auth/login" and row["attempted_fuzz_lean"]
+                for row in summary["routes"]))
 
     def test_gate_falla_por_500(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -97,11 +138,12 @@ class RestlerReportTests(unittest.TestCase):
             spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
             write_json(root / "artifacts" / "openapi-original.json", spec)
             write_json(
-                root / "Test" / "ResponseBuckets" / "runSummary.json",
+                root / "TestMain" / "ResponseBuckets" / "runSummary.json",
                 {"codeCounts": {"500": 1}, "bugCount": 1})
             with (
                 patch.object(report, "WORK_DIR", root),
                 patch.object(report, "STATE_DIR", root / "state"),
+                patch.object(report, "CI_STATE_DIR", root / "ci-state"),
                 patch.object(report, "ARTIFACTS_DIR", root / "artifacts"),
             ):
                 result = report.main()
@@ -120,6 +162,7 @@ class RestlerReportTests(unittest.TestCase):
             with (
                 patch.object(report, "WORK_DIR", root),
                 patch.object(report, "STATE_DIR", root / "state"),
+                patch.object(report, "CI_STATE_DIR", root / "ci-state"),
                 patch.object(report, "ARTIFACTS_DIR", root / "artifacts"),
             ):
                 result = report.main()
@@ -129,14 +172,34 @@ class RestlerReportTests(unittest.TestCase):
             self.assertEqual("ERROR", summary["status"])
             self.assertIn("POST /api/v1/auth/logout", summary["missing_operations"])
 
+    def test_gate_error_si_falta_pasada_destructiva(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_work(root, omit=("DELETE", "/api/v1/cuentas/mi-cuenta"))
+            spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
+            write_json(root / "artifacts" / "openapi-original.json", spec)
+            with (
+                patch.object(report, "WORK_DIR", root),
+                patch.object(report, "STATE_DIR", root / "state"),
+                patch.object(report, "CI_STATE_DIR", root / "ci-state"),
+                patch.object(report, "ARTIFACTS_DIR", root / "artifacts"),
+            ):
+                result = report.main()
+            self.assertEqual(1, result)
+            summary = json.loads(
+                (root / "artifacts" / "restler-results.json").read_text(encoding="utf-8"))
+            self.assertEqual("ERROR", summary["status"])
+            self.assertIn("DELETE /api/v1/cuentas/mi-cuenta", summary["missing_operations"])
+
     def test_gate_warn_si_hay_operacion_sin_2xx(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_work(root)
             spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
             write_json(root / "artifacts" / "openapi-original.json", spec)
-            for task in ("Test", "FuzzLean"):
-                speccov = root / task / "RestlerResults" / "exp" / "logs" / "speccov.json"
+            for task, name in (("TestMain", "speccov.json"),
+                               ("FuzzLean", "speccov-min.json")):
+                speccov = (root / task / "RestlerResults" / "exp" / "logs" / name)
                 data = json.loads(speccov.read_text(encoding="utf-8"))
                 first = next(iter(data.values()))
                 first["valid"] = 0
@@ -144,6 +207,7 @@ class RestlerReportTests(unittest.TestCase):
             with (
                 patch.object(report, "WORK_DIR", root),
                 patch.object(report, "STATE_DIR", root / "state"),
+                patch.object(report, "CI_STATE_DIR", root / "ci-state"),
                 patch.object(report, "ARTIFACTS_DIR", root / "artifacts"),
             ):
                 result = report.main()

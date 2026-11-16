@@ -16,4 +16,5 @@ __pycache__/
 .restler-state/
 .restler-work/
 .dast-mail/
+.ci-state/
 artifacts/

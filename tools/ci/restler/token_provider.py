@@ -1,11 +1,20 @@
 """Token provider de RESTler para la API efímera de UniHome.
 
-Cada refresco crea una cuenta sintética nueva, la confirma con el código
-capturado por el SMTP local y hace login mediante los endpoints reales. No se
-escriben tokens ni contraseñas en logs ni artefactos.
+Modos admitidos:
+
+- ``admin``: inicia sesión con la cuenta administradora sintética provisionada
+  por ``provision_admin.py``. Es el modo de las ejecuciones principales Test y
+  Fuzz-lean, porque los endpoints ``/admin/*`` exigen ese privilegio.
+- ``disposable``: crea una cuenta sintética nueva, la confirma con el código
+  capturado por el SMTP local y hace login. Se usa en la ejecución aislada de
+  ``DELETE /api/v1/cuentas/mi-cuenta`` para que el borrado no invalide el token
+  de las demás operaciones.
+
+No se escriben tokens ni contraseñas en logs ni artefactos.
 """
 from __future__ import annotations
 
+import json
 import sys
 import uuid
 from pathlib import Path
@@ -35,10 +44,64 @@ def format_token(access_token: str) -> str:
     )
 
 
-def acquire_token(data: dict[str, Any], log: Callable[[str], None]) -> str:
+def _state_from_data(data: dict[str, Any]) -> Path:
+    configured = str(data.get("state_file") or "").strip()
+    return Path(configured) if configured else ROOT_DIR / ".ci-state/admin.json"
+
+
+def _read_state(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            "No se encontró el estado de la cuenta administradora sintética."
+        ) from error
+    if not isinstance(value, dict):
+        raise RuntimeError("El estado del administrador no es un objeto JSON.")
+    return value
+
+
+def _login(
+    http: HttpClient,
+    email: str,
+    password: str,
+    log: Callable[[str], None],
+) -> str:
+    _, payload, _ = http.request(
+        "POST", "/api/v1/auth/login",
+        body={"correo": email, "contrasena": password},
+        expected={200}, note="token login")
+    tokens = _json_body(payload)
+    access_token = str(tokens.get("accessToken") or "")
+    if not access_token:
+        raise RuntimeError("El login del token provider no devolvió accessToken.")
+    return access_token
+
+
+def _acquire_admin_token(
+    data: dict[str, Any],
+    log: Callable[[str], None],
+) -> str:
+    state = _read_state(_state_from_data(data))
+    email = str(state.get("email") or "")
+    password = str(state.get("password") or "")
+    if not email or not password:
+        raise RuntimeError(
+            "El estado del administrador no contiene email y contraseña.")
+    http = HttpClient(TARGET, None)
+    access_token = _login(http, email, password, log)
+    log("Token RESTler renovado con la cuenta administradora sintética.")
+    return format_token(access_token)
+
+
+def _acquire_disposable_token(
+    data: dict[str, Any],
+    log: Callable[[str], None],
+) -> str:
     password = str(data.get("password") or "")
     if not password:
-        raise RuntimeError("El token provider no recibió la contraseña sintética.")
+        raise RuntimeError(
+            "El token provider no recibió la contraseña sintética desechable.")
 
     http = HttpClient(TARGET, None)
     email = f"restler.token.{uuid.uuid4().hex}@uni.edu"
@@ -56,11 +119,15 @@ def acquire_token(data: dict[str, Any], log: Callable[[str], None]) -> str:
         body={"correo": email, "codigo": code},
         expected={200}, note="token confirmación")
 
-    _, login_payload, _ = http.request(
-        "POST", "/api/v1/auth/login",
-        body={"correo": email, "contrasena": password},
-        expected={200}, note="token login")
-    tokens = _json_body(login_payload)
-    access_token = str(tokens.get("accessToken") or "")
-    log("Token RESTler renovado mediante registro, confirmación y login reales.")
+    access_token = _login(http, email, password, log)
+    log("Token RESTler desechable renovado mediante registro, confirmación y login.")
     return format_token(access_token)
+
+
+def acquire_token(data: dict[str, Any], log: Callable[[str], None]) -> str:
+    mode = str(data.get("mode") or "disposable")
+    if mode == "admin":
+        return _acquire_admin_token(data, log)
+    if mode == "disposable":
+        return _acquire_disposable_token(data, log)
+    raise RuntimeError(f"Modo de token provider no soportado: {mode!r}")

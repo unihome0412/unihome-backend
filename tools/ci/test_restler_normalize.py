@@ -30,9 +30,81 @@ class NormalizeOpenApiTests(unittest.TestCase):
         self.assertEqual(operation_keys(source), operation_keys(converted))
         self.assertEqual("string", converted["components"]["schemas"]["Request"]["properties"]["nombre"]["type"])
         self.assertTrue(converted["components"]["schemas"]["Request"]["properties"]["nombre"]["nullable"])
-        self.assertIn("oneOf", converted["components"]["schemas"]["Request"]["properties"]["estado"])
+        estado = converted["components"]["schemas"]["Request"]["properties"]["estado"]
+        self.assertEqual("integer", estado["type"])
+        self.assertTrue(estado["nullable"])
         self.assertEqual(2, len(changes))
         self.assertTrue(report(source, converted, changes)["operations_preserved"])
+
+    def test_corrige_enums_string_y_oneof_nullable(self):
+        source = {
+            "openapi": "3.1.1",
+            "paths": {"/x": {"post": {}}},
+            "components": {"schemas": {
+                "UnitType": {"type": "integer"},
+                "Request": {
+                    "type": "object",
+                    "properties": {
+                        "tipoUnidad": {
+                            "oneOf": [
+                                {"type": "null"},
+                                {"$ref": "#/components/schemas/UnitType"},
+                            ]
+                        },
+                        "latitud": {
+                            "type": ["null", "number", "string"],
+                            "format": "double",
+                        },
+                    },
+                },
+            }},
+        }
+
+        converted, changes = convert(source)
+
+        self.assertEqual(
+            "string",
+            converted["components"]["schemas"]["UnitType"]["type"])
+        self.assertIn(
+            "Habitacion",
+            converted["components"]["schemas"]["UnitType"]["enum"])
+        tipo = converted["components"]["schemas"]["Request"]["properties"]["tipoUnidad"]
+        self.assertEqual("string", tipo["type"])
+        self.assertIn("Estudio", tipo["enum"])
+        self.assertTrue(tipo["nullable"])
+        latitud = converted["components"]["schemas"]["Request"]["properties"]["latitud"]
+        self.assertEqual("number", latitud["type"])
+        self.assertTrue(latitud["nullable"])
+        self.assertTrue(any(
+            item.get("before_one_of") and item.get("after_type") == "string"
+            for item in changes))
+
+    def test_relaja_uuid_de_entrada_para_ids_sinteticos(self):
+        source = {
+            "openapi": "3.1.1",
+            "paths": {"/x/{id}": {
+                "put": {"parameters": [{
+                    "name": "id",
+                    "in": "path",
+                    "schema": {"type": "string", "format": "uuid"},
+                }]},
+            }},
+            "components": {"schemas": {"CrearPropiedadRequest": {
+                "type": "object",
+                "properties": {
+                    "universidadId": {"type": "string", "format": "uuid"},
+                },
+            }}},
+        }
+
+        converted, changes = convert(source)
+
+        parameter = converted["paths"]["/x/{id}"]["put"]["parameters"][0]
+        self.assertNotIn("format", parameter["schema"])
+        university = converted["components"]["schemas"][
+            "CrearPropiedadRequest"]["properties"]["universidadId"]
+        self.assertNotIn("format", university)
+        self.assertTrue(any(item.get("before_format") == "uuid" for item in changes))
 
     def test_no_modifica_el_documento_original(self):
         source = {
