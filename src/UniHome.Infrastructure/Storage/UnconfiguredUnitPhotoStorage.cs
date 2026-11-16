@@ -4,8 +4,8 @@ using UniHome.Application.Units.Abstractions;
 namespace UniHome.Infrastructure.Storage;
 
 /// <summary>
-/// Implementación fail-closed mientras DEC-04 no autorice un proveedor de blobs.
-/// No simula almacenamiento ni escribe archivos en el repositorio o MongoDB.
+/// Implementación fail-closed cuando Cloudinary no está configurado. No simula
+/// almacenamiento ni escribe archivos en el repositorio o MongoDB.
 /// </summary>
 internal sealed class UnconfiguredUnitPhotoStorage : IUnitPhotoStorage
 {
@@ -19,6 +19,11 @@ internal sealed class UnconfiguredUnitPhotoStorage : IUnitPhotoStorage
         string storageKey,
         CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
+
+    public Task<UnitPhotoContent?> ReadAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default) =>
+        throw new StorageUnavailableException();
 
     public string GetReadUrl(string storageKey) =>
         throw new StorageUnavailableException();

@@ -136,6 +136,11 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             "/api/v1/publicaciones/primera/terminos",
             out var terms));
         Assert.True(terms.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/fotos/{photoRef}",
+            out var photo));
+        Assert.True(photo.TryGetProperty("get", out _));
     }
 
     [Fact]
@@ -183,6 +188,72 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
 
         Assert.True(paths.TryGetProperty("/api/v1/exploracion/mapa", out var publicMap));
         Assert.False(publicMap.GetProperty("get").TryGetProperty("security", out _));
+    }
+
+    [Fact]
+    public async Task OpenApi_Exploracion_DebeDeclararContratoCamelCaseYEnumsString()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        var paths = root.GetProperty("paths");
+        var parameters = paths.GetProperty("/api/v1/exploracion/lista")
+            .GetProperty("get")
+            .GetProperty("parameters")
+            .EnumerateArray()
+            .ToDictionary(
+                parameter => parameter.GetProperty("name").GetString()!,
+                parameter => parameter,
+                StringComparer.Ordinal);
+
+        Assert.Equal(7, parameters.Count);
+        foreach (var expected in new[]
+                 {
+                     "universidadId", "distanciaMaxKm", "precioMaxMxn", "soloIndividual",
+                     "paraQuien", "page", "pageSize"
+                 })
+        {
+            Assert.True(parameters.ContainsKey(expected), expected);
+        }
+        Assert.True(parameters["universidadId"].GetProperty("required").GetBoolean());
+        Assert.Equal(
+            "#/components/schemas/ForWhom",
+            parameters["paraQuien"].GetProperty("schema").GetProperty("$ref").GetString());
+        Assert.Equal(
+            1,
+            parameters["page"].GetProperty("schema").GetProperty("minimum").GetInt32());
+        Assert.Equal(
+            100,
+            parameters["pageSize"].GetProperty("schema").GetProperty("maximum").GetInt32());
+
+        var schemas = root.GetProperty("components").GetProperty("schemas");
+        foreach (var enumName in new[]
+                 {
+                     "UnitType", "ForWhom", "Occupancy", "BathroomType", "FurnitureType",
+                     "PropertyType"
+                 })
+        {
+            var schema = schemas.GetProperty(enumName);
+            Assert.Equal("string", schema.GetProperty("type").GetString());
+            Assert.NotEmpty(schema.GetProperty("enum").EnumerateArray());
+        }
+
+        var card = schemas.GetProperty("UnidadTarjetaResponse").GetProperty("properties");
+        Assert.Equal(
+            "#/components/schemas/UnitType",
+            card.GetProperty("tipoUnidad").GetProperty("$ref").GetString());
+        Assert.Equal(
+            "#/components/schemas/ForWhom",
+            card.GetProperty("paraQuien").GetProperty("$ref").GetString());
+
+        var detail = schemas.GetProperty("UnidadFichaResponse").GetProperty("properties");
+        Assert.True(detail.TryGetProperty("tipoPropiedad", out _));
+        Assert.True(detail.TryGetProperty("serviciosIncluidos", out _));
+        Assert.True(detail.TryGetProperty("serviciosAparte", out _));
+        Assert.True(detail.TryGetProperty("galeriaFotos", out _));
     }
 
     [Fact]

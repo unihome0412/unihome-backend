@@ -31,6 +31,14 @@
         "resolved": "2.7.0",
         "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
+      "CloudinaryDotNet": {
+        "type": "Transitive",
+        "resolved": "1.29.3",
+        "contentHash": "C9UpTh7YoOrfeUXcdjnsEloTaWKTNeDgvMpWoGAOTkC6HOxPIbcQAiSGhoqPPT8scAKAFjrPzf89nyZkGvtoCg==",
+        "dependencies": {
+          "Newtonsoft.Json": "13.0.3"
+        }
+      },
       "DnsClient": {
         "type": "Transitive",
         "resolved": "1.6.1",
@@ -127,6 +135,11 @@
           "ZstdSharp.Port": "0.7.3"
         }
       },
+      "Newtonsoft.Json": {
+        "type": "Transitive",
+        "resolved": "13.0.3",
+        "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
+      },
       "SharpCompress": {
         "type": "Transitive",
         "resolved": "0.48.1",
@@ -168,6 +181,7 @@
       "unihome.infrastructure": {
         "type": "Project",
         "dependencies": {
+          "CloudinaryDotNet": "[1.29.3, )",
           "MailKit": "[4.18.2, )",
           "Microsoft.IdentityModel.JsonWebTokens": "[8.19.2, )",
           "MongoDB.Driver": "[3.13.0, )",

@@ -1,4 +1,5 @@
 using UniHome.Application.Common;
+using UniHome.Application.Exploration;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Identity.Abstractions;
@@ -29,7 +30,11 @@ public sealed class AddFavoriteService
     {
         var unit = await _units.FindByIdAsync(unitId, cancellationToken).ConfigureAwait(false);
 
-        if (unit is null)
+        // No se permite crear favoritos sobre unidades que el usuario no puede
+        // ver. El propietario sí puede guardar las suyas en Borrador/Revisión.
+        // Si una unidad visible deja de serlo después, el favorito se conserva.
+        if (unit is null ||
+            (!ExplorationProjection.IsPublic(unit) && unit.OwnerAccountId != accountId))
         {
             return OperationResult<Guid>.NotFound();
         }

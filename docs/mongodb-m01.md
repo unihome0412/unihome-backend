@@ -84,14 +84,13 @@ TTL es limpieza eventual, no autorización.
 | `createdAt` | date | — |
 | `failedAttempts` | int | — |
 
-Esta colección pertenece al modelo externo preexistente y **no es creada ni
-modificada por `M01-001`**. El código comprueba los tres índices en modo lectura
-antes de operar; si falta la colección o un índice, responde almacenamiento no
-disponible. El token en claro nunca se guarda: el repositorio persiste únicamente
-SHA-256 y consume el documento con una actualización condicionada por hash,
-vigencia y límite de intentos. La colección debe existir antes de habilitar HU-006
-en un entorno; no se añadió una migración nueva para no alterar el esquema externo
-sin autorización.
+M01-001 no crea `restablecimientos_contrasena`; la migraci?n versionada
+`M01-002` la materializa con sus tres ?ndices y el validador `strict/error`
+(`consumedAt` date/null). El c?digo sigue comprobando los ?ndices en modo lectura
+antes de operar; si falta la colecci?n o un ?ndice, responde almacenamiento no
+disponible. El token en claro nunca se guarda: se persiste ?nicamente SHA-256 y
+se consume con una actualizaci?n condicionada por hash, vigencia y l?mite de
+intentos.
 
 ## Inventario Atlas observado
 

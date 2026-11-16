@@ -41,6 +41,17 @@ public sealed class InMemoryUnitRepository : IUnitRepository
         }
     }
 
+    public Task<Unit?> FindByPhotoStorageKeyAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_units.Values.SingleOrDefault(unit =>
+                unit.Photos.Any(photo => photo.StorageKey == storageKey)));
+        }
+    }
+
     public Task<IReadOnlyList<Unit>> FindByIdsAsync(
         IReadOnlyCollection<Guid> ids,
         CancellationToken cancellationToken = default)

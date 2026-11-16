@@ -16,12 +16,14 @@ efímeros; el código de confirmación se obtiene de un SMTP de captura local.
 from __future__ import annotations
 
 import argparse
+import base64
 import email
 import json
 import os
 import re
 import secrets
 import string
+import subprocess
 import sys
 import time
 import urllib.error
@@ -35,6 +37,12 @@ from pathlib import Path
 from typing import Any
 
 PRIVACY_VERSION = "2026-01"
+TERMS_VERSION = "2026-01"
+ADMIN_STATE_FILE = Path(".ci-state/admin.json")
+DAST_PHOTO_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFElEQVR42mP4z8DAAMb"
+    "//0MZUA4Aep8J9x7TI9wAAAAASUVORK5CYII="
+)
 EXPECTED_ZAP_VERSION = "2.17.0"
 ZAP_IMAGE_REF = (
     "ghcr.io/zaproxy/zaproxy:2.17.0@sha256:"
@@ -160,11 +168,90 @@ class HttpClient:
 
         self.records.append(ResponseRecord(
             method=method,
-            path=path,
+            path=urllib.parse.urlsplit(path).path,
             status=status,
             headers=response_headers,
             auth=auth,
             openapi=openapi,
+            note=note,
+        ))
+
+        if expected is not None and status not in expected:
+            preview = payload[:240].decode("utf-8", errors="replace")
+            raise DastError(
+                f"{method} {path}: se esperaba {sorted(expected)} y se recibió "
+                f"{status}. Cuerpo: {preview!r}")
+
+        return status, payload, response_headers
+
+    def request_multipart(
+        self,
+        method: str,
+        path: str,
+        *,
+        files: list[tuple[str, str, str, bytes]],
+        fields: dict[str, str] | None = None,
+        token: str | None = None,
+        expected: set[int] | None = None,
+        note: str = "",
+    ) -> tuple[int, bytes, dict[str, str]]:
+        """Envía multipart/form-data real, necesario para la carga de fotos."""
+        boundary = f"----UniHomeDast{uuid.uuid4().hex}"
+        chunks: list[bytes] = []
+
+        for name, value in (fields or {}).items():
+            chunks.extend([
+                f"--{boundary}\r\n".encode("ascii"),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(
+                    "ascii"),
+                value.encode("utf-8"),
+                b"\r\n",
+            ])
+
+        for field_name, filename, content_type, content in files:
+            chunks.extend([
+                f"--{boundary}\r\n".encode("ascii"),
+                (
+                    f'Content-Disposition: form-data; name="{field_name}"; '
+                    f'filename="{filename}"\r\n'
+                ).encode("ascii"),
+                f"Content-Type: {content_type}\r\n\r\n".encode("ascii"),
+                content,
+                b"\r\n",
+            ])
+
+        chunks.append(f"--{boundary}--\r\n".encode("ascii"))
+        data = b"".join(chunks)
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "UniHome-DAST/1.0",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        request = urllib.request.Request(
+            self.target + path, data=data, headers=headers, method=method)
+        try:
+            with self._opener.open(request, timeout=30) as response:
+                status = response.status
+                payload = response.read()
+                response_headers = _header_dict(response.headers)
+        except urllib.error.HTTPError as error:
+            status = error.code
+            payload = error.read()
+            response_headers = _header_dict(error.headers)
+        except Exception as error:  # pragma: no cover - se valida en Actions
+            raise DastError(
+                f"No se pudo ejecutar {method} {path}: {error}") from error
+
+        self.records.append(ResponseRecord(
+            method=method,
+            path=urllib.parse.urlsplit(path).path,
+            status=status,
+            headers=response_headers,
+            auth=bool(token),
+            openapi=True,
             note=note,
         ))
 
@@ -317,11 +404,40 @@ def parse_openapi_operations(spec: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(operations, key=lambda value: (value["path"], value["method"]))
 
 
+def _path_matches(template: str, actual: str) -> bool:
+    """Compara una ruta OpenAPI con placeholders contra la ruta real enviada."""
+    template_parts = template.strip("/").split("/")
+    actual_parts = actual.strip("/").split("/")
+    if len(template_parts) != len(actual_parts):
+        return False
+
+    for expected, observed in zip(template_parts, actual_parts):
+        if expected.startswith("{") and expected.endswith("}"):
+            if not observed:
+                return False
+            continue
+        if expected != observed:
+            return False
+    return True
+
+
+def resolve_operation_path(
+    method: str,
+    actual_path: str,
+    operations: list[dict[str, Any]],
+) -> str | None:
+    for operation in operations:
+        if operation["method"] != method:
+            continue
+        if _path_matches(operation["path"], actual_path):
+            return str(operation["path"])
+    return None
+
+
 def build_coverage(
     operations: list[dict[str, Any]],
     records: list[ResponseRecord],
 ) -> dict[str, Any]:
-    operation_keys = {(item["method"], item["path"]) for item in operations}
     routes: list[dict[str, Any]] = []
     missing: list[str] = []
 
@@ -329,7 +445,8 @@ def build_coverage(
         key = (operation["method"], operation["path"])
         matches = [
             record for record in records
-            if (record.method, record.path) == key
+            if record.method == operation["method"]
+            and _path_matches(str(operation["path"]), record.path)
         ]
         statuses = sorted({record.status for record in matches})
         visited = any(200 <= status < 300 for status in statuses)
@@ -342,14 +459,14 @@ def build_coverage(
             "openapi": True,
             "visited": visited,
             "statuses": statuses,
+            "observed_paths": sorted({record.path for record in matches}),
             "notes": sorted({record.note for record in matches if record.note}),
         })
 
     extras: dict[tuple[str, str], list[ResponseRecord]] = {}
     for record in records:
-        key = (record.method, record.path)
-        if key not in operation_keys:
-            extras.setdefault(key, []).append(record)
+        if resolve_operation_path(record.method, record.path, operations) is None:
+            extras.setdefault((record.method, record.path), []).append(record)
 
     support_routes = []
     for (method, path), matches in sorted(extras.items()):
@@ -488,6 +605,70 @@ def wait_for_verification_code(
     raise DastError(
         f"El SMTP de captura no recibió un código para {recipient} en "
         f"{timeout_seconds}s. El flujo de registro no puede continuar.")
+
+
+def extract_password_reset_token(
+    message_bytes: bytes,
+    recipient: str,
+) -> str | None:
+    message = email.message_from_bytes(message_bytes, policy=policy.default)
+    recipients = " ".join(
+        str(value) for field in ("To", "Cc") for value in message.get_all(field, [])
+    ).lower()
+    if recipient.lower() not in recipients:
+        return None
+
+    for part in message.walk():
+        if part.get_content_type() not in ("text/plain", "text/html"):
+            continue
+        try:
+            text = str(part.get_content())
+        except Exception:  # pragma: no cover - mensajes MIME dañados
+            continue
+        if part.get_content_type() == "text/html":
+            text = re.sub(r"<[^>]+>", " ", text)
+        match = re.search(r"[?&]token=([A-Za-z0-9._~%+-]+)", text)
+        if match:
+            return urllib.parse.unquote(match.group(1))
+    return None
+
+
+def wait_for_password_reset_token(
+    mailbox: Path,
+    recipient: str,
+    timeout_seconds: int = 45,
+) -> str:
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        for path in sorted(mailbox.glob("*.eml")):
+            try:
+                token = extract_password_reset_token(path.read_bytes(), recipient)
+            except OSError:
+                continue
+            if token:
+                return token
+        time.sleep(0.5)
+    raise DastError(
+        f"El SMTP de captura no recibió un enlace de recuperación para "
+        f"{recipient} en {timeout_seconds}s.")
+
+
+def load_admin_state(path: Path = ADMIN_STATE_FILE) -> dict[str, str]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise DastError(
+            "No está disponible el administrador sintético provisionado en CI."
+        ) from error
+
+    if not isinstance(value, dict):
+        raise DastError("El estado del administrador sintético no es un objeto.")
+    email = str(value.get("email") or "")
+    password = str(value.get("password") or "")
+    if not email or not password:
+        raise DastError(
+            "El estado del administrador sintético no contiene credenciales.")
+    return {"email": email, "password": password}
 
 
 def security_findings(records: list[ResponseRecord]) -> list[dict[str, str]]:
@@ -743,6 +924,96 @@ def _json_body(payload: bytes) -> dict[str, Any]:
     return value
 
 
+def _login(
+    http: HttpClient,
+    email: str,
+    password: str,
+    note: str,
+) -> tuple[str, str]:
+    _, payload, _ = http.request(
+        "POST", "/api/v1/auth/login",
+        body={"correo": email, "contrasena": password},
+        expected={200}, note=note)
+    tokens = _json_body(payload)
+    access = str(tokens.get("accessToken") or "")
+    refresh = str(tokens.get("refreshToken") or "")
+    if not access:
+        raise DastError(f"{note} no devolvió accessToken.")
+    return access, refresh
+
+
+def _register_account(
+    http: HttpClient,
+    mailbox: Path,
+    password: str,
+    role: str,
+) -> str:
+    account_email = f"dast.{role}.{uuid.uuid4().hex}@uni.edu"
+    _, payload, _ = http.request(
+        "POST", "/api/v1/auth/registro",
+        body=_register_payload(account_email, password),
+        expected={201}, note=f"registro {role}")
+    response = _json_body(payload)
+    if response.get("correoConfirmacionEnviado") is not True:
+        raise DastError(
+            f"El registro {role} no confirmó el envío por SMTP; "
+            "el doble de captura no está operativo.")
+    code = wait_for_verification_code(mailbox, account_email)
+    http.request(
+        "POST", "/api/v1/auth/confirmacion-correo",
+        body={"correo": account_email, "codigo": code},
+        expected={200}, note=f"confirmación {role}")
+    return account_email
+
+
+def _response_id(payload: bytes, operation: str) -> str:
+    value = _json_body(payload)
+    identifier = str(value.get("id") or "")
+    if not identifier:
+        raise DastError(f"{operation} no devolvió id.")
+    return identifier
+
+
+def _publish_unit_for_exploration(unit_id: str) -> None:
+    """Publica el fixture M04/M07 directamente en la base efímera.
+
+    M06 no forma parte del Sprint 3 y no existe un endpoint para aprobar una
+    publicación. El job DAST usa una base exclusiva y desechable, por lo que el
+    fixture se marca Aprobada/Disponible solo para poder ejercer los endpoints
+    públicos y autenticados con respuestas 2xx. No se ejecuta en producción.
+    """
+    container = os.environ.get("MONGO_CONTAINER_ID", "").strip()
+    database = os.environ.get("MONGO_DAST_DATABASE", "").strip()
+
+    if not container or not database:
+        raise DastError(
+            "Faltan MONGO_CONTAINER_ID/MONGO_DAST_DATABASE para publicar el fixture M04.")
+
+    try:
+        normalized = uuid.UUID(unit_id).hex
+    except ValueError as error:
+        raise DastError("El alta de unidad devolvió un id no válido.") from error
+
+    script = (
+        f'const database = db.getSiblingDB({json.dumps(database)});'
+        f'const result = database.unidades.updateOne('
+        f'{{_id: {json.dumps(normalized)}}},'
+        f'{{$set: {{estadoPublicacion: "Aprobada", estadoOcupacion: "Disponible"}}}});'
+        'if (result.matchedCount !== 1) {'
+        '  throw new Error("fixture M04 no encontrado");'
+        '}'
+    )
+    completed = subprocess.run(
+        ["docker", "exec", container, "mongosh", "--quiet", "--eval", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if completed.returncode != 0:
+        raise DastError("No se pudo publicar el fixture M04 en MongoDB efímero.")
+
+
 def run_scan(args: argparse.Namespace) -> int:
     target = args.target.rstrip("/")
     output = Path(OUTPUT_DIR)
@@ -750,9 +1021,11 @@ def run_scan(args: argparse.Namespace) -> int:
     mailbox = Path(MAILBOX_DIR)
     generated_at = datetime.now(timezone.utc).isoformat()
     password = _generate_password()
+    recovery_password = _generate_password()
     technical_errors: list[str] = []
     health: dict[str, Any] = {}
 
+    admin = load_admin_state()
     http = HttpClient(target, args.proxy)
     zap = ZapApi(args.zap_api, args.zap_api_key)
 
@@ -784,44 +1057,14 @@ def run_scan(args: argparse.Namespace) -> int:
                  note="Swagger UI")
     http.request("GET", "/", expected={302}, openapi=False, note="redirección raíz")
 
-    def register_account(role: str) -> str:
-        account_email = f"dast.{role}.{uuid.uuid4().hex}@uni.edu"
-        _, payload, _ = http.request(
-            "POST", "/api/v1/auth/registro",
-            body=_register_payload(account_email, password),
-            expected={201}, note=f"registro {role}")
-        response = _json_body(payload)
-        if response.get("correoConfirmacionEnviado") is not True:
-            raise DastError(
-                f"El registro {role} no confirmó el envío por SMTP; "
-                "el doble de captura no está operativo.")
-        code = wait_for_verification_code(mailbox, account_email)
-        http.request(
-            "POST", "/api/v1/auth/confirmacion-correo",
-            body={"correo": account_email, "codigo": code},
-            expected={200}, note=f"confirmación {role}")
-        return account_email
+    # M01: cuentas A (operaciones normales), C (borrado) y R (recuperación).
+    account_a = _register_account(http, mailbox, password, "a")
+    access_a, refresh_a = _login(http, account_a, password, "login A")
 
-    account_a = register_account("a")
-    _, login_payload, _ = http.request(
-        "POST", "/api/v1/auth/login",
-        body={"correo": account_a, "contrasena": password},
-        expected={200}, note="login A")
-    tokens_a = _json_body(login_payload)
-    access_a = str(tokens_a.get("accessToken") or "")
-    refresh_a = str(tokens_a.get("refreshToken") or "")
-    if not access_a or not refresh_a:
-        raise DastError("El login A no devolvió accessToken y refreshToken.")
+    account_c = _register_account(http, mailbox, password, "c")
+    access_c, _ = _login(http, account_c, password, "login C")
 
-    account_c = register_account("c")
-    _, login_c_payload, _ = http.request(
-        "POST", "/api/v1/auth/login",
-        body={"correo": account_c, "contrasena": password},
-        expected={200}, note="login C")
-    tokens_c = _json_body(login_c_payload)
-    access_c = str(tokens_c.get("accessToken") or "")
-    if not access_c:
-        raise DastError("El login C no devolvió accessToken.")
+    account_r = _register_account(http, mailbox, recovery_password, "r")
 
     http.request(
         "POST", "/api/v1/auth/confirmacion-correo/reenvio",
@@ -850,6 +1093,155 @@ def run_scan(args: argparse.Namespace) -> int:
         "POST", "/api/v1/auth/login",
         body={"correo": account_c, "contrasena": password},
         expected={401, 403}, note="login C tras borrado")
+
+    # La cuenta A sigue activa: se vuelve a iniciar sesión para M02/M05.
+    access_a, _ = _login(http, account_a, password, "login A posterior")
+
+    # M02: perfil autenticado.
+    http.request(
+        "GET", "/api/v1/perfil/mi-perfil", token=access_a,
+        expected={200}, auth=True, note="perfil A")
+
+    # M03: catálogo público y administración sintética.
+    http.request(
+        "GET", "/api/v1/universidades?buscar=DAST", expected={200},
+        note="búsqueda universidades")
+    access_admin, _ = _login(
+        http, admin["email"], admin["password"], "login administrador")
+    university_name = f"DAST Universidad {uuid.uuid4().hex}"
+    _, university_payload, _ = http.request(
+        "POST", "/api/v1/admin/universidades",
+        body={"nombreYCampus": university_name},
+        token=access_admin, expected={201}, auth=True,
+        note="alta universidad admin")
+    university_id = _response_id(university_payload, "alta universidad")
+    http.request(
+        "GET", "/api/v1/admin/universidades?page=1&pageSize=50",
+        token=access_admin, expected={200}, auth=True,
+        note="listado universidades admin")
+    http.request(
+        "PUT", f"/api/v1/admin/universidades/{university_id}",
+        body={"nombreYCampus": f"{university_name} Editada"},
+        token=access_admin, expected={200}, auth=True,
+        note="edición universidad admin")
+    http.request(
+        "PUT", f"/api/v1/admin/universidades/{university_id}/estado",
+        body={"activa": False},
+        token=access_admin, expected={200}, auth=True,
+        note="desactivación universidad admin")
+    http.request(
+        "PUT", f"/api/v1/admin/universidades/{university_id}/estado",
+        body={"activa": True},
+        token=access_admin, expected={200}, auth=True,
+        note="reactivación universidad admin")
+
+    # M05: propiedad, unidad, servicios, zona, fotos y vista previa.
+    _, property_payload, _ = http.request(
+        "POST", "/api/v1/propiedades",
+        body={
+            "nombre": f"DAST Propiedad {uuid.uuid4().hex}",
+            "direccion": "Calle DAST 123",
+            "colonia": "Centro",
+            "tipoPropiedad": "Casa",
+            "universidadId": university_id,
+            "latitud": 19.4326,
+            "longitud": -99.1332,
+        },
+        token=access_a, expected={201}, auth=True, note="alta propiedad")
+    property_id = _response_id(property_payload, "alta propiedad")
+
+    _, unit_payload, _ = http.request(
+        "POST", f"/api/v1/propiedades/{property_id}/unidades",
+        body={
+            "tipoUnidad": "Habitacion",
+            "ocupacion": "Individual",
+            "lugares": 1,
+            "precioMensualPorLugarMxn": 3500,
+            "tamanoM2": 15,
+            "paraQuien": "Mixto",
+            "bano": "Privado",
+            "mobiliario": "Amueblado",
+            "muebles": ["Cama", "Escritorio"],
+            "plantillaBase": "HabitacionIndividual",
+        },
+        token=access_a, expected={201}, auth=True, note="alta unidad")
+    unit_id = _response_id(unit_payload, "alta unidad")
+
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/servicios",
+        body={"servicios": [{
+            "nombre": "Internet",
+            "modalidad": "Incluido",
+            "montoMensualMxn": 500,
+        }]},
+        token=access_a, expected={200}, auth=True, note="servicios unidad")
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/zona-reglas",
+        body={
+            "informacionZona": "Zona DAST",
+            "reglasConvivencia": "Reglas DAST",
+        },
+        token=access_a, expected={200}, auth=True, note="zona y reglas unidad")
+
+    http.request_multipart(
+        "POST", f"/api/v1/unidades/{unit_id}/fotos",
+        files=[("Fotos", "foto.png", "image/png", DAST_PHOTO_PNG)],
+        token=access_a, expected={200}, note="carga foto unidad")
+
+    _, preview_payload, _ = http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/vista-previa",
+        token=access_a, expected={200}, auth=True, note="vista previa unidad")
+    preview = _json_body(preview_payload)
+    photo_url = str(preview.get("fotoPrincipalUrl") or "")
+    photo_path = urllib.parse.urlsplit(photo_url).path
+    if not photo_path.startswith("/api/v1/fotos/"):
+        raise DastError("La vista previa no devolvió una ruta de foto válida.")
+    http.request(
+        "GET", photo_path, token=access_a,
+        expected={200}, auth=True, note="lectura foto")
+
+    http.request(
+        "POST", "/api/v1/publicaciones/primera/terminos",
+        body={"versionTerminos": TERMS_VERSION},
+        token=access_a, expected={200}, auth=True, note="aceptación términos")
+
+    # M04/M07: el fixture se marca público en la base efímera porque M06 aún no
+    # existe. Así ZAP visita las siete operaciones con respuestas 2xx reales.
+    _publish_unit_for_exploration(unit_id)
+    http.request(
+        "GET", f"/api/v1/exploracion/mapa?universidadId={university_id}",
+        expected={200}, note="exploración mapa")
+    http.request(
+        "GET",
+        f"/api/v1/exploracion/lista?universidadId={university_id}"
+        "&precioMaxMxn=4500&soloIndividual=true&paraQuien=Mixto",
+        expected={200}, note="exploración lista y filtros")
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/tarjeta",
+        expected={200}, note="tarjeta pública")
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/ficha",
+        token=access_a, expected={200}, auth=True, note="ficha autenticada")
+    http.request(
+        "PUT", f"/api/v1/favoritos/{unit_id}",
+        token=access_a, expected={204}, auth=True, note="alta favorito")
+    http.request(
+        "GET", "/api/v1/favoritos",
+        token=access_a, expected={200}, auth=True, note="lista favoritos")
+    http.request(
+        "DELETE", f"/api/v1/favoritos/{unit_id}",
+        token=access_a, expected={204}, auth=True, note="baja favorito")
+
+    # M01: recuperación de contraseña con token real capturado por SMTP.
+    http.request(
+        "POST", "/api/v1/auth/recuperacion/solicitud",
+        body={"correo": account_r}, expected={200},
+        note="solicitud recuperación R")
+    reset_token = wait_for_password_reset_token(mailbox, account_r)
+    http.request(
+        "POST", "/api/v1/auth/recuperacion/confirmacion",
+        body={"token": reset_token, "nuevaContrasena": recovery_password},
+        expected={200}, note="confirmación recuperación R")
 
     messages, records = zap.wait_for_passive(expected_messages=len(http.records))
     report = zap.write_reports(output)

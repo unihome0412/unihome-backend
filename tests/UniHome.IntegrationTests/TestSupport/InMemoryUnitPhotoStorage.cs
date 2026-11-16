@@ -42,6 +42,22 @@ public sealed class InMemoryUnitPhotoStorage : IUnitPhotoStorage
         return Task.CompletedTask;
     }
 
+    public Task<UnitPhotoContent?> ReadAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (!_files.TryGetValue(storageKey, out var bytes))
+            {
+                return Task.FromResult<UnitPhotoContent?>(null);
+            }
+
+            return Task.FromResult<UnitPhotoContent?>(
+                new UnitPhotoContent(new MemoryStream(bytes, writable: false), "image/png", bytes.LongLength));
+        }
+    }
+
     public string GetReadUrl(string storageKey) => $"https://photos.test/{storageKey}";
 
     public int Count

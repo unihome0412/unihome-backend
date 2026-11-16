@@ -12,6 +12,7 @@ using UniHome.Application.Publications.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Infrastructure.Configuration;
+using UniHome.Infrastructure.Storage;
 using UniHome.IntegrationTests.TestSupport;
 using Xunit;
 
@@ -62,6 +63,17 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
     public InMemoryUnitPhotoStorage PhotoStorage { get; } = new();
 
+    internal InMemoryCloudinaryPhotoClient CloudinaryClient { get; } = new();
+
+    protected virtual bool UseCloudinaryStorage => false;
+
+    /// <summary>
+    /// Los dobles de exploración se desactivan solo para verificar el fail-closed
+    /// 503 cuando MongoDB no está configurado. La identidad sigue en memoria para
+    /// poder emitir un JWT válido sin depender de MongoDB.
+    /// </summary>
+    protected virtual bool UseInMemoryExploration => true;
+
     public InMemoryFavoriteRepository Favorites { get; } = new();
 
     public CapturingVerificationEmailSender EmailSender { get; } = new();
@@ -105,6 +117,19 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
                 ["Auth:RateLimit:PasswordResetConfirmPermitLimit"] = "1000",
                 ["Auth:RateLimit:PasswordResetConfirmWindowSeconds"] = "60"
             });
+
+            if (UseCloudinaryStorage)
+            {
+                configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Cloudinary:CloudName"] = "test-cloud",
+                    ["Cloudinary:ApiKey"] = "test-key",
+                    ["Cloudinary:ApiSecret"] = "test-secret",
+                    ["Cloudinary:Folder"] = "unihome/unidades",
+                    ["Cloudinary:PublicBaseUrl"] = "https://api.unihome.test",
+                    ["Cloudinary:TimeoutSeconds"] = "5"
+                });
+            }
         });
 
         builder.ConfigureServices(services =>
@@ -125,23 +150,37 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IPasswordResetRepository>();
             services.AddSingleton<IPasswordResetRepository>(PasswordResets);
 
-            services.RemoveAll<IUniversityRepository>();
-            services.AddSingleton<IUniversityRepository>(Universities);
+            if (UseInMemoryExploration)
+            {
+                services.RemoveAll<IUniversityRepository>();
+                services.AddSingleton<IUniversityRepository>(Universities);
 
-            services.RemoveAll<IPropertyRepository>();
-            services.AddSingleton<IPropertyRepository>(Properties);
+                services.RemoveAll<IPropertyRepository>();
+                services.AddSingleton<IPropertyRepository>(Properties);
 
-            services.RemoveAll<IUnitRepository>();
-            services.AddSingleton<IUnitRepository>(Units);
+                services.RemoveAll<IUnitRepository>();
+                services.AddSingleton<IUnitRepository>(Units);
+            }
 
             services.RemoveAll<ITermsAcceptanceRepository>();
             services.AddSingleton<ITermsAcceptanceRepository>(Terms);
 
-            services.RemoveAll<IUnitPhotoStorage>();
-            services.AddSingleton<IUnitPhotoStorage>(PhotoStorage);
+            if (UseCloudinaryStorage)
+            {
+                services.RemoveAll<ICloudinaryPhotoClient>();
+                services.AddSingleton<ICloudinaryPhotoClient>(CloudinaryClient);
+            }
+            else
+            {
+                services.RemoveAll<IUnitPhotoStorage>();
+                services.AddSingleton<IUnitPhotoStorage>(PhotoStorage);
+            }
 
-            services.RemoveAll<IUnitFavoriteRepository>();
-            services.AddSingleton<IUnitFavoriteRepository>(Favorites);
+            if (UseInMemoryExploration)
+            {
+                services.RemoveAll<IUnitFavoriteRepository>();
+                services.AddSingleton<IUnitFavoriteRepository>(Favorites);
+            }
 
             services.RemoveAll<IVerificationEmailSender>();
             services.AddSingleton<IVerificationEmailSender>(EmailSender);

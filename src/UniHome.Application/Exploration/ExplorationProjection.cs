@@ -48,10 +48,11 @@ public static class ExplorationProjection
         Unit unit,
         decimal? distanceKm,
         bool? isFavorite,
-        UnitPhotoUrlResolver photos) =>
+        UnitPhotoUrlResolver photos,
+        bool allowPhoto = true) =>
         new(
             unit.Id,
-            photos.Primary(unit),
+            photos.Primary(unit, allowPhoto),
             unit.PricePerPlace,
             unit.Type,
             distanceKm,

@@ -98,6 +98,27 @@ public sealed class AddUnitPhotosServiceTests
     }
 
     [Fact]
+    public async Task Add_CuandoMongoFalla_DebeEliminarLaFotoSubida()
+    {
+        var context = CreateContext();
+        context.Units.AppendResult = false;
+        var service = new AddUnitPhotosService(
+            context.Units,
+            context.Storage,
+            context.Eligibility,
+            new FixedClock(Now));
+
+        var result = await service.AddAsync(
+            context.Account.Id,
+            context.Unit.Id,
+            [new UnitPhotoUpload("foto.png", "image/png", PublicationServiceTestData.PngBytes())]);
+
+        Assert.Equal(OperationStatus.Conflict, result.Status);
+        Assert.Single(context.Storage.Deleted);
+        Assert.Equal(context.Storage.Saved[0], context.Storage.Deleted[0]);
+    }
+
+    [Fact]
     public async Task Add_UnidadAjena_DebeDevolverForbidden()
     {
         var context = CreateContext();

@@ -27,7 +27,7 @@ public sealed class ExplorationAndFavoritesServiceTests
                 DistanciaMaxKm: 2,
                 PrecioMaxMxn: 4500,
                 SoloIndividual: true,
-                ParaQuien: null),
+                ParaQuien: ForWhom.Mixto),
             accountId: null);
 
         Assert.Equal(OperationStatus.Success, result.Status);
@@ -35,6 +35,42 @@ public sealed class ExplorationAndFavoritesServiceTests
         Assert.Equal(context.Available.Id, result.Value.Items[0].Id);
         Assert.Equal("a pie", result.Value.Items[0].TiempoTraslado);
         Assert.Equal(1, result.Value.Total);
+    }
+
+    [Fact]
+    public async Task Lista_SinUbicacionUniversidad_DistanciaNulaYFiltroDistanciaFalla()
+    {
+        var context = BuildContext();
+        context.Universities.Location = null;
+        var service = new ExploreUnitsService(
+            context.Universities,
+            context.Units,
+            context.Properties,
+            context.Favorites,
+            new UnitPhotoUrlResolver(context.Storage));
+
+        var list = await service.ListAsync(
+            new ExplorationQuery(
+                ExplorationTestData.UniversityId,
+                DistanciaMaxKm: null,
+                PrecioMaxMxn: null,
+                SoloIndividual: null,
+                ParaQuien: null),
+            accountId: null);
+        var filtered = await service.ListAsync(
+            new ExplorationQuery(
+                ExplorationTestData.UniversityId,
+                DistanciaMaxKm: 2,
+                PrecioMaxMxn: null,
+                SoloIndividual: null,
+                ParaQuien: null),
+            accountId: null);
+
+        Assert.Equal(OperationStatus.Success, list.Status);
+        Assert.All(list.Value!.Items, item => Assert.Null(item.DistanciaKm));
+        Assert.All(list.Value.Items, item => Assert.Null(item.TiempoTraslado));
+        Assert.Equal(OperationStatus.ValidationFailed, filtered.Status);
+        Assert.Contains("distanciaMaxKm", filtered.ValidationErrors.Keys);
     }
 
     [Fact]
@@ -149,8 +185,12 @@ public sealed class ExplorationAndFavoritesServiceTests
         Assert.Equal("EnRevision", listed.Value.Items[0].Tarjeta.EstadoActual);
         Assert.True(listed.Value.Items[0].Tarjeta.EsFavorito);
 
-        var otherUser = await list.ListAsync(Guid.NewGuid(), 1, 20);
+        var otherUserId = Guid.NewGuid();
+        var otherUser = await list.ListAsync(otherUserId, 1, 20);
         Assert.Empty(otherUser.Value!.Items);
+
+        var otherAdd = await add.AddAsync(otherUserId, context.InReview.Id);
+        Assert.Equal(OperationStatus.NotFound, otherAdd.Status);
 
         await remove.RemoveAsync(context.AccountId, context.InReview.Id);
         await remove.RemoveAsync(context.AccountId, context.InReview.Id);

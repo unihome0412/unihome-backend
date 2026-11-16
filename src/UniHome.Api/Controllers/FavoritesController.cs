@@ -43,6 +43,8 @@ public sealed class FavoritesController : AuthenticatedControllerBase
                 "La sesión no es válida.");
         }
 
+        Response.Headers.CacheControl = "no-store";
+
         var result = await _add
             .AddAsync(accountId, unitId, cancellationToken)
             .ConfigureAwait(false);
@@ -71,6 +73,8 @@ public sealed class FavoritesController : AuthenticatedControllerBase
                 StatusCodes.Status401Unauthorized,
                 "La sesión no es válida.");
         }
+
+        Response.Headers.CacheControl = "no-store";
 
         var result = await _remove
             .RemoveAsync(accountId, unitId, cancellationToken)
@@ -102,6 +106,8 @@ public sealed class FavoritesController : AuthenticatedControllerBase
                 StatusCodes.Status401Unauthorized,
                 "La sesión no es válida.");
         }
+
+        Response.Headers.CacheControl = "no-store";
 
         var result = await _list
             .ListAsync(accountId, page, pageSize, cancellationToken)

@@ -106,19 +106,25 @@ sin borrado). La búsqueda pública solo devuelve activas.
 Perfil (HU-002/HU-008): `GET /api/v1/perfil/mi-perfil` requiere Bearer y devuelve
 `nombreCompleto`, `correo`, `fechaNacimiento`, `genero`, `universidadActual`,
 `etiquetaCuenta`, `vinculadoAUnidad` y `puedePublicar`. No expone hash de
-contraseña ni claims administrativos. La barra de navegación y la visibilidad del
-panel son responsabilidad de Android; el backend entrega los indicadores y
-revalida cada ruta administrativa.
+contraseña ni claims administrativos. `universidadActual` permanece `null` porque
+M01 no persiste una asociación cuenta-universidad y M03 solo asocia
+`UniversidadId` a propiedades/unidades; la dependencia funcional es HU-087 y no
+se inventa una relación. La respuesta autenticada envía `Cache-Control: no-store`.
+La barra de navegación y la visibilidad del panel son responsabilidad de Android;
+el backend entrega los indicadores y revalida cada ruta administrativa.
 
 Sprint 2 / M05: `POST /api/v1/propiedades`, `POST /api/v1/propiedades/{id}/unidades`,
-`POST /api/v1/unidades/{id}/fotos`, `PUT /api/v1/unidades/{id}/servicios`,
+`POST /api/v1/unidades/{id}/fotos` y `GET /api/v1/fotos/{photoRef}`, `PUT /api/v1/unidades/{id}/servicios`,
 `PUT /api/v1/unidades/{id}/zona-reglas`, `GET /api/v1/unidades/{id}/vista-previa` y
 `POST /api/v1/publicaciones/primera/terminos`. Todas las rutas requieren Bearer y
 verifican que el recurso pertenezca al titular. La edad se recalcula en servidor.
 La unidad nace en `Borrador`; no se implementó el envío a revisión de Sprint 4.
-La carga de fotos usa un puerto de almacenamiento; **DEC-04 sigue pendiente**, por lo
-que sin proveedor autorizado responde `503` y no se declara funcionalidad de fotos
-lista para producción. Detalle en [`docs/mongodb-m05.md`](docs/mongodb-m05.md).
+La carga de fotos usa **Cloudinary Free** mediante `IUnitPhotoStorage`; las im?genes
+se suben como `authenticated` y se entregan por `GET /api/v1/fotos/{photoRef}`, no por
+una URL de Cloudinary. Si faltan `Cloudinary__CloudName`, `Cloudinary__ApiKey` o
+`Cloudinary__ApiSecret`, el endpoint falla cerrado con `503`. La prueba real opt-in
+sigue **PENDIENTE** de credenciales seguras. Detalle en
+[`docs/dec-04-cloudinary.md`](dec-04-cloudinary.md).
 
 Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
 `contrasena` y `confirmacionPerdidaInformacion: true`. Hace borrado lógico
@@ -180,7 +186,11 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   por 60. Son umbrales provisionales pendientes de aprobación. El limitador usa el
   adaptador distribuido configurado: Upstash Redis cuando `Redis:Enabled=true` y el
   adaptador en memoria solo en Development/pruebas. Fuera de Development Redis es
-  obligatorio y las IP se seudonimizan con `Auth:RateLimit:IpHashSalt`.
+  obligatorio y las IP se seudonimizan con `Auth:RateLimit:IpHashSalt`. El timeout
+  por intento es `Redis:CommandTimeoutMs=2000`, con `Redis:MaxAttempts=2`,
+  `Redis:RetryDelayMs=100` y `Redis:ReadinessTimeoutMs=800`. Los fallos
+  transitorios se reintentan de forma acotada; FailClosed conserva el 503 y los
+  errores de autenticación/contrato no se reintentan.
 - Límite "por cuenta" de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
   (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como
@@ -220,20 +230,20 @@ sobre `nombreNormalizado`. La migración versionada `M03-001` crea la colección
 índice; el adaptador verifica el esquema en modo lectura y falla cerrada si falta o
 diverge. Detalle en [`docs/mongodb-m03.md`](docs/mongodb-m03.md).
 
-M07 usa `favoritos` (`accountId`, `unitId`, `createdAt`) con ?ndice ?nico
-`ux_favoritos_cuenta_unidad` y la migraci?n `M07-001`; no cambia M05-001. Detalle
+M07 usa `favoritos` (`accountId`, `unitId`, `createdAt`) con índice único
+`ux_favoritos_cuenta_unidad` y la migración `M07-001`; no cambia M05-001. Detalle
 en [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
 
 M05 usa `propiedades`, `unidades` y `aceptaciones_terminos` con la migración
-`M05-001`; las fotos guardan solo metadatos y el binario depende de DEC-04. Detalle en
+`M05-001`; las fotos guardan solo metadatos y el binario se almacena en Cloudinary. Detalle en
 [`docs/mongodb-m05.md`](docs/mongodb-m05.md).
 
 Sprint 3 / M04-M07: `GET /api/v1/exploracion/mapa`, `GET /api/v1/exploracion/lista`,
 `GET /api/v1/unidades/{id}/tarjeta`, `GET /api/v1/unidades/{id}/ficha`,
 `PUT/DELETE /api/v1/favoritos/{id}` y `GET /api/v1/favoritos`. Mapa, lista y tarjeta
-son p?blicos (la tarjeta acepta Bearer opcional para `esFavorito`); ficha y favoritos
-exigen sesi?n. Solo se exponen unidades Aprobadas y Disponibles. HU-007 reutiliza la
-b?squeda M03 existente. No se expone correo ni tel?fono del arrendador. La distancia
+son públicos (la tarjeta acepta Bearer opcional para `esFavorito`); ficha y favoritos
+exigen sesión. Solo se exponen unidades Aprobadas y Disponibles. HU-007 reutiliza la
+búsqueda M03 existente. No se expone correo ni teléfono del arrendador. La distancia
 usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
 [`docs/sprint-03-cierre.md`](docs/sprint-03-cierre.md) y
 [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
@@ -296,7 +306,7 @@ en modo solo lectura; si falta una garantía crítica, la API no opera esa colec
 | Ruta | Semántica |
 |---|---|
 | `GET /health/live` | Proceso vivo. No consulta dependencias externas. |
-| `GET /health/ready` | Conectividad e índices M01 disponibles. Sin configuración o esquema válido responde `503`. |
+| `GET /health/ready` | MongoDB (conectividad e índices M01) y Redis/rate limiting distribuido disponibles. Sin configuración, esquema válido o Redis accesible responde `503`. |
 
 La colección externa `restablecimientos_contrasena` no forma parte de `M01-001`; su
 verificación de índices se ejecuta al invocar los endpoints de recuperación. Si falta
@@ -307,17 +317,21 @@ o diverge, HU-006 responde `503` y no se declara operativa.
 - Errores homogéneos con `ProblemDetails`, incluyendo `traceId` y `errors` en validaciones.
 - Excepciones no controladas: `500` genérico, sin stack trace.
 - Todas las respuestas incluyen `X-Content-Type-Options`, `X-Frame-Options`,
-  `Referrer-Policy`, `Permissions-Policy` y una CSP; las rutas de autenticación
-  y cuentas añaden `Cache-Control: no-store`. La CSP de Swagger UI permite sus
-  recursos propios e inline; el resto de la API usa `default-src 'none'`.
+  `Referrer-Policy`, `Permissions-Policy` y una CSP; las rutas de autenticación,
+  cuentas y perfil añaden `Cache-Control: no-store`. La CSP de Swagger UI permite
+  sus recursos propios e inline; el resto de la API usa `default-src 'none'`.
+  Fuera de Development, HSTS se emite para requests HTTPS con host público no
+  loopback y `X-Forwarded-Proto` confiable (`max-age=31536000; includeSubDomains`,
+  sin preload).
 - OpenAPI nativo de .NET 10 disponible solo en desarrollo: `GET /openapi/v1.json`.
   Incluye el esquema Bearer y marca `logout` como operación autenticada.
-- `Gender` se documenta como enum string (`Mujer`, `Hombre`,
-  `PrefiereNoDecir`), igual que el JSON real; los enteros se rechazan. La
-  corrección se aplica al documento OpenAPI sin cambiar el contrato HTTP.
-  Verificación: ejecución manual
-  [42850339456](https://github.com/unihome0412/unihome-backend/actions/runs/42850339456),
-  `contract-test` con 10/10 pruebas OpenAPI aprobadas.
+- Los 12 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
+  `Occupancy`, `ForWhom`, `BathroomType`, `FurnitureType`, `UnitTemplate`,
+  `ServiceName`, `ServiceMode`, `AccountLabel`) se documentan como string con sus
+  valores reales; los enteros se rechazan en runtime. `POST
+  /api/v1/unidades/{unitId}/fotos` se documenta como `multipart/form-data` con
+  `Fotos` repetible, array de binarios, JPEG/PNG, 10 fotos, 5 MB por archivo y
+  52 MB por solicitud.
 - Registro: `400` por validación, `409` por correo duplicado (provisional, DEC-09
   pendiente), `413` por cuerpo excesivo y `503` si MongoDB no está disponible.
 - Login: `400` por datos inválidos, `401` genérico, `403` por cuenta no confirmada o
@@ -356,9 +370,10 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 `UNIHOME_ENABLE_MONGO_CI=true`) levanta MongoDB Community 8.0.34 dentro del runner
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
-`unihome_ci_verificacion`, se aplican `M01-001`, `M03-001`, `M05-001` y `M07-001` a esa base
-temporal y las pruebas reales de identidad, recuperación de contraseña, universidades,
-publicaciones, exploraci?n/favoritos y bloqueo distribuido se ejecutan con TRX. El job falla
+`unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`
+y `M07-001` a esa base temporal y las pruebas reales de identidad, recuperación de
+contraseña, universidades, publicaciones, exploración/favoritos y bloqueo distribuido
+se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
 La ejecución manual de verificación
@@ -369,8 +384,8 @@ commit de código `f51ac10`) dejó 4/4 pruebas reales aprobadas, 0 omitidas,
 El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
 `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
-`127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M03-001 y M05-001, y un
-SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+`127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M01-002, M03-001,
+M05-001 y M07-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
 confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
 operación documentada y publica `zap-report.html`, `zap-report.json`,
 `dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el
@@ -505,14 +520,18 @@ declara listo para el primer despliegue hasta completar esos pasos.
   `ux_universidades_nombre_normalizado`; no se modificó Atlas.
 - La allowlist `Admin__AccountIds` es un mecanismo provisional hasta que M13 defina
   la provisión, auditoría y revocación formales de administradores.
-- **DEC-04 pendiente:** no hay proveedor de blobs autorizado. La carga de fotos M05
-  está implementada con validación y metadatos, pero falla cerrada con `503` hasta
-  aprobar/configurar el proveedor; no se usó almacenamiento simulado en producción.
+- **DEC-04 resuelto en c?digo con Cloudinary Free:** las fotos se suben como
+  `authenticated` y se entregan mediante `GET /api/v1/fotos/{photoRef}`; la URL
+  firmada de Cloudinary y las credenciales no salen del backend. Sin
+  `Cloudinary__CloudName`, `Cloudinary__ApiKey` o `Cloudinary__ApiSecret`, el
+  almacenamiento falla cerrado con `503`. La prueba real opt-in est? **PENDIENTE**
+  de credenciales seguras. Detalle en
+  [`docs/dec-04-cloudinary.md`](docs/dec-04-cloudinary.md).
 - El Sprint 2 no implementa el envío a revisión ni el expediente de M06 (HU-013/HU-027,
   Sprint 4); las unidades permanecen en `Borrador`.
-- M04/M07 requieren que M06 apruebe publicaciones para que existan unidades p?blicas
-  reales; `arrendadorVerificado` permanece `false` hasta la verificaci?n de M06.
-- La ubicaci?n de universidad no se administra por M03; sin ella la distancia es null
+- M04/M07 requieren que M06 apruebe publicaciones para que existan unidades públicas
+  reales; `arrendadorVerificado` permanece `false` hasta la verificación de M06.
+- La ubicación de universidad no se administra por M03; sin ella la distancia es null
   y un filtro `distanciaMaxKm` responde 400. Se requiere carga controlada.
 - El perfil devuelve `etiquetaCuenta=UsuarioUniHome` y `vinculadoAUnidad=false`
   mientras M05/M06/M09 no existan. Son indicadores derivados, no estados

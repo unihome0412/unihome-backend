@@ -153,7 +153,7 @@ def render_report(
         "|---|---|",
         f"| Versión de MongoDB | {mongo_version} |",
         f"| Base temporal | `{database}` |",
-        f"| Inicialización M01-001 + M03-001 + M05-001 + M07-001 | {initialization or 'desconocida'} |",
+        f"| Inicialización M01-001 + M01-002 + M03-001 + M05-001 + M07-001 | {initialization or 'desconocida'} |",
         f"| Pruebas ejecutadas | {evidence.executed} |",
         f"| Pruebas aprobadas | {evidence.passed} |",
         f"| Pruebas fallidas | {evidence.failed} |",

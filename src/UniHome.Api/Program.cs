@@ -24,14 +24,14 @@ using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Exploration;
+using UniHome.Application.Favorites;
 using UniHome.Application.Identity.ConfirmEmail;
 using UniHome.Application.Identity.DeleteAccount;
 using UniHome.Application.Identity.Login;
 using UniHome.Application.Identity.Logout;
 using UniHome.Application.Identity.PasswordRecovery;
 using UniHome.Application.Identity.RefreshSessions;
-using UniHome.Application.Exploration;
-using UniHome.Application.Favorites;
 using UniHome.Application.Identity.RegisterAccount;
 using UniHome.Application.Profiles;
 using UniHome.Application.Profiles.GetProfile;
@@ -146,7 +146,6 @@ builder.Services.AddScoped<AddUnitPhotosService>();
 builder.Services.AddScoped<ConfigureUnitServicesService>();
 builder.Services.AddScoped<ConfigureUnitZoneRulesService>();
 builder.Services.AddScoped<GetUnitPreviewService>();
-builder.Services.AddScoped<AcceptTermsService>();
 builder.Services.AddScoped<UnitPhotoUrlResolver>();
 builder.Services.AddScoped<ExploreUnitsService>();
 builder.Services.AddScoped<GetUnitCardService>();
@@ -154,6 +153,7 @@ builder.Services.AddScoped<GetUnitDetailService>();
 builder.Services.AddScoped<AddFavoriteService>();
 builder.Services.AddScoped<RemoveFavoriteService>();
 builder.Services.AddScoped<ListFavoritesService>();
+builder.Services.AddScoped<AcceptTermsService>();
 builder.Services.AddScoped<CreateUniversityService>();
 builder.Services.AddScoped<ListUniversitiesService>();
 builder.Services.AddScoped<UpdateUniversityService>();
@@ -461,6 +461,16 @@ builder.Services.AddRateLimiter(options =>
         });
 });
 
+builder.Services.AddHsts(options =>
+{
+    // Azure termina TLS en el ingress. La política se emite solo cuando la
+    // request ya es HTTPS (X-Forwarded-Proto confiable) y evita preload, que
+    // requiere autorización explícita sobre el dominio.
+    options.MaxAge = TimeSpan.FromDays(365);
+    options.IncludeSubDomains = true;
+    options.Preload = false;
+});
+
 builder.Services.AddProblemDetails(options =>
 {
     options.CustomizeProblemDetails = context =>
@@ -492,6 +502,9 @@ builder.Services
         tags: [HealthCheckTags.Live])
     .AddCheck<StorageHealthCheck>(
         "storage",
+        tags: [HealthCheckTags.Ready])
+    .AddCheck<RedisHealthCheck>(
+        "redis",
         tags: [HealthCheckTags.Ready]);
 
 builder.Services.AddOpenApi("v1", options =>
@@ -511,18 +524,23 @@ builder.Services.AddOpenApi("v1", options =>
             Description = "Token de acceso JWT emitido por POST /api/v1/auth/login."
         };
 
-        // El generador nativo describe el enum Gender como integer. El contrato
-        // HTTP, y el consumidor Android, usan los nombres string del enum; se
-        // corrige el componente después de generar los esquemas.
-        if (document.Components.Schemas is { } schemas &&
-            schemas.TryGetValue("Gender", out var rawGender) &&
-            rawGender is OpenApiSchema gender)
+        // El generador nativo describe todos los enums como integer. El contrato
+        // HTTP, y el consumidor Android, usan los nombres string; se corrige cada
+        // componente público después de generar los esquemas sin tocar el runtime.
+        if (document.Components.Schemas is { } schemas)
         {
-            gender.Type = JsonSchemaType.String;
-            gender.Format = null;
-            gender.Enum = Enum.GetNames<Gender>()
-                .Select(name => (JsonNode)JsonValue.Create(name)!)
-                .ToList();
+            foreach (var (name, enumType) in PublicApiEnums.Schemas)
+            {
+                if (schemas.TryGetValue(name, out var rawSchema) &&
+                    rawSchema is OpenApiSchema schema)
+                {
+                    schema.Type = JsonSchemaType.String;
+                    schema.Format = null;
+                    schema.Enum = Enum.GetNames(enumType)
+                        .Select(value => (JsonNode)JsonValue.Create(value)!)
+                        .ToList();
+                }
+            }
         }
 
         return Task.CompletedTask;
@@ -530,6 +548,54 @@ builder.Services.AddOpenApi("v1", options =>
 
     options.AddOperationTransformer((operation, context, _) =>
     {
+        var relativePath = context.Description.RelativePath?.TrimStart('/');
+
+        // universidadId es obligatorio en el contrato de exploración. El DTO lo
+        // declara nullable para poder responder 400 con ProblemDetails; el
+        // documento OpenAPI debe reflejar la obligatoriedad real.
+        if (string.Equals(relativePath, "api/v1/exploracion/mapa", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(relativePath, "api/v1/exploracion/lista", StringComparison.OrdinalIgnoreCase))
+        {
+            var universityParameter = operation.Parameters?
+                .FirstOrDefault(parameter =>
+                    string.Equals(parameter.Name, "universidadId", StringComparison.OrdinalIgnoreCase));
+
+            if (universityParameter is OpenApiParameter openApiParameter)
+            {
+                openApiParameter.Required = true;
+            }
+
+            foreach (var parameter in operation.Parameters ?? [])
+            {
+                if (parameter.Schema is not OpenApiSchema schema)
+                {
+                    continue;
+                }
+
+                if (string.Equals(parameter.Name, "page", StringComparison.OrdinalIgnoreCase))
+                {
+                    schema.Minimum = "1";
+                }
+                else if (string.Equals(parameter.Name, "pageSize", StringComparison.OrdinalIgnoreCase))
+                {
+                    schema.Minimum = "1";
+                    schema.Maximum = "100";
+                }
+            }
+        }
+
+        if (string.Equals(
+                relativePath,
+                UnitPhotosOpenApiContract.RelativePath,
+                StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(
+                context.Description.HttpMethod,
+                UnitPhotosOpenApiContract.Method,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            UnitPhotosOpenApiContract.Apply(operation);
+        }
+
         var metadata = context.Description.ActionDescriptor.EndpointMetadata;
         var requiresAuthentication = metadata.OfType<IAuthorizeData>().Any() &&
             !metadata.OfType<IAllowAnonymous>().Any();
@@ -571,7 +637,8 @@ app.Use(async (context, next) =>
             : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
         if (path.StartsWithSegments("/api/v1/auth") ||
-            path.StartsWithSegments("/api/v1/cuentas"))
+            path.StartsWithSegments("/api/v1/cuentas") ||
+            path.StartsWithSegments("/api/v1/perfil"))
         {
             headers.CacheControl = "no-store";
         }

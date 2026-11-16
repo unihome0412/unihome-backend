@@ -1,5 +1,6 @@
 using MongoDB.Bson;
 using UniHome.Infrastructure.Persistence.Mongo;
+using UniHome.Infrastructure.Persistence.Mongo.Migrations;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 
 namespace UniHome.UnitTests.Infrastructure;
@@ -44,6 +45,38 @@ public sealed class MongoPasswordResetBsonMappingTests
         Assert.Equal(BsonType.DateTime, document["consumedAt"].BsonType);
         Assert.Equal(BsonType.DateTime, document["createdAt"].BsonType);
         Assert.Equal(BsonType.Int32, document["failedAttempts"].BsonType);
+
+        var unconsumed = new PasswordResetDocument
+        {
+            Id = Identifier,
+            AccountId = Identifier,
+            TokenHash = "hash",
+            ExpiresAt = Timestamp.AddMinutes(30),
+            ConsumedAt = null,
+            CreatedAt = Timestamp,
+            FailedAttempts = 0
+        }.ToBsonDocument();
+
+        Assert.Equal(BsonType.Null, unconsumed["consumedAt"].BsonType);
+    }
+
+    [Fact]
+    public void MigracionM01_002_DebeMaterializarColeccionIndicesYValidador()
+    {
+        var definition = MongoPasswordResetMigration.Definition;
+
+        Assert.Equal("M01-002", definition.Version);
+        var collection = Assert.Single(definition.Collections);
+        Assert.Equal(MongoIdentitySchema.AccountRecoveryCollection, collection.Name);
+        Assert.Equal(3, collection.Indexes.Count);
+        Assert.NotNull(collection.Validator);
+
+        var properties = collection.Validator.Filter["$jsonSchema"]["properties"].AsBsonDocument;
+        var consumedAtTypes = properties["consumedAt"]["bsonType"].AsBsonArray
+            .Select(value => value.AsString)
+            .ToArray();
+
+        Assert.Equal(["date", "null"], consumedAtTypes);
     }
 
     [Fact]

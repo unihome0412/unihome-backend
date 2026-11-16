@@ -57,7 +57,7 @@ configuradas (secretos incluidos).
 
 ## Variables de entorno requeridas
 
-Ninguna de estas variables tiene valor en este documento ni en el repositorio.
+Ninguna variable sensible tiene valor en este documento ni en el repositorio.
 Deben configurarse en Container Apps como *secrets* (las sensibles) o variables
 de entorno normales (las no sensibles), nunca en `appsettings.json` ni en la
 imagen. Nombres verificados contra las clases de opciones correspondientes en
@@ -67,6 +67,16 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 |---|---|---|---|
 | `MongoDb__ConnectionString` | Sí | `MongoDbOptions` (`MongoDb`) | Sí, para que la API opere con persistencia |
 | `MongoDb__DatabaseName` | No | `MongoDbOptions` (`MongoDb`) | Sí, junto con la anterior |
+| `Redis__Enabled` | No | `RedisOptions` (`Redis`) | **S? fuera de Development**; con `true` exige credenciales |
+| `Redis__ConnectionString` | S? | `RedisOptions` (`Redis`) | Una de las formas de credencial Upstash (`rediss://...`) |
+| `Redis__RestUrl` | No | `RedisOptions` (`Redis`) | Alternativa a ConnectionString; URL REST HTTPS de Upstash |
+| `Redis__RestToken` | S? | `RedisOptions` (`Redis`) | Requerido con `Redis__RestUrl` |
+| `Redis__CommandTimeoutMs` | No | `RedisOptions` (`Redis`) | Opcional; predeterminado 250 ms |
+| `Admin__AccountIds` | No | `AdminAccessOptions` (`Admin`) | Solo para cuentas administrativas autorizadas; lista vac?a deniega todo |
+| `Cloudinary__CloudName` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
+| `Cloudinary__ApiKey` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
+| `Cloudinary__ApiSecret` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
+| `Cloudinary__PublicBaseUrl` | No | `CloudinaryOptions` (`Cloudinary`) | Base HTTPS p?blica de la API para el proxy de fotos |
 | `Jwt__SigningKey` | Sí | `JwtOptions` (`Jwt`) | Sí, mínimo 32 caracteres fuera de Development |
 | `Jwt__Issuer` | No | `JwtOptions` (`Jwt`) | No (tiene valor por defecto `UniHome`) |
 | `Jwt__Audience` | No | `JwtOptions` (`Jwt`) | No (tiene valor por defecto `UniHome.Mobile`) |
@@ -81,6 +91,8 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Smtp__FromName` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `PasswordRecovery__ResetLinkBaseUrl` | No | `PasswordRecoveryOptions` (`PasswordRecovery`) | Solo si se habilita recuperación de contraseña; URL HTTPS del cliente (se le agrega `?token=...`) |
 | `Proxy__TrustForwardedHeaders` | No | `ProxyOptions` (`Proxy`) | Sí, en `true`, solo si el contenedor corre detrás del ingress de Container Apps |
+| `Proxy__KnownProxies__0` | No | `ProxyOptions` (`Proxy`) | `127.0.0.1`; obligatorio si `TrustForwardedHeaders=true` (el ingress llega por loopback) |
+| `Proxy__KnownProxies__1` | No | `ProxyOptions` (`Proxy`) | `::1`; obligatorio si `TrustForwardedHeaders=true` (loopback IPv6) |
 | `Api__EnableSwagger` | No | `ApiOptions` (`Api`) | No; `false` por defecto, activar solo para demostraciones puntuales |
 
 Si no existe ninguna clave bajo `Smtp`, el registro funciona sin enviar correo
@@ -105,6 +117,14 @@ variable en `true`:
 Por eso está desactivada por defecto (`false`) y solo debe activarse cuando el
 contenedor efectivamente corre detrás de ese ingress, nunca si queda expuesto
 directamente a Internet sin un proxy de por medio.
+
+`Proxy__TrustForwardedHeaders=true` exige al menos un proxy o red confiable
+(`Proxy__KnownProxies` o `Proxy__KnownNetworks`). El ingress de Container Apps
+se conecta al proceso por loopback, por lo que los valores correctos son
+`127.0.0.1` y `::1`. Sin ellos, la API falla cerrada al arrancar con
+`InvalidOperationException` y el contenedor termina con exit code 139 (incidente
+del SHA `3e947dcb87d678a39bb22112649a61c154dd1e13`). Es una validación
+deliberada: no se debe desactivar ni sustituir por confiar en cualquier origen.
 
 ## Imagen de contenedor
 
@@ -190,6 +210,8 @@ az containerapp secret set --name unihome-api --resource-group rg-unihome-dev --
 az containerapp update --name unihome-api --resource-group rg-unihome-dev --set-env-vars `
   "ASPNETCORE_ENVIRONMENT=Production" `
   "Proxy__TrustForwardedHeaders=true" `
+  "Proxy__KnownProxies__0=127.0.0.1" `
+  "Proxy__KnownProxies__1=::1" `
   "Jwt__Issuer=UniHome" `
   "Jwt__Audience=UniHome.Mobile" `
   "MongoDb__DatabaseName=<valor real>" `

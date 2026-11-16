@@ -8,6 +8,11 @@ public interface IUnitRepository
 
     Task<Unit?> FindByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    Task<Unit?> FindByPhotoStorageKeyAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<Unit?>(null);
+
     Task<IReadOnlyList<Unit>> FindByIdsAsync(
         IReadOnlyCollection<Guid> ids,
         CancellationToken cancellationToken = default);
@@ -23,7 +28,6 @@ public interface IUnitRepository
         bool onlyIndividual,
         ForWhom? forWhom,
         CancellationToken cancellationToken = default);
-
     Task<bool> UpdateServicesAsync(
         Guid id,
         Guid propertyId,

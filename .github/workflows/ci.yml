@@ -291,7 +291,7 @@ jobs:
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
           -c Release --no-build --no-restore
-          --filter "FullyQualifiedName~OpenApiTests|FullyQualifiedName~OpenApiDocumentTests|FullyQualifiedName~OpenApiGenderContractTests|FullyQualifiedName~SwaggerUiTests"
+          --filter "FullyQualifiedName~OpenApi|FullyQualifiedName~SwaggerUiTests|FullyQualifiedName~HealthReadinessTests"
           --logger "trx;LogFileName=openapi-contract.trx"
           --results-directory TestResults/contracts
       - name: Guardar contratos verificados
@@ -501,7 +501,7 @@ jobs:
         run: dotnet restore UniHome.Backend.slnx --locked-mode
       - name: Build Release
         run: dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
-      - name: Inicializar base efímera con M01-001, M03-001, M05-001 y M07-001
+      - name: Inicializar base efímera con M01-001, M01-002, M03-001, M05-001 y M07-001
         id: mongo-migration
         run: |
           set -euo pipefail
@@ -519,6 +519,19 @@ jobs:
           grep -F 'M01 coinciden: True' TestResults/mongo/migration-verify.txt
           grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify.txt
           grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database unihome_ci_verificacion --confirm --version M01-002 \
+            | tee TestResults/mongo/migration-apply-m01-002.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database unihome_ci_verificacion --version M01-002 \
+            | tee TestResults/mongo/migration-verify-m01-002.txt
+          grep -F 'Registrada: True' TestResults/mongo/migration-verify-m01-002.txt
+          grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify-m01-002.txt
+          grep -F 'M01-002 coinciden: True' TestResults/mongo/migration-verify-m01-002.txt
+          grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m01-002.txt
+          grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m01-002.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
             apply --database unihome_ci_verificacion --confirm --version M03-001 \
@@ -557,7 +570,7 @@ jobs:
           grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify-m07.txt
           grep -F 'M07-001 coinciden: True' TestResults/mongo/migration-verify-m07.txt
           grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m07.txt
-          grep -F 'Resultado: V' TestResults/mongo/migration-verify-m07.txt
+          grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m07.txt
       - name: Pruebas reales contra MongoDB
         id: mongo-tests
         run: >-
@@ -664,6 +677,57 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Job manual y opcional: usa credenciales Cloudinary dedicadas y un environment
+  # protegido para exigir aprobación humana. No se ejecuta en PR/push ni crea secretos.
+  cloudinary-integration:
+    name: Cloudinary Integration (manual, credenciales dedicadas)
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_CLOUDINARY_INTEGRATION == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.run_mongo_only != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: cloudinary-integration
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Exigir credenciales dedicadas sin imprimirlas
+        env:
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_INTEGRATION_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_INTEGRATION_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_INTEGRATION_API_SECRET }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDINARY_CLOUD_NAME" || { echo "::error::Falta CLOUDINARY_INTEGRATION_CLOUD_NAME"; exit 1; }
+          test -n "$CLOUDINARY_API_KEY" || { echo "::error::Falta CLOUDINARY_INTEGRATION_API_KEY"; exit 1; }
+          test -n "$CLOUDINARY_API_SECRET" || { echo "::error::Falta CLOUDINARY_INTEGRATION_API_SECRET"; exit 1; }
+      - name: Restore y build
+        run: |
+          dotnet restore UniHome.Backend.slnx --locked-mode
+          dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
+      - name: Ejecutar prueba real opt-in con limpieza en finally
+        env:
+          UNIHOME_RUN_CLOUDINARY_INTEGRATION_TESTS: '1'
+          Cloudinary__CloudName: ${{ secrets.CLOUDINARY_INTEGRATION_CLOUD_NAME }}
+          Cloudinary__ApiKey: ${{ secrets.CLOUDINARY_INTEGRATION_API_KEY }}
+          Cloudinary__ApiSecret: ${{ secrets.CLOUDINARY_INTEGRATION_API_SECRET }}
+        run: |
+          dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj \
+            --configuration Release --no-build --no-restore \
+            --filter "FullyQualifiedName~CloudinaryPersistenceTests" \
+            --logger "trx;LogFileName=cloudinary-integration.trx" \
+            --results-directory TestResults/cloudinary
+      - name: Publicar evidencia
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloudinary-integration-results
+          path: TestResults/cloudinary/**/*.trx
+          if-no-files-found: warn
+          retention-days: 7
+
   docker-build:
     name: Docker Build (sin push ni Azure)
     needs: detect-changes
@@ -704,6 +768,274 @@ jobs:
           tar -xzf dockle.tar.gz dockle
           chmod +x dockle
           ./dockle --exit-code 1 --exit-level FATAL unihome-ci:${GITHUB_SHA::12}
+
+  container-smoke:
+    name: Container Smoke (imagen real, Linux)
+    needs: [detect-changes, docker-build]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_DOCKER == 'true' && needs.docker-build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        # Misma imagen efímera fijada por digest que usa MongoDB CI.
+        image: mongo:8.0.34@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+        env:
+          GLIBC_TUNABLES: glibc.pthread.rseq=1
+        ports:
+          - 127.0.0.1:27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+          --health-start-period 10s
+    env:
+      SMOKE_CONTAINER: unihome-smoke
+      SMOKE_DATABASE: unihome_smoke
+      SMOKE_UPSTASH_PORT: '8079'
+      SMOKE_UPSTASH_PID_FILE: /tmp/unihome-smoke-upstash.pid
+      MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+      MongoDb__DatabaseName: unihome_smoke
+      MongoDb__ServerSelectionTimeoutSeconds: '5'
+      UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_smoke
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Descargar imagen construida
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ci-container-image
+      - name: Cargar imagen y fijar tag local
+        run: |
+          set -euo pipefail
+          docker load --input unihome-ci.tar
+          echo "SMOKE_IMAGE=unihome-ci:${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+      - name: Inicializar MongoDB efímero con M01-001
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if docker exec "${{ job.services.mongo.id }}" \
+              mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -qx '1'; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::MongoDB efímero no disponible."
+              exit 1
+            fi
+            sleep 2
+          done
+          dotnet restore tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj --locked-mode
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-restore -- \
+            apply --database "$SMOKE_DATABASE" --confirm --version M01-001
+      - name: Reproducir el fallo sin Proxy__KnownProxies (control negativo)
+        run: |
+          set -euo pipefail
+          negative_name="${SMOKE_CONTAINER}-negative"
+          docker rm -f "$negative_name" >/dev/null 2>&1 || true
+          set +e
+          timeout 30 docker run --rm --name "$negative_name" --network host \
+            -e ASPNETCORE_ENVIRONMENT=Production \
+            -e Proxy__TrustForwardedHeaders=true \
+            -e Jwt__SigningKey=unihome-smoke-signing-key-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e VerificationCode__HmacSecret=unihome-smoke-hmac-secret-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e Auth__RateLimit__IpHashSalt=unihome-smoke-ip-salt-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e Redis__Enabled=true \
+            -e Redis__RestUrl=https://smoke.invalid \
+            -e Redis__RestToken=smoke-test-token \
+            -e MongoDb__ConnectionString="$MongoDb__ConnectionString" \
+            -e MongoDb__DatabaseName="$MongoDb__DatabaseName" \
+            -e MongoDb__ServerSelectionTimeoutSeconds=5 \
+            -e Api__EnableSwagger=false \
+            "$SMOKE_IMAGE" > smoke-negative.log 2>&1
+          negative_code=$?
+          set -e
+          docker rm -f "$negative_name" >/dev/null 2>&1 || true
+          echo "NEGATIVE_EXIT_CODE=$negative_code" >> "$GITHUB_ENV"
+          echo "Exit code real del control negativo: $negative_code"
+          if [ "$negative_code" -eq 0 ]; then
+            echo "::error::La imagen no falló sin Proxy__KnownProxies; el control negativo no es válido."
+            cat smoke-negative.log
+            exit 1
+          fi
+          grep -F "Proxy:TrustForwardedHeaders" smoke-negative.log
+          grep -F "Proxy:KnownProxies o Proxy:KnownNetworks" smoke-negative.log
+      - name: Preparar stub HTTPS local de Upstash para readiness
+        run: |
+          set -euo pipefail
+          CERT_DIR="$RUNNER_TEMP/unihome-smoke-upstash"
+          mkdir -p "$CERT_DIR"
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 \
+            -keyout "$CERT_DIR/ca-key.pem" -out "$CERT_DIR/ca-cert.pem" \
+            -subj "/CN=UniHome Smoke Upstash CA" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign"
+          openssl req -newkey rsa:2048 -sha256 -nodes \
+            -keyout "$CERT_DIR/server-key.pem" -out "$CERT_DIR/server.csr" \
+            -subj "/CN=127.0.0.1"
+          openssl x509 -req -in "$CERT_DIR/server.csr" \
+            -CA "$CERT_DIR/ca-cert.pem" -CAkey "$CERT_DIR/ca-key.pem" \
+            -CAcreateserial -out "$CERT_DIR/server-cert.pem" -days 1 -sha256 \
+            -extfile <(printf "subjectAltName=IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n")
+          cat "$CERT_DIR/server-cert.pem" "$CERT_DIR/ca-cert.pem" \
+            > "$CERT_DIR/server-chain.pem"
+          cp "$CERT_DIR/ca-cert.pem" "$GITHUB_WORKSPACE/smoke-upstash-ca.crt"
+          chmod 644 "$GITHUB_WORKSPACE/smoke-upstash-ca.crt"
+          nohup python3 tools/ci/smoke_upstash_stub.py \
+            --host 127.0.0.1 --port "$SMOKE_UPSTASH_PORT" \
+            --cert "$CERT_DIR/server-chain.pem" --key "$CERT_DIR/server-key.pem" \
+            > "$GITHUB_WORKSPACE/smoke-upstash.log" 2>&1 &
+          echo $! > "$SMOKE_UPSTASH_PID_FILE"
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error --cacert "$CERT_DIR/ca-cert.pem" \
+              "https://127.0.0.1:${SMOKE_UPSTASH_PORT}/health" > /dev/null; then
+              echo "Stub HTTPS de Upstash disponible (intento ${attempt})."
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$SMOKE_UPSTASH_PID_FILE")" 2>/dev/null; then
+              cat "$GITHUB_WORKSPACE/smoke-upstash.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$GITHUB_WORKSPACE/smoke-upstash.log"
+          exit 1
+      - name: Arrancar la imagen real con configuración equivalente a Azure
+        run: |
+          set -euo pipefail
+          docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+          # La imagen ya define el binding HTTP interno en 8080; no se repite
+          # aquí para no introducir una URL clear-text en código nuevo.
+          docker run --detach --name "$SMOKE_CONTAINER" --network host \
+            -e ASPNETCORE_ENVIRONMENT=Production \
+            -e Proxy__TrustForwardedHeaders=true \
+            -e Proxy__KnownProxies__0=127.0.0.1 \
+            -e Proxy__KnownProxies__1=::1 \
+            -e Jwt__Issuer=UniHome \
+            -e Jwt__Audience=UniHome.Mobile \
+            -e Jwt__SigningKey=unihome-smoke-signing-key-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e VerificationCode__HmacSecret=unihome-smoke-hmac-secret-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e Auth__RateLimit__IpHashSalt=unihome-smoke-ip-salt-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e Redis__Enabled=true \
+            -e Redis__RestUrl="https://127.0.0.1:${SMOKE_UPSTASH_PORT}" \
+            -e Redis__RestToken=smoke-test-token \
+            -e SSL_CERT_FILE=/tmp/unihome-smoke-upstash-ca.crt \
+            -v "$GITHUB_WORKSPACE/smoke-upstash-ca.crt:/tmp/unihome-smoke-upstash-ca.crt:ro" \
+            -e MongoDb__ConnectionString="$MongoDb__ConnectionString" \
+            -e MongoDb__DatabaseName="$MongoDb__DatabaseName" \
+            -e MongoDb__ServerSelectionTimeoutSeconds=5 \
+            -e Cloudinary__PublicBaseUrl=https://unihome.invalid \
+            -e Api__EnableSwagger=false \
+            "$SMOKE_IMAGE"
+      - name: Verificar proceso, puerto y health checks reales
+        run: |
+          set -euo pipefail
+          live_ok=false
+          for attempt in $(seq 1 60); do
+            if ! docker inspect -f '{{.State.Running}}' "$SMOKE_CONTAINER" | grep -qx true; then
+              echo "::error::El contenedor terminó antes de responder."
+              docker inspect -f 'exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}}' "$SMOKE_CONTAINER" || true
+              docker logs "$SMOKE_CONTAINER" || true
+              exit 1
+            fi
+            if curl --fail --silent --show-error \
+              -H 'X-Forwarded-Proto: https' \
+              http://127.0.0.1:8080/health/live > live.json; then
+              live_ok=true
+              break
+            fi
+            sleep 2
+          done
+          test "$live_ok" = true
+
+          ready_ok=false
+          for attempt in $(seq 1 30); do
+            if ! docker inspect -f '{{.State.Running}}' "$SMOKE_CONTAINER" | grep -qx true; then
+              echo "::error::El contenedor terminó antes de readiness."
+              docker inspect -f 'exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}}' "$SMOKE_CONTAINER" || true
+              docker logs "$SMOKE_CONTAINER" || true
+              exit 1
+            fi
+            if curl --fail --silent --show-error \
+              -H 'X-Forwarded-Proto: https' \
+              http://127.0.0.1:8080/health/ready > ready.json; then
+              ready_ok=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready_ok" = true
+
+          python3 - <<'PY'
+          import json
+          for name in ("live", "ready"):
+              with open(f"{name}.json", encoding="utf-8") as stream:
+                  payload = json.load(stream)
+              if payload.get("status") != "Healthy":
+                  raise SystemExit(f"{name} no está Healthy: {payload}")
+          PY
+
+          sleep 5
+          test "$(docker inspect -f '{{.State.Running}}' "$SMOKE_CONTAINER")" = "true"
+          test "$(docker inspect -f '{{.State.ExitCode}}' "$SMOKE_CONTAINER")" = "0"
+          test "$(docker inspect -f '{{.State.OOMKilled}}' "$SMOKE_CONTAINER")" = "false"
+          test "$(docker inspect -f '{{.RestartCount}}' "$SMOKE_CONTAINER")" = "0"
+          docker logs "$SMOKE_CONTAINER" 2>&1 | grep -F "Application started. Press Ctrl+C to shut down."
+          docker logs "$SMOKE_CONTAINER" 2>&1 | grep -F "Now listening on:"
+          if docker logs "$SMOKE_CONTAINER" 2>&1 | grep -Eiq \
+            'Unhandled exception|Segmentation fault|SIGSEGV|Application is shutting down'; then
+            echo "::error::Los logs contienen un error fatal."
+            docker logs "$SMOKE_CONTAINER" || true
+            exit 1
+          fi
+          echo "Contenedor estable; /health/live y /health/ready responden Healthy."
+      - name: Guardar evidencia y limpiar
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/container-smoke
+          docker logs "$SMOKE_CONTAINER" > artifacts/container-smoke/container.log 2>&1 || true
+          docker inspect "$SMOKE_CONTAINER" > artifacts/container-smoke/container-inspect.json 2>&1 || true
+          cp -f smoke-negative.log artifacts/container-smoke/negative.log 2>/dev/null || true
+          cp -f smoke-upstash.log artifacts/container-smoke/upstash.log 2>/dev/null || true
+          cp -f live.json artifacts/container-smoke/live.json 2>/dev/null || true
+          cp -f ready.json artifacts/container-smoke/ready.json 2>/dev/null || true
+          stub_stopped=false
+          if [ -f "$SMOKE_UPSTASH_PID_FILE" ]; then
+            stub_pid=$(cat "$SMOKE_UPSTASH_PID_FILE")
+            kill "$stub_pid" 2>/dev/null || true
+            for attempt in $(seq 1 10); do
+              if ! kill -0 "$stub_pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if kill -0 "$stub_pid" 2>/dev/null; then
+              echo "::error::El stub HTTPS de Upstash no se detuvo."
+              exit 1
+            fi
+            stub_stopped=true
+          fi
+          {
+            echo "# Container Smoke"
+            echo ""
+            echo "- Imagen: \`${SMOKE_IMAGE:-no-cargada}\`"
+            echo "- Resultado: \`${{ job.status }}\`"
+            echo "- Exit code del control negativo: \`${NEGATIVE_EXIT_CODE:-n/d}\`"
+            echo "- Liveness/readiness: \`${live_ok:-false}\` / \`${ready_ok:-false}\`"
+            echo "- Stub HTTPS de Upstash detenido: \`$stub_stopped\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+      - name: Publicar evidencia del contenedor
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-smoke-evidence
+          path: artifacts/container-smoke/**
+          if-no-files-found: warn
+          retention-days: 7
 
   dast-zap:
     name: DAST (OWASP ZAP) - baseline pasivo aislado
@@ -799,7 +1131,7 @@ jobs:
           done
           echo "::error::MongoDB efímero no disponible para DAST."
           exit 1
-      - name: Inicializar base efímera DAST con M01-001, M03-001, M05-001 y M07-001
+      - name: Inicializar base efímera DAST con M01-001, M01-002, M03-001, M05-001 y M07-001
         run: |
           set -euo pipefail
           mkdir -p artifacts/dast-zap
@@ -812,6 +1144,15 @@ jobs:
             verify --database "$MONGO_DAST_DATABASE" --version M01-001 \
             | tee artifacts/dast-zap/migration-verify.txt
           grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_DAST_DATABASE" --confirm --version M01-002 \
+            | tee artifacts/dast-zap/migration-apply-m01-002.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_DAST_DATABASE" --version M01-002 \
+            | tee artifacts/dast-zap/migration-verify-m01-002.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m01-002.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
             apply --database "$MONGO_DAST_DATABASE" --confirm --version M03-001 \
@@ -838,7 +1179,7 @@ jobs:
             --configuration Release --no-build -- \
             verify --database "$MONGO_DAST_DATABASE" --version M07-001 \
             | tee artifacts/dast-zap/migration-verify-m07.txt
-          grep -F 'Resultado: V' artifacts/dast-zap/migration-verify-m07.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m07.txt
       - name: Preparar SMTP de captura local y confianza TLS
         run: |
           set -euo pipefail
@@ -1002,45 +1343,91 @@ jobs:
           Smtp__FromEmail: no-reply@unihome.test
           Smtp__FromName: UniHome DAST
           Smtp__TimeoutSeconds: '15'
+          PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          Cloudinary__UseEphemeralStorage: 'true'
+          Auth__RateLimit__LoginPermitLimit: '10000'
+          Auth__RateLimit__RefreshPermitLimit: '10000'
+          Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
+          Auth__RateLimit__ResendPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetRequestPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetConfirmPermitLimit: '10000'
           SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
           SSL_CERT_DIR: /etc/ssl/certs
         run: |
           set -euo pipefail
-          mkdir -p artifacts/dast-zap
+          mkdir -p artifacts/dast-zap .ci-state
           API_DLL="$GITHUB_WORKSPACE/src/UniHome.Api/bin/Release/net10.0/UniHome.Api.dll"
           test -f "$API_DLL"
-          (
-            cd "$(dirname "$API_DLL")"
-            nohup dotnet UniHome.Api.dll --urls "$DAST_TARGET" \
-              > "$GITHUB_WORKSPACE/artifacts/dast-zap/api.log" 2>&1 &
-            echo $! > "$API_PID_FILE"
-          )
-          live_code=""
-          for attempt in $(seq 1 60); do
-            live_code=$(curl -sS -o artifacts/dast-zap/health-live.json \
-              -w '%{http_code}' "$DAST_TARGET/health/live" || true)
-            if [ "$live_code" = "200" ]; then break; fi
-            if ! kill -0 "$(cat "$API_PID_FILE")" 2>/dev/null; then
-              sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
-                artifacts/dast-zap/api.log | tail -40
-              echo "::error::La API DAST terminó antes de responder /health/live."
+
+          start_api() {
+            (
+              cd "$(dirname "$API_DLL")"
+              nohup dotnet UniHome.Api.dll --urls "$DAST_TARGET" \
+                > "$GITHUB_WORKSPACE/artifacts/dast-zap/api.log" 2>&1 &
+              echo $! > "$API_PID_FILE"
+            )
+          }
+
+          stop_api() {
+            if [ ! -f "$API_PID_FILE" ]; then
+              return 0
+            fi
+            local api_pid
+            api_pid=$(cat "$API_PID_FILE")
+            kill "$api_pid" 2>/dev/null || true
+            for attempt in $(seq 1 20); do
+              if ! kill -0 "$api_pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if kill -0 "$api_pid" 2>/dev/null; then
+              echo "::error::La API DAST no se detuvo para reiniciar con el administrador sintético."
               exit 1
             fi
-            sleep 2
-          done
-          if [ "$live_code" != "200" ]; then
-            echo "::error::La API DAST no respondió /health/live con HTTP 200."
-            sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
-              artifacts/dast-zap/api.log | tail -40
-            exit 1
-          fi
-          ready_code=$(curl -sS -o artifacts/dast-zap/health-ready.json \
-            -w '%{http_code}' "$DAST_TARGET/health/ready" || true)
-          if [ "$ready_code" != "200" ]; then
-            echo "::error::La API DAST no respondió /health/ready con HTTP 200; MongoDB no está listo."
-            cat artifacts/dast-zap/health-ready.json || true
-            exit 1
-          fi
+            rm -f "$API_PID_FILE"
+            sleep 1
+          }
+
+          wait_api() {
+            live_code=""
+            for attempt in $(seq 1 60); do
+              live_code=$(curl -sS -o artifacts/dast-zap/health-live.json \
+                -w '%{http_code}' "$DAST_TARGET/health/live" || true)
+              if [ "$live_code" = "200" ]; then break; fi
+              if ! kill -0 "$(cat "$API_PID_FILE")" 2>/dev/null; then
+                sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+                  artifacts/dast-zap/api.log | tail -40
+                echo "::error::La API DAST terminó antes de responder /health/live."
+                exit 1
+              fi
+              sleep 2
+            done
+            if [ "$live_code" != "200" ]; then
+              echo "::error::La API DAST no respondió /health/live con HTTP 200."
+              sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+                artifacts/dast-zap/api.log | tail -40
+              exit 1
+            fi
+            ready_code=$(curl -sS -o artifacts/dast-zap/health-ready.json \
+              -w '%{http_code}' "$DAST_TARGET/health/ready" || true)
+            if [ "$ready_code" != "200" ]; then
+              echo "::error::La API DAST no respondió /health/ready con HTTP 200; MongoDB no está listo."
+              cat artifacts/dast-zap/health-ready.json || true
+              exit 1
+            fi
+          }
+
+          start_api
+          wait_api
+
+          python3 tools/ci/provision_admin.py \
+            --target "$DAST_TARGET"
+          ADMIN_ID=$(python3 -c 'import json; print(json.load(open(".ci-state/admin.json", encoding="utf-8"))["accountId"])')
+
+          stop_api
+          export Admin__AccountIds__0="$ADMIN_ID"
+          start_api
+          wait_api
+
           {
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "target=$DAST_TARGET"
@@ -1049,6 +1436,7 @@ jobs:
             echo "health_ready_http=$ready_code"
             echo "api_pid=$(cat "$API_PID_FILE")"
             echo "smtp_capture=127.0.0.1:587"
+            echo "admin_synthetic=true"
           } > artifacts/dast-zap/startup-summary.txt
           sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g; s#(Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
             artifacts/dast-zap/api.log | tail -40 >> artifacts/dast-zap/startup-summary.txt
@@ -1081,6 +1469,8 @@ jobs:
           docker logs unihome-zap > artifacts/dast-zap/zap-startup.log 2>&1 || true
           exit 1
       - name: Ejecutar baseline pasivo, rutas reales y reportes
+        env:
+          MONGO_CONTAINER_ID: ${{ job.services.mongo.id }}
         run: |
           set -euo pipefail
           python3 tools/ci/zap_dast.py \
@@ -1159,6 +1549,7 @@ jobs:
             echo "mongo_database_dropped=false" >> "$SUMMARY"
             exit 1
           fi
+          rm -rf .ci-state .dast-mail
       - name: Publicar evidencia DAST
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -1255,7 +1646,7 @@ jobs:
           done
           echo "::error::MongoDB efímero no disponible para RESTler."
           exit 1
-      - name: Inicializar base efímera RESTler con M01-001, M03-001, M05-001 y M07-001
+      - name: Inicializar base efímera RESTler con M01-001, M01-002, M03-001, M05-001 y M07-001
         run: |
           set -euo pipefail
           mkdir -p artifacts/restler
@@ -1268,6 +1659,15 @@ jobs:
             verify --database "$MONGO_RESTLER_DATABASE" --version M01-001 \
             | tee artifacts/restler/migration-verify.txt
           grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M01-002 \
+            | tee artifacts/restler/migration-apply-m01-002.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_RESTLER_DATABASE" --version M01-002 \
+            | tee artifacts/restler/migration-verify-m01-002.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m01-002.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
             apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M03-001 \
@@ -1294,7 +1694,7 @@ jobs:
             --configuration Release --no-build -- \
             verify --database "$MONGO_RESTLER_DATABASE" --version M07-001 \
             | tee artifacts/restler/migration-verify-m07.txt
-          grep -F 'Resultado: V' artifacts/restler/migration-verify-m07.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m07.txt
       - name: Preparar SMTP de captura local y confianza TLS
         run: |
           set -euo pipefail
@@ -1357,6 +1757,10 @@ jobs:
           Auth__RateLimit__RefreshPermitLimit: '10000'
           Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
           Auth__RateLimit__ResendPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetRequestPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetConfirmPermitLimit: '10000'
+          PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          Cloudinary__UseEphemeralStorage: 'true'
           Smtp__Host: 127.0.0.1
           Smtp__Port: '587'
           Smtp__UseStartTls: 'true'
@@ -1416,6 +1820,104 @@ jobs:
           } > artifacts/restler/startup-summary.txt
           sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g; s#(Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
             artifacts/restler/api.log | tail -40 >> artifacts/restler/startup-summary.txt
+      - name: Provisionar administrador sintético RESTler
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-state
+          python3 tools/ci/provision_admin.py \
+            --target "$RESTLER_TARGET"
+      - name: Reiniciar API RESTler con administrador sintético
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          Api__EnableSwagger: 'true'
+          MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+          MongoDb__DatabaseName: unihome_restler
+          MongoDb__ServerSelectionTimeoutSeconds: '5'
+          Jwt__SigningKey: 'restler-synthetic-jwt-signing-key-not-a-production-secret-0123456789'
+          VerificationCode__HmacSecret: 'restler-synthetic-hmac-secret-not-a-production-secret-0123456789'
+          Auth__RateLimit__LoginPermitLimit: '10000'
+          Auth__RateLimit__RefreshPermitLimit: '10000'
+          Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
+          Auth__RateLimit__ResendPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetRequestPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetConfirmPermitLimit: '10000'
+          PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          Cloudinary__UseEphemeralStorage: 'true'
+          Smtp__Host: 127.0.0.1
+          Smtp__Port: '587'
+          Smtp__UseStartTls: 'true'
+          Smtp__CheckCertificateRevocation: 'false'
+          Smtp__Username: unihome-restler
+          Smtp__Password: synthetic-not-a-secret
+          Smtp__FromEmail: no-reply@unihome.test
+          Smtp__FromName: UniHome RESTler
+          Smtp__TimeoutSeconds: '15'
+          SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_DIR: /etc/ssl/certs
+        run: |
+          set -euo pipefail
+          ADMIN_ID=$(python3 -c 'import json; print(json.load(open(".ci-state/admin.json", encoding="utf-8"))["accountId"])')
+          if [ -f "$API_PID_FILE" ]; then
+            api_pid=$(cat "$API_PID_FILE")
+            kill "$api_pid" 2>/dev/null || true
+            for attempt in $(seq 1 20); do
+              if ! kill -0 "$api_pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if kill -0 "$api_pid" 2>/dev/null; then
+              echo "::error::La API RESTler no se detuvo para reiniciar con el administrador sintético."
+              exit 1
+            fi
+            rm -f "$API_PID_FILE"
+            sleep 1
+          fi
+          API_DLL="$GITHUB_WORKSPACE/src/UniHome.Api/bin/Release/net10.0/UniHome.Api.dll"
+          test -f "$API_DLL"
+          export Admin__AccountIds__0="$ADMIN_ID"
+          (
+            cd "$(dirname "$API_DLL")"
+            nohup dotnet UniHome.Api.dll --urls "$RESTLER_TARGET" \
+              > "$GITHUB_WORKSPACE/artifacts/restler/api.log" 2>&1 &
+            echo $! > "$API_PID_FILE"
+          )
+          live_code=""
+          for attempt in $(seq 1 60); do
+            live_code=$(curl -sS -o artifacts/restler/health-live.json \
+              -w '%{http_code}' "$RESTLER_TARGET/health/live" || true)
+            if [ "$live_code" = "200" ]; then break; fi
+            if ! kill -0 "$(cat "$API_PID_FILE")" 2>/dev/null; then
+              sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+                artifacts/restler/api.log | tail -40
+              echo "::error::La API RESTler terminó antes de responder /health/live."
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$live_code" != "200" ]; then
+            echo "::error::La API RESTler no respondió /health/live con HTTP 200."
+            sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+              artifacts/restler/api.log | tail -40
+            exit 1
+          fi
+          ready_code=$(curl -sS -o artifacts/restler/health-ready.json \
+            -w '%{http_code}' "$RESTLER_TARGET/health/ready" || true)
+          if [ "$ready_code" != "200" ]; then
+            echo "::error::La API RESTler no respondió /health/ready con HTTP 200."
+            cat artifacts/restler/health-ready.json || true
+            exit 1
+          fi
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "target=$RESTLER_TARGET"
+            echo "mongo_database=$MONGO_RESTLER_DATABASE"
+            echo "health_live_http=$live_code"
+            echo "health_ready_http=$ready_code"
+            echo "api_pid=$(cat "$API_PID_FILE")"
+            echo "smtp_capture=127.0.0.1:587"
+            echo "admin_synthetic=true"
+          } > artifacts/restler/startup-summary.txt
+          sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g; s#(Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+            artifacts/restler/api.log | tail -40 >> artifacts/restler/startup-summary.txt
       - name: Compilar RESTler v9.3.1 fijado por commit
         run: |
           set -euo pipefail
@@ -1436,6 +1938,7 @@ jobs:
         env:
           RESTLER_BIN: /tmp/restler-bin
           PYTHON: python3
+          MONGO_CONTAINER_ID: ${{ job.services.mongo.id }}
         run: |
           set -euo pipefail
           bash tools/ci/restler/run-isolated.sh \
@@ -1495,7 +1998,7 @@ jobs:
             echo "mongo_database_dropped=false" >> "$SUMMARY"
             exit 1
           fi
-          rm -rf .restler-state
+          rm -rf .restler-state .ci-state .dast-mail
       - name: Publicar evidencia RESTler
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -1507,7 +2010,7 @@ jobs:
 
   pr-quality-gate:
     name: PR Quality Gate (controles obligatorios)
-    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, dast-zap, restler-fuzzing]
+    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, cloudinary-integration, docker-build, container-lint, container-smoke, dast-zap, restler-fuzzing]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1521,6 +2024,7 @@ jobs:
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
       UNIHOME_ENABLE_PACT: ${{ vars.UNIHOME_ENABLE_PACT }}
+      UNIHOME_ENABLE_CLOUDINARY_INTEGRATION: ${{ vars.UNIHOME_ENABLE_CLOUDINARY_INTEGRATION }}
       UNIHOME_ENABLE_DOCKER: ${{ vars.UNIHOME_ENABLE_DOCKER }}
       UNIHOME_ENABLE_ZAP: ${{ vars.UNIHOME_ENABLE_ZAP }}
       UNIHOME_ENABLE_RESTLER: ${{ vars.UNIHOME_ENABLE_RESTLER }}
@@ -1531,7 +2035,7 @@ jobs:
 
   hardening-report:
     name: Hardening Report (Combinado)
-    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, dast-zap, restler-fuzzing, pr-quality-gate]
+    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, cloudinary-integration, docker-build, container-lint, container-smoke, dast-zap, restler-fuzzing, pr-quality-gate]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1545,6 +2049,7 @@ jobs:
       UNIHOME_ENABLE_MONGO_CI: ${{ vars.UNIHOME_ENABLE_MONGO_CI }}
       UNIHOME_ENABLE_MUTATION: ${{ vars.UNIHOME_ENABLE_MUTATION }}
       UNIHOME_ENABLE_PACT: ${{ vars.UNIHOME_ENABLE_PACT }}
+      UNIHOME_ENABLE_CLOUDINARY_INTEGRATION: ${{ vars.UNIHOME_ENABLE_CLOUDINARY_INTEGRATION }}
       UNIHOME_ENABLE_DOCKER: ${{ vars.UNIHOME_ENABLE_DOCKER }}
       UNIHOME_ENABLE_ZAP: ${{ vars.UNIHOME_ENABLE_ZAP }}
       UNIHOME_ENABLE_RESTLER: ${{ vars.UNIHOME_ENABLE_RESTLER }}
@@ -1566,8 +2071,8 @@ jobs:
     # Explícito para no heredar el success() implícito del job: los skips de
     # jobs opcionales transitivos (por ejemplo Pact) no deben omitir el deploy.
     # Los needs obligatorios se exigen uno a uno como success.
-    needs: [detect-changes, build-test, contract-test, docker-build, container-lint, pr-quality-gate, hardening-report]
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && github.event.inputs.run_mongo_only != 'true' && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
+    needs: [detect-changes, build-test, contract-test, docker-build, container-lint, container-smoke, pr-quality-gate, hardening-report]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && github.event.inputs.run_mongo_only != 'true' && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.container-smoke.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: azure-dev
@@ -1709,6 +2214,10 @@ jobs:
               --name "$AZURE_CONTAINER_APP" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --image "$previous_image" \
+              --set-env-vars \
+                "Proxy__TrustForwardedHeaders=true" \
+                "Proxy__KnownProxies__0=127.0.0.1" \
+                "Proxy__KnownProxies__1=::1" \
               --revision-suffix "rb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"; then
               echo "::error::Falló el rollback a la imagen anterior."
               return 1
@@ -1789,6 +2298,10 @@ jobs:
             --name "$AZURE_CONTAINER_APP" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --image "$IMAGE" \
+            --set-env-vars \
+              "Proxy__TrustForwardedHeaders=true" \
+              "Proxy__KnownProxies__0=127.0.0.1" \
+              "Proxy__KnownProxies__1=::1" \
             --revision-suffix "sha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
           new_revision="$(az containerapp show \
@@ -1796,6 +2309,24 @@ jobs:
             --query 'properties.latestRevisionName' -o tsv)"
           if [ -z "$new_revision" ] || [ "$new_revision" = "$previous_revision" ]; then
             echo "::error::Container Apps no creó una revisión nueva verificable."
+            exit 1
+          fi
+
+          revision_proxy_trust="$(az containerapp revision show \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$new_revision" \
+            --query "properties.template.containers[0].env[?name=='Proxy__TrustForwardedHeaders'].value | [0]" \
+            -o tsv 2>/dev/null || true)"
+          revision_known_proxy_count="$(az containerapp revision show \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$new_revision" \
+            --query "length(properties.template.containers[0].env[?starts_with(name, 'Proxy__KnownProxies') || starts_with(name, 'Proxy__KnownNetworks')])" \
+            -o tsv 2>/dev/null || true)"
+          if [ "$revision_proxy_trust" = "true" ] \
+            && [ "${revision_known_proxy_count:-0}" -eq 0 ]; then
+            echo "::error::La revisión $new_revision activa Proxy:TrustForwardedHeaders sin Proxy:KnownProxies/KnownNetworks; el proceso fallaría al arrancar."
             exit 1
           fi
 

@@ -23,8 +23,9 @@ namespace UniHome.IntegrationTests;
 
 /// <summary>
 /// Prueba real opt-in de M04/M07 contra MongoDB: exige M05-001 y M07-001,
-/// usa una base aislada y elimina únicamente sus documentos. DEC-04 sigue
-/// pendiente, por lo que las fotos se representan con el doble de almacenamiento.
+/// usa una base aislada y elimina únicamente sus documentos. Las fotos usan el
+/// puerto fail-closed de Cloudinary; la prueba real del proveedor es opt-in y
+/// no forma parte de esta prueba de persistencia.
 /// </summary>
 public sealed class MongoExplorationPersistenceTests
 {
@@ -120,14 +121,20 @@ public sealed class MongoExplorationPersistenceTests
             Assert.DoesNotContain("correo", cardBody, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("telefono", cardBody, StringComparison.OrdinalIgnoreCase);
 
-            using var favoriteOne = await http.PutAsync(
-                $"/api/v1/favoritos/{unit.Id}",
-                null);
-            using var favoriteTwo = await http.PutAsync(
-                $"/api/v1/favoritos/{unit.Id}",
-                null);
+            var concurrentFavorites = await Task.WhenAll(
+                http.PutAsync($"/api/v1/favoritos/{unit.Id}", null),
+                http.PutAsync($"/api/v1/favoritos/{unit.Id}", null));
+            using var favoriteOne = concurrentFavorites[0];
+            using var favoriteTwo = concurrentFavorites[1];
             Assert.Equal(HttpStatusCode.NoContent, favoriteOne.StatusCode);
             Assert.Equal(HttpStatusCode.NoContent, favoriteTwo.StatusCode);
+
+            var favoriteCount = await database
+                .GetCollection<BsonDocument>(MongoExplorationSchema.FavoritesCollection)
+                .CountDocumentsAsync(new BsonDocument(
+                    "accountId",
+                    account.Id.ToString("N")));
+            Assert.Equal(1, favoriteCount);
 
             using var favorites = await http.GetAsync("/api/v1/favoritos");
             Assert.Equal(HttpStatusCode.OK, favorites.StatusCode);

@@ -2,6 +2,7 @@
 import json
 import tempfile
 import unittest
+import uuid
 from email.message import EmailMessage
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,31 +17,60 @@ from zap_dast import (
     ZapApi,
     build_coverage,
     classify_status,
+    extract_password_reset_token,
     extract_verification_code,
     parse_openapi_operations,
     parse_zap_report,
     render_markdown,
     security_findings,
+    wait_for_password_reset_token,
     wait_for_verification_code,
     write_error_report,
 )
 
-SPEC = {
-    "openapi": "3.0.0",
-    "paths": {
-        "/api/v1/auth/registro": {"post": {}},
-        "/api/v1/auth/confirmacion-correo": {"post": {}},
-        "/api/v1/auth/confirmacion-correo/reenvio": {"post": {}},
-        "/api/v1/auth/login": {"post": {}},
-        "/api/v1/auth/refresh": {"post": {}},
-        "/api/v1/auth/logout": {
-            "post": {"security": [{"Bearer": []}]},
-        },
-        "/api/v1/cuentas/mi-cuenta": {
-            "delete": {"security": [{"Bearer": []}]},
-        },
-    },
-}
+OPERATIONS = [
+    ("GET", "/api/v1/admin/universidades", True),
+    ("POST", "/api/v1/admin/universidades", True),
+    ("PUT", "/api/v1/admin/universidades/{id}", True),
+    ("PUT", "/api/v1/admin/universidades/{id}/estado", True),
+    ("POST", "/api/v1/auth/confirmacion-correo", False),
+    ("POST", "/api/v1/auth/confirmacion-correo/reenvio", False),
+    ("POST", "/api/v1/auth/login", False),
+    ("POST", "/api/v1/auth/logout", True),
+    ("POST", "/api/v1/auth/recuperacion/confirmacion", False),
+    ("POST", "/api/v1/auth/recuperacion/solicitud", False),
+    ("POST", "/api/v1/auth/refresh", False),
+    ("POST", "/api/v1/auth/registro", False),
+    ("DELETE", "/api/v1/cuentas/mi-cuenta", True),
+    ("GET", "/api/v1/fotos/{photoRef}", False),
+    ("GET", "/api/v1/perfil/mi-perfil", True),
+    ("POST", "/api/v1/propiedades", True),
+    ("POST", "/api/v1/propiedades/{propertyId}/unidades", True),
+    ("POST", "/api/v1/publicaciones/primera/terminos", True),
+    ("POST", "/api/v1/unidades/{unitId}/fotos", True),
+    ("PUT", "/api/v1/unidades/{unitId}/servicios", True),
+    ("GET", "/api/v1/unidades/{unitId}/vista-previa", True),
+    ("PUT", "/api/v1/unidades/{unitId}/zona-reglas", True),
+    ("GET", "/api/v1/universidades", False),
+    ("GET", "/api/v1/exploracion/mapa", False),
+    ("GET", "/api/v1/exploracion/lista", False),
+    ("GET", "/api/v1/unidades/{unitId}/tarjeta", False),
+    ("GET", "/api/v1/unidades/{unitId}/ficha", True),
+    ("PUT", "/api/v1/favoritos/{unitId}", True),
+    ("GET", "/api/v1/favoritos", True),
+    ("DELETE", "/api/v1/favoritos/{unitId}", True),
+]
+
+
+def build_spec() -> dict:
+    paths: dict = {}
+    for method, path, auth in OPERATIONS:
+        operation = {"security": [{"Bearer": []}]} if auth else {}
+        paths.setdefault(path, {})[method.lower()] = operation
+    return {"openapi": "3.0.0", "paths": paths}
+
+
+SPEC = build_spec()
 
 SAFE_HEADERS = {
     "x-content-type-options": "nosniff",
@@ -83,6 +113,7 @@ class FakeHttpClient:
     def __init__(self, target, proxy):
         del target, proxy
         self.records = []
+        self.multipart_calls = []
 
     def request(
         self,
@@ -96,14 +127,13 @@ class FakeHttpClient:
         openapi=True,
         note="",
     ):
-        del token
         status, payload = self._response(method, path, body, note)
         if expected is not None and status not in expected:
             raise AssertionError(
                 f"Respuesta simulada {status} no esperada para {method} {path}: {expected}")
         self.records.append(ResponseRecord(
             method=method,
-            path=path,
+            path=path.split("?", 1)[0],
             status=status,
             headers=dict(SAFE_HEADERS),
             auth=auth,
@@ -112,41 +142,115 @@ class FakeHttpClient:
         ))
         return status, payload, dict(SAFE_HEADERS)
 
+    def request_multipart(
+        self,
+        method,
+        path,
+        *,
+        files,
+        fields=None,
+        token=None,
+        expected=None,
+        note="",
+    ):
+        del fields
+        self.multipart_calls.append((method, path, files))
+        status, payload = self._response(method, path, None, note)
+        if expected is not None and status not in expected:
+            raise AssertionError(
+                f"Respuesta simulada {status} no esperada para {method} {path}: {expected}")
+        self.records.append(ResponseRecord(
+            method=method,
+            path=path.split("?", 1)[0],
+            status=status,
+            headers=dict(SAFE_HEADERS),
+            auth=bool(token),
+            openapi=True,
+            note=note,
+        ))
+        return status, payload, dict(SAFE_HEADERS)
+
     @staticmethod
     def _response(method, path, body, note):
         del body
-        if path == "/health/live":
+        base = path.split("?", 1)[0]
+        if base == "/health/live":
             return 200, b'{"status":"Healthy"}'
-        if path == "/health/ready":
+        if base == "/health/ready":
             return 200, b'{"status":"Healthy"}'
-        if path == "/openapi/v1.json":
+        if base == "/openapi/v1.json":
             return 200, json.dumps(SPEC).encode("utf-8")
-        if path == "/swagger/index.html":
+        if base == "/swagger/index.html":
             return 200, b"<html></html>"
-        if path == "/":
+        if base == "/":
             return 302, b""
-        if path == "/api/v1/auth/registro":
-            return 201, b'{"correoConfirmacionEnviado":true}'
-        if path == "/api/v1/auth/confirmacion-correo":
+        if base == "/api/v1/auth/registro":
+            return 201, json.dumps({
+                "id": str(uuid.uuid4()),
+                "correoConfirmacionEnviado": True,
+            }).encode("utf-8")
+        if base == "/api/v1/auth/confirmacion-correo":
             return 200, b'{"correoConfirmado":true}'
-        if path == "/api/v1/auth/confirmacion-correo/reenvio":
+        if base == "/api/v1/auth/confirmacion-correo/reenvio":
             return 202, b""
-        if path == "/api/v1/auth/login":
+        if base == "/api/v1/auth/login":
             if note == "login C tras borrado":
                 return 401, b"{}"
-            suffix = "a" if note == "login A" else "c"
             return 200, json.dumps({
-                "accessToken": f"access-{suffix}",
-                "refreshToken": f"refresh-{suffix}",
+                "accessToken": f"access-{uuid.uuid4().hex}",
+                "refreshToken": f"refresh-{uuid.uuid4().hex}",
             }).encode("utf-8")
-        if path == "/api/v1/auth/refresh":
+        if base == "/api/v1/auth/refresh":
             if note == "refresh tras logout":
                 return 401, b"{}"
-            return 200, b'{"accessToken":"access-new","refreshToken":"refresh-new"}'
-        if path == "/api/v1/auth/logout":
+            return 200, json.dumps({
+                "accessToken": f"access-{uuid.uuid4().hex}",
+                "refreshToken": f"refresh-{uuid.uuid4().hex}",
+            }).encode("utf-8")
+        if base == "/api/v1/auth/logout":
             return 204, b""
-        if path == "/api/v1/cuentas/mi-cuenta":
+        if base == "/api/v1/auth/recuperacion/solicitud":
+            return 200, b'{"mensaje":"Si el correo esta registrado recibiras instrucciones"}'
+        if base == "/api/v1/auth/recuperacion/confirmacion":
+            return 200, b"{}"
+        if base == "/api/v1/cuentas/mi-cuenta":
             return 204, b""
+        if base == "/api/v1/perfil/mi-perfil":
+            return 200, b'{"nombreCompleto":"Cuenta DAST"}'
+        if base == "/api/v1/universidades":
+            return 200, b"[]"
+        if base == "/api/v1/admin/universidades":
+            if method == "POST":
+                return 201, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+            return 200, b"[]"
+        if base.startswith("/api/v1/admin/universidades/"):
+            return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+        if base == "/api/v1/propiedades":
+            return 201, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+        if base.startswith("/api/v1/propiedades/") and base.endswith("/unidades"):
+            return 201, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and base.endswith("/servicios"):
+            return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and base.endswith("/zona-reglas"):
+            return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+        if base in ("/api/v1/exploracion/mapa", "/api/v1/exploracion/lista"):
+            return 200, b"[]"
+        if base.startswith("/api/v1/unidades/") and base.endswith("/tarjeta"):
+            return 200, b'{"id":"' + str(uuid.uuid4()).encode() + b'"}'
+        if base.startswith("/api/v1/unidades/") and base.endswith("/ficha"):
+            return 200, b'{"id":"' + str(uuid.uuid4()).encode() + b'"}'
+        if base == "/api/v1/favoritos":
+            return 200, b"[]"
+        if base.startswith("/api/v1/favoritos/"):
+            return 204, b""
+        if base.startswith("/api/v1/unidades/") and base.endswith("/fotos"):
+            return 200, b'{"totalFotos":1}'
+        if base.startswith("/api/v1/unidades/") and base.endswith("/vista-previa"):
+            return 200, b'{"fotoPrincipalUrl":"/api/v1/fotos/ref"}'
+        if base.startswith("/api/v1/fotos/"):
+            return 200, zap_dast.DAST_PHOTO_PNG
+        if base == "/api/v1/publicaciones/primera/terminos":
+            return 200, b'{"aceptada":true}'
         raise AssertionError(f"Ruta simulada no definida: {method} {path}")
 
 
@@ -174,17 +278,58 @@ class FakeZapApi:
 
 
 class ZapDastTests(unittest.TestCase):
-    def test_openapi_operations_incluyen_auth_y_metodos(self):
+    def test_publicar_fixture_sin_contenedor_falla(self):
+        with patch.dict(zap_dast.os.environ, {}, clear=True):
+            with self.assertRaises(DastError):
+                zap_dast._publish_unit_for_exploration(str(uuid.uuid4()))
+
+    def test_publicar_fixture_marca_unidad_aprobada_y_disponible(self):
+        with patch.dict(
+            zap_dast.os.environ,
+            {
+                "MONGO_CONTAINER_ID": "mongo-container",
+                "MONGO_DAST_DATABASE": "unihome_dast",
+            },
+            clear=False,
+        ), patch.object(zap_dast.subprocess, "run") as run:
+            run.return_value = SimpleNamespace(returncode=0, stderr="")
+            zap_dast._publish_unit_for_exploration(str(uuid.uuid4()))
+
+        command = run.call_args.args[0]
+        self.assertEqual("docker", command[0])
+        self.assertEqual("mongosh", command[3])
+        self.assertIn("estadoPublicacion", command[-1])
+        self.assertIn("estadoOcupacion", command[-1])
+
+    def test_openapi_operations_incluyen_30_operaciones_y_auth(self):
         operations = parse_openapi_operations(SPEC)
-        self.assertEqual(7, len(operations))
+        self.assertEqual(30, len(operations))
         auth = {(item["method"], item["path"]) for item in operations if item["auth"]}
         self.assertIn(("POST", "/api/v1/auth/logout"), auth)
         self.assertIn(("DELETE", "/api/v1/cuentas/mi-cuenta"), auth)
+        self.assertIn(("POST", "/api/v1/admin/universidades"), auth)
+        self.assertIn(("POST", "/api/v1/unidades/{unitId}/fotos"), auth)
         self.assertNotIn(("POST", "/api/v1/auth/login"), auth)
 
     def test_openapi_sin_rutas_falla(self):
         with self.assertRaises(DastError):
             parse_openapi_operations({"paths": {}})
+
+    def test_cobertura_resuelve_placeholders_de_rutas(self):
+        operations = parse_openapi_operations(SPEC)
+        records = [
+            ResponseRecord("POST", "/api/v1/auth/registro", 201, {}),
+            ResponseRecord(
+                "PUT", "/api/v1/admin/universidades/123e4567-e89b-12d3-a456-426614174000/estado",
+                200, {}),
+            ResponseRecord(
+                "POST", "/api/v1/unidades/123e4567-e89b-12d3-a456-426614174000/fotos",
+                200, {}),
+        ]
+        coverage = build_coverage(operations, records)
+        self.assertEqual(3, coverage["openapi_visited"])
+        self.assertEqual(27, len(coverage["missing"]))
+        self.assertEqual(0, len(coverage["support_routes"]))
 
     def test_cobertura_detecta_ruta_no_visitada(self):
         operations = parse_openapi_operations(SPEC)
@@ -261,6 +406,30 @@ class ZapDastTests(unittest.TestCase):
         )
         self.assertEqual(
             "654321", extract_verification_code(message.as_bytes(), "ana@uni.edu"))
+
+    def test_token_de_recuperacion_desde_enlace(self):
+        message = EmailMessage()
+        message["To"] = "ana@uni.edu"
+        message["From"] = "no-reply@uni.edu"
+        message.set_content(
+            "Abre http://127.0.0.1:5088/restablecer?token=abc-DEF_123 para continuar")
+        self.assertEqual(
+            "abc-DEF_123",
+            extract_password_reset_token(message.as_bytes(), "ana@uni.edu"))
+        self.assertIsNone(
+            extract_password_reset_token(message.as_bytes(), "otra@uni.edu"))
+
+    def test_espera_token_de_recuperacion_desde_buzon(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mailbox = Path(directory)
+            message = EmailMessage()
+            message["To"] = "ana@uni.edu"
+            message["From"] = "no-reply@uni.edu"
+            message.set_content("https://app.test/reset?token=token-123")
+            (mailbox / "uno.eml").write_bytes(message.as_bytes())
+            self.assertEqual(
+                "token-123",
+                wait_for_password_reset_token(mailbox, "ana@uni.edu", timeout_seconds=1))
 
     def test_espera_codigo_desde_buzon(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -345,6 +514,21 @@ class ZapDastTests(unittest.TestCase):
         with self.assertRaises(DastError):
             client.request("GET", "/x")
 
+    def test_http_client_multipart_envia_archivo_real(self):
+        client = HttpClient("http://127.0.0.1:5088", None)
+        opener = FakeOpener(FakeResponse(200, b'{"totalFotos":1}'))
+        client._opener = opener
+        status, _, _ = client.request_multipart(
+            "POST", "/api/v1/unidades/u/fotos",
+            files=[("Fotos", "foto.png", "image/png", b"\x89PNG")],
+            expected={200},
+        )
+        self.assertEqual(200, status)
+        request = opener.requests[0]
+        self.assertIn("multipart/form-data; boundary=", request.get_header("Content-type"))
+        self.assertIn(b'name="Fotos"; filename="foto.png"', request.data)
+        self.assertIn(b"\x89PNG", request.data)
+
     def test_desenvuelve_reportes_de_la_api(self):
         self.assertEqual("<html></html>", zap_dast._unwrap_report(
             json.dumps({"htmlreport": "<html></html>"}), "htmlreport"))
@@ -425,96 +609,70 @@ class ZapDastTests(unittest.TestCase):
         self.assertEqual(3, messages)
         self.assertEqual(0, records)
 
-    def test_run_scan_genera_evidencia_y_estado(self):
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)
-            mailbox = output / "mailbox"
-            mailbox.mkdir()
-            args = SimpleNamespace(
-                target="http://127.0.0.1:5088",
-                proxy="http://127.0.0.1:8090",
-                zap_api="http://127.0.0.1:8090",
-                zap_api_key="key",
-            )
-            with (
-                patch.object(zap_dast, "HttpClient", FakeHttpClient),
-                patch.object(zap_dast, "ZapApi", FakeZapApi),
-                patch.object(zap_dast, "OUTPUT_DIR", output),
-                patch.object(zap_dast, "MAILBOX_DIR", mailbox),
-                patch.object(zap_dast, "wait_for_verification_code",
-                             return_value="123456"),
-            ):
-                result = zap_dast.run_scan(args)
-            self.assertEqual(0, result)
-            summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("PASS", summary["status"])
-            self.assertEqual(7, summary["coverage"]["openapi_visited"])
-            self.assertTrue((output / "dast-report.md").exists())
-            self.assertTrue((output / "zap-report.html").exists())
-            self.assertNotIn("access-a", (output / "dast-report.md").read_text(encoding="utf-8"))
+    def _run_scan(self, zap_class=FakeZapApi):
+        output = Path(tempfile.mkdtemp(prefix="unihome-dast-test-"))
+        mailbox = output / "mailbox"
+        mailbox.mkdir()
+        args = SimpleNamespace(
+            target="http://127.0.0.1:5088",
+            proxy="http://127.0.0.1:8090",
+            zap_api="http://127.0.0.1:8090",
+            zap_api_key="key",
+        )
+        with (
+            patch.object(zap_dast, "HttpClient", FakeHttpClient),
+            patch.object(zap_dast, "ZapApi", zap_class),
+            patch.object(zap_dast, "OUTPUT_DIR", output),
+            patch.object(zap_dast, "MAILBOX_DIR", mailbox),
+            patch.object(
+                zap_dast, "load_admin_state",
+                return_value={"email": "admin@uni.edu", "password": "synthetic"}),
+            patch.object(zap_dast, "wait_for_verification_code",
+                         return_value="123456"),
+            patch.object(zap_dast, "wait_for_password_reset_token",
+                         return_value="reset-token"),
+            patch.object(zap_dast, "_publish_unit_for_exploration",
+                         return_value=None),
+        ):
+            result = zap_dast.run_scan(args)
+        return result, output
+
+    def test_run_scan_genera_evidencia_y_cobertura_30_de_30(self):
+        result, output = self._run_scan()
+        self.assertEqual(0, result)
+        summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
+        self.assertEqual("PASS", summary["status"])
+        self.assertEqual(30, summary["coverage"]["openapi_operations"])
+        self.assertEqual(30, summary["coverage"]["openapi_visited"])
+        self.assertEqual([], summary["coverage"]["missing"])
+        self.assertTrue((output / "dast-report.md").exists())
+        self.assertTrue((output / "zap-report.html").exists())
+        self.assertNotIn("access-", (output / "dast-report.md").read_text(encoding="utf-8"))
 
     def test_run_scan_high_falla(self):
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)
-            mailbox = output / "mailbox"
-            mailbox.mkdir()
-            args = SimpleNamespace(
-                target="http://127.0.0.1:5088",
-                proxy="http://127.0.0.1:8090",
-                zap_api="http://127.0.0.1:8090",
-                zap_api_key="key",
-            )
+        class HighZap(FakeZapApi):
+            report = {"site": [{"alerts": [{
+                "name": "Hallazgo alto",
+                "riskdesc": "High (High)",
+                "riskcode": "3",
+                "instances": [{"uri": "http://127.0.0.1:5088/x"}],
+            }]}]}
 
-            class HighZap(FakeZapApi):
-                report = {"site": [{"alerts": [{
-                    "name": "Hallazgo alto",
-                    "riskdesc": "High (High)",
-                    "riskcode": "3",
-                    "instances": [{"uri": "http://127.0.0.1:5088/x"}],
-                }]}]}
-
-            with (
-                patch.object(zap_dast, "HttpClient", FakeHttpClient),
-                patch.object(zap_dast, "ZapApi", HighZap),
-                patch.object(zap_dast, "OUTPUT_DIR", output),
-                patch.object(zap_dast, "MAILBOX_DIR", mailbox),
-                patch.object(zap_dast, "wait_for_verification_code",
-                             return_value="123456"),
-            ):
-                result = zap_dast.run_scan(args)
-            self.assertEqual(1, result)
-            summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("FAIL", summary["status"])
+        result, output = self._run_scan(HighZap)
+        self.assertEqual(1, result)
+        summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
+        self.assertEqual("FAIL", summary["status"])
 
     def test_run_scan_version_inesperada_es_error(self):
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory)
-            mailbox = output / "mailbox"
-            mailbox.mkdir()
-            args = SimpleNamespace(
-                target="http://127.0.0.1:5088",
-                proxy="http://127.0.0.1:8090",
-                zap_api="http://127.0.0.1:8090",
-                zap_api_key="key",
-            )
+        class OldZap(FakeZapApi):
+            def version(self):
+                return "2.16.0"
 
-            class OldZap(FakeZapApi):
-                def version(self):
-                    return "2.16.0"
-
-            with (
-                patch.object(zap_dast, "HttpClient", FakeHttpClient),
-                patch.object(zap_dast, "ZapApi", OldZap),
-                patch.object(zap_dast, "OUTPUT_DIR", output),
-                patch.object(zap_dast, "MAILBOX_DIR", mailbox),
-                patch.object(zap_dast, "wait_for_verification_code",
-                             return_value="123456"),
-            ):
-                result = zap_dast.run_scan(args)
-            self.assertEqual(1, result)
-            summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
-            self.assertEqual("ERROR", summary["status"])
-            self.assertTrue(summary["technical_errors"])
+        result, output = self._run_scan(OldZap)
+        self.assertEqual(1, result)
+        summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
+        self.assertEqual("ERROR", summary["status"])
+        self.assertTrue(summary["technical_errors"])
 
     def test_error_tecnico_genera_reporte_error(self):
         with tempfile.TemporaryDirectory() as directory:

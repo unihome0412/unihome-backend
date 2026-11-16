@@ -7,6 +7,7 @@ using UniHome.Application.Identity.Sessions;
 using UniHome.Domain.Accounts;
 using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
+using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.IntegrationTests.TestSupport;
 
 namespace UniHome.IntegrationTests;
@@ -244,26 +245,22 @@ public sealed class MongoPasswordResetPersistenceTests
         {
             await database.CreateCollectionAsync(
                 collectionName,
-                new MongoValidatorDefinition(BsonDocument.Parse(
-                    """
-                    {
-                      "$jsonSchema": {
-                        "bsonType": "object",
-                        "required": ["accountId", "tokenHash", "expiresAt"],
-                        "properties": {
-                          "_id": { "bsonType": ["objectId", "string", "binData"] },
-                          "accountId": { "bsonType": ["objectId", "string", "binData"] },
-                          "tokenHash": { "bsonType": "string", "maxLength": 4096 },
-                          "expiresAt": { "bsonType": "date" },
-                          "consumedAt": { "bsonType": ["date", "null"] },
-                          "createdAt": { "bsonType": "date" }
-                        }
-                      }
-                    }
-                    """)).ToCreateCollectionOptions());
+                MongoPasswordResetIndexes.Validator.ToCreateCollectionOptions());
         }
 
         var collection = database.GetCollection<BsonDocument>(collectionName);
+        using var collectionInfos = await database.ListCollectionsAsync(
+            new ListCollectionsOptions
+            {
+                Filter = new BsonDocument("name", collectionName)
+            });
+        Assert.True(await collectionInfos.MoveNextAsync());
+        var collectionInfo = Assert.Single(collectionInfos.Current);
+        var options = collectionInfo["options"].AsBsonDocument;
+        var validator = options["validator"].AsBsonDocument;
+        var level = options.GetValue("validationLevel", "strict").AsString;
+        var action = options.GetValue("validationAction", "error").AsString;
+        Assert.True(MongoPasswordResetIndexes.Validator.Matches(validator, level, action));
         await collection.Indexes.CreateOneAsync(new CreateIndexModel<BsonDocument>(
             new BsonDocumentIndexKeysDefinition<BsonDocument>(
                 new BsonDocument(MongoIdentitySchema.AccountRecoveryTokenHashField, 1)),

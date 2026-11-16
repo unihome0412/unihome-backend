@@ -1,14 +1,15 @@
+using UniHome.Application.Identity.Exceptions;
+
 namespace UniHome.Application.Units.Abstractions;
 
-public sealed record StoredUnitPhoto(
-    string StorageKey,
+public sealed record UnitPhotoContent(
+    Stream Content,
     string ContentType,
-    long SizeBytes,
-    string Sha256);
+    long? ContentLength);
 
 /// <summary>
-/// Puerto de almacenamiento de fotografías (DEC-04). El proveedor concreto queda
-/// pendiente de aprobación; la API no guarda binarios en MongoDB ni en el repo.
+/// Puerto de almacenamiento de fotografías. La implementación de producción es
+/// Cloudinary con entrega autenticada; el binario nunca se guarda en MongoDB.
 /// </summary>
 public interface IUnitPhotoStorage
 {
@@ -21,5 +22,23 @@ public interface IUnitPhotoStorage
         string storageKey,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Descarga el contenido desde el proveedor para el endpoint proxy. Devuelve
+    /// null si el recurso ya no existe.
+    /// </summary>
+    Task<UnitPhotoContent?> ReadAsync(
+        string storageKey,
+        CancellationToken cancellationToken = default) =>
+        throw new StorageUnavailableException();
+
+    /// <summary>
+    /// URL de lectura autorizada de la API (no la URL interna de Cloudinary).
+    /// </summary>
     string GetReadUrl(string storageKey);
 }
+
+public sealed record StoredUnitPhoto(
+    string StorageKey,
+    string ContentType,
+    long SizeBytes,
+    string Sha256);

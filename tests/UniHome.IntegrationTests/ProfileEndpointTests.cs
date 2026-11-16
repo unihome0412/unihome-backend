@@ -55,6 +55,39 @@ public sealed class ProfileEndpointTests : IClassFixture<UniHomeApiFactory>
     }
 
     [Fact]
+    public async Task MiPerfil_Autenticado_DevuelveCacheControlNoStore()
+    {
+        var email = AuthTestHelpers.UniqueEmail();
+        await AuthTestHelpers.SeedAccountAsync(_factory, email);
+        using var login = await AuthTestHelpers.LoginAsync(_client, email);
+        var tokens = await AuthTestHelpers.ReadTokensAsync(login);
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+
+        using var response = await _client.GetAsync("/api/v1/perfil/mi-perfil");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains(
+            "no-store",
+            response.Headers.CacheControl?.ToString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RespuestaPublica_NoRecibeNoStoreDelPerfil()
+    {
+        _client.DefaultRequestHeaders.Authorization = null;
+
+        using var response = await _client.GetAsync("/api/v1/universidades?buscar=uni");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain(
+            "no-store",
+            response.Headers.CacheControl?.ToString() ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task MiPerfil_MenorDeEdad_NoPuedePublicar()
     {
         var email = AuthTestHelpers.UniqueEmail();

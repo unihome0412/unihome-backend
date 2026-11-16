@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -5,6 +6,7 @@ using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Abstractions.Storage;
 using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Identity.Exceptions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Publications.Abstractions;
 using UniHome.Application.Units.Abstractions;
@@ -44,6 +46,9 @@ public static class DependencyInjection
             .AddOptions<MongoDbOptions>()
             .Bind(configuration.GetSection(MongoDbOptions.SectionName));
 
+        services.Configure<CloudinaryOptions>(
+            configuration.GetSection(CloudinaryOptions.SectionName));
+
         services
             .AddOptions<VerificationCodeOptions>()
             .Bind(configuration.GetSection(VerificationCodeOptions.SectionName));
@@ -58,7 +63,26 @@ public static class DependencyInjection
 
         services
             .AddOptions<RedisOptions>()
-            .Bind(configuration.GetSection(RedisOptions.SectionName));
+            .Bind(configuration.GetSection(RedisOptions.SectionName))
+            .Validate(
+                options => options.CommandTimeoutMs is >= RedisOptions.MinCommandTimeoutMs
+                    and <= RedisOptions.MaxCommandTimeoutMs,
+                $"{RedisOptions.SectionName}:CommandTimeoutMs debe estar entre " +
+                $"{RedisOptions.MinCommandTimeoutMs} y {RedisOptions.MaxCommandTimeoutMs}.")
+            .Validate(
+                options => options.MaxAttempts is >= 1 and <= RedisOptions.MaxAttemptsLimit,
+                $"{RedisOptions.SectionName}:MaxAttempts debe estar entre 1 y " +
+                $"{RedisOptions.MaxAttemptsLimit}.")
+            .Validate(
+                options => options.RetryDelayMs is >= 0 and <= RedisOptions.MaxRetryDelayMs,
+                $"{RedisOptions.SectionName}:RetryDelayMs debe estar entre 0 y " +
+                $"{RedisOptions.MaxRetryDelayMs}.")
+            .Validate(
+                options => options.ReadinessTimeoutMs is >= RedisOptions.MinReadinessTimeoutMs
+                    and <= RedisOptions.MaxReadinessTimeoutMs,
+                $"{RedisOptions.SectionName}:ReadinessTimeoutMs debe estar entre " +
+                $"{RedisOptions.MinReadinessTimeoutMs} y {RedisOptions.MaxReadinessTimeoutMs}.")
+            .ValidateOnStart();
 
         var redisSection = configuration.GetSection(RedisOptions.SectionName);
         var redisOptions = redisSection.Get<RedisOptions>() ?? new RedisOptions();
@@ -97,6 +121,11 @@ public static class DependencyInjection
             services.AddSingleton<IDistributedRateLimiter, InMemoryDistributedRateLimiter>();
         }
 
+        // readiness consulta el mismo almacén que usa el rate limiting. En
+        // Development usa el adaptador en memoria; en Production, Upstash real.
+        services.AddSingleton<IRateLimiterReadinessProbe>(serviceProvider =>
+            serviceProvider.GetRequiredService<IDistributedRateLimiter>());
+
         // La sección Smtp es opcional para desarrollo y pruebas. Si existe
         // cualquier clave, se valida completa al arrancar y no se permite usar
         // texto plano ni credenciales parciales.
@@ -129,7 +158,49 @@ public static class DependencyInjection
         services.AddSingleton<IUnitRepository, MongoUnitRepository>();
         services.AddSingleton<ITermsAcceptanceRepository, MongoTermsAcceptanceRepository>();
         services.AddSingleton<IUnitFavoriteRepository, MongoFavoriteRepository>();
-        services.AddSingleton<IUnitPhotoStorage, UnconfiguredUnitPhotoStorage>();
+        services.AddHttpContextAccessor();
+
+        // La decisi?n se eval?a al resolver, no al construir el contenedor: as? la
+        // configuraci?n del host (incluidos tests y User Secrets) se aplica antes
+        // de elegir el adaptador y nunca hay dos implementaciones compitiendo.
+        services.AddSingleton<ICloudinaryPhotoClient>(serviceProvider =>
+        {
+            var options = serviceProvider
+                .GetRequiredService<IOptions<CloudinaryOptions>>()
+                .Value;
+
+            if (!options.IsConfigured)
+            {
+                throw new StorageUnavailableException();
+            }
+
+            return new CloudinaryPhotoClient(Options.Create(options));
+        });
+
+        services.AddSingleton<IUnitPhotoStorage>(serviceProvider =>
+        {
+            var options = serviceProvider
+                .GetRequiredService<IOptions<CloudinaryOptions>>()
+                .Value;
+
+            // Los harnesses DAST/RESTler se ejecutan en Development y necesitan
+            // un backend real de fotos sin usar Cloudinary ni secretos. Fuera de
+            // Development este flag se ignora y se conserva el fail-closed.
+            if (isDevelopment && options.UseEphemeralStorage)
+            {
+                return new EphemeralUnitPhotoStorage();
+            }
+
+            if (!options.IsConfigured)
+            {
+                return new UnconfiguredUnitPhotoStorage();
+            }
+
+            return new CloudinaryUnitPhotoStorage(
+                serviceProvider.GetRequiredService<ICloudinaryPhotoClient>(),
+                Options.Create(options),
+                serviceProvider.GetService<IHttpContextAccessor>());
+        });
         services.AddSingleton<IPasswordHasher, AspNetCorePasswordHasher>();
         services.AddSingleton<IDummyPasswordHashProvider, DummyPasswordHashProvider>();
         services.AddSingleton<ISystemClock, SystemClock>();

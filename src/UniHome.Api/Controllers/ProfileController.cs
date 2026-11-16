@@ -48,6 +48,10 @@ public sealed class ProfileController : ControllerBase
                 "La sesión no es válida.");
         }
 
+        // universidadActual permanece null: M01 no persiste una asociación
+        // cuenta-universidad y M03 solo asocia UniversidadId a propiedades y
+        // unidades. No se inventa una relación ni se toma la universidad de una
+        // propiedad del titular. La dependencia funcional es HU-087 (Sprint 8).
         return Ok(new PerfilResponse(
             profile.Account.FullName,
             profile.Account.Email.Value,

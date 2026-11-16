@@ -54,7 +54,7 @@ dotnet run --project tools/UniHome.MongoMigrator -- verify `
   --database unihome_modelo_pruebas --version M03-001
 ```
 
-El job `mongo-db-test` aplica `M01-001` y `M03-001` en la base efímera
+El job `mongo-db-test` aplica `M01-001`, `M01-002` y `M03-001` en la base efímera
 `unihome_ci_verificacion`, verifica ledger, checksum e índices y ejecuta la prueba
 real `MongoUniversityPersistenceTests`, que cubre alta, listado, edición,
 duplicado, desactivación, reactivación y búsqueda.

@@ -12,6 +12,8 @@ namespace UniHome.Infrastructure.Persistence.Mongo.Exploration;
 [ExcludeFromCodeCoverage]
 internal sealed class MongoFavoriteRepository : IUnitFavoriteRepository
 {
+    private const int DuplicateKeyCode = 11000;
+
     private readonly MongoDbClientProvider _clientProvider;
     private readonly ILogger<MongoFavoriteRepository> _logger;
 
@@ -58,6 +60,15 @@ internal sealed class MongoFavoriteRepository : IUnitFavoriteRepository
                     new UpdateOptions { IsUpsert = true },
                     cancellationToken)
                 .ConfigureAwait(false);
+        }
+        catch (MongoWriteException exception) when (exception.WriteError?.Code == DuplicateKeyCode)
+        {
+            // Dos PUT concurrentes pueden competir en el upsert; el índice único
+            // ya garantiza una sola fila. El segundo se considera idempotente.
+        }
+        catch (MongoCommandException exception) when (exception.Code == DuplicateKeyCode)
+        {
+            // Misma carrera expresada como error de comando según el servidor.
         }
         catch (MongoException exception)
         {
@@ -183,7 +194,7 @@ internal sealed class MongoFavoriteRepository : IUnitFavoriteRepository
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
             var items = documents
-                .Select(document => new Favorite(
+                .Select(document => Favorite.Create(
                     Guid.ParseExact(document.AccountId, "N"),
                     Guid.ParseExact(document.UnitId, "N"),
                     new DateTimeOffset(

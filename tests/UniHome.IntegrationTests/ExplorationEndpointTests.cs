@@ -130,11 +130,13 @@ public sealed class ExplorationEndpointTests : IClassFixture<UniHomeApiFactory>
             await LoginAsync(account));
         using var detail = await _client.GetAsync($"/api/v1/unidades/{available.Id}/ficha");
         Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        Assert.True(detail.Headers.CacheControl?.NoStore);
         var detailBody = await detail.Content.ReadAsStringAsync();
         using var detailJson = JsonDocument.Parse(detailBody);
         Assert.Equal(2, detailJson.RootElement.GetProperty("galeriaFotos").GetArrayLength());
         Assert.Single(detailJson.RootElement.GetProperty("serviciosIncluidos").EnumerateArray());
         Assert.Single(detailJson.RootElement.GetProperty("serviciosAparte").EnumerateArray());
+        Assert.False(detailJson.RootElement.GetProperty("arrendadorVerificado").GetBoolean());
         Assert.Equal("a pie", detailJson.RootElement.GetProperty("tiempoTraslado").GetString());
         Assert.DoesNotContain("correo", detailBody, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("telefono", detailBody, StringComparison.OrdinalIgnoreCase);
@@ -175,6 +177,7 @@ public sealed class ExplorationEndpointTests : IClassFixture<UniHomeApiFactory>
 
         using var list = await _client.GetAsync("/api/v1/favoritos");
         Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        Assert.True(list.Headers.CacheControl?.NoStore);
         Assert.Equal("1", list.Headers.GetValues("X-Total-Count").Single());
         using var listJson = JsonDocument.Parse(await list.Content.ReadAsStringAsync());
         Assert.Single(listJson.RootElement.EnumerateArray());
@@ -185,6 +188,9 @@ public sealed class ExplorationEndpointTests : IClassFixture<UniHomeApiFactory>
         Assert.True(
             listJson.RootElement[0].GetProperty("tarjeta")
                 .GetProperty("esFavorito").GetBoolean());
+        Assert.False(
+            listJson.RootElement[0].GetProperty("tarjeta")
+                .GetProperty("arrendadorVerificado").GetBoolean());
 
         _factory.Units.Replace(RestoreUnit(unit, PublicationState.Aprobada, UnitAvailability.Ocupado));
 
@@ -216,6 +222,424 @@ public sealed class ExplorationEndpointTests : IClassFixture<UniHomeApiFactory>
 
         Assert.Equal(HttpStatusCode.Unauthorized, list.StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, add.StatusCode);
+    }
+
+    [Fact]
+    public async Task Tarjeta_SinSesion_EsFavoritoNullYConSesionEsBooleano()
+    {
+        var account = await SeedAdultAsync();
+        var universityId = await SeedUniversityAsync();
+        var unit = await SeedUnitAsync(
+            account.Id,
+            universityId,
+            "Casa Favorito Opcional",
+            price: 3000,
+            occupancy: Occupancy.Individual,
+            forWhom: ForWhom.Mixto,
+            state: PublicationState.Aprobada,
+            availability: UnitAvailability.Disponible,
+            latitude: 19.0,
+            longitude: -99.0,
+            hasPhoto: false);
+
+        using var anonymous = await _client.GetAsync($"/api/v1/unidades/{unit.Id}/tarjeta");
+        Assert.Equal(HttpStatusCode.OK, anonymous.StatusCode);
+        using var anonymousJson = JsonDocument.Parse(
+            await anonymous.Content.ReadAsStringAsync());
+        Assert.Equal(
+            JsonValueKind.Null,
+            anonymousJson.RootElement.GetProperty("esFavorito").ValueKind);
+        Assert.False(
+            anonymousJson.RootElement.GetProperty("arrendadorVerificado").GetBoolean());
+
+        using var anonymousList = await _client.GetAsync(
+            $"/api/v1/exploracion/lista?universidadId={universityId}");
+        using var anonymousListJson = JsonDocument.Parse(
+            await anonymousList.Content.ReadAsStringAsync());
+        Assert.Equal(
+            JsonValueKind.Null,
+            Assert.Single(anonymousListJson.RootElement.EnumerateArray())
+                .GetProperty("esFavorito").ValueKind);
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(account));
+
+        using var withSession = await _client.GetAsync($"/api/v1/unidades/{unit.Id}/tarjeta");
+        Assert.True(withSession.Headers.CacheControl?.NoStore);
+        using var withSessionJson = JsonDocument.Parse(
+            await withSession.Content.ReadAsStringAsync());
+        Assert.False(withSessionJson.RootElement.GetProperty("esFavorito").GetBoolean());
+
+        using var add = await _client.PutAsync($"/api/v1/favoritos/{unit.Id}", null);
+        Assert.Equal(HttpStatusCode.NoContent, add.StatusCode);
+
+        using var favorite = await _client.GetAsync($"/api/v1/unidades/{unit.Id}/tarjeta");
+        using var favoriteJson = JsonDocument.Parse(
+            await favorite.Content.ReadAsStringAsync());
+        Assert.True(favoriteJson.RootElement.GetProperty("esFavorito").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Favoritos_EstanAisladosPorCuenta()
+    {
+        var owner = await SeedAdultAsync();
+        var other = await SeedAdultAsync();
+        var universityId = await SeedUniversityAsync();
+        var unit = await SeedUnitAsync(
+            owner.Id,
+            universityId,
+            "Casa Aislada",
+            price: 3000,
+            occupancy: Occupancy.Individual,
+            forWhom: ForWhom.Mixto,
+            state: PublicationState.Aprobada,
+            availability: UnitAvailability.Disponible,
+            latitude: 19.0,
+            longitude: -99.0,
+            hasPhoto: false);
+
+        using var ownerClient = _factory.CreateClient();
+        using var otherClient = _factory.CreateClient();
+        ownerClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(ownerClient, owner));
+        otherClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(otherClient, other));
+
+        using var ownerAdd = await ownerClient.PutAsync(
+            $"/api/v1/favoritos/{unit.Id}",
+            null);
+        Assert.Equal(HttpStatusCode.NoContent, ownerAdd.StatusCode);
+
+        using var otherList = await otherClient.GetAsync("/api/v1/favoritos");
+        Assert.Equal(HttpStatusCode.OK, otherList.StatusCode);
+        Assert.Equal("0", otherList.Headers.GetValues("X-Total-Count").Single());
+
+        using var otherCard = await otherClient.GetAsync(
+            $"/api/v1/unidades/{unit.Id}/tarjeta");
+        using var otherCardJson = JsonDocument.Parse(
+            await otherCard.Content.ReadAsStringAsync());
+        Assert.False(otherCardJson.RootElement.GetProperty("esFavorito").GetBoolean());
+
+        using var otherDelete = await otherClient.DeleteAsync(
+            $"/api/v1/favoritos/{unit.Id}");
+        Assert.Equal(HttpStatusCode.NoContent, otherDelete.StatusCode);
+
+        using var ownerList = await ownerClient.GetAsync("/api/v1/favoritos");
+        Assert.Equal(HttpStatusCode.OK, ownerList.StatusCode);
+        Assert.True(ownerList.Headers.CacheControl?.NoStore);
+        Assert.Equal("1", ownerList.Headers.GetValues("X-Total-Count").Single());
+
+        using var ownerCard = await ownerClient.GetAsync(
+            $"/api/v1/unidades/{unit.Id}/tarjeta");
+        using var ownerCardJson = JsonDocument.Parse(
+            await ownerCard.Content.ReadAsStringAsync());
+        Assert.True(ownerCardJson.RootElement.GetProperty("esFavorito").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Exploracion_Validaciones_DebenResponder400()
+    {
+        var universityId = await SeedUniversityAsync();
+        var invalidRequests = new[]
+        {
+            "/api/v1/exploracion/mapa",
+            $"/api/v1/exploracion/lista?universidadId={universityId}&page=0",
+            $"/api/v1/exploracion/lista?universidadId={universityId}&pageSize=101",
+            $"/api/v1/exploracion/lista?universidadId={universityId}&distanciaMaxKm=0",
+            $"/api/v1/exploracion/lista?universidadId={universityId}&precioMaxMxn=0",
+            $"/api/v1/exploracion/lista?universidadId={universityId}&paraQuien=Invalido",
+            $"/api/v1/exploracion/lista?universidadId={universityId}&paraQuien=1",
+            $"/api/v1/exploracion/mapa?universidadId={Guid.Empty}"
+        };
+
+        foreach (var request in invalidRequests)
+        {
+            using var response = await _client.GetAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.True(
+                response.StatusCode == HttpStatusCode.BadRequest,
+                $"{request} -> {(int)response.StatusCode} {body}");
+        }
+
+        var account = await SeedAdultAsync();
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(account));
+
+        using var invalidFavoritePage = await _client.GetAsync("/api/v1/favoritos?page=0");
+        using var invalidFavoriteSize = await _client.GetAsync(
+            "/api/v1/favoritos?pageSize=101");
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalidFavoritePage.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidFavoriteSize.StatusCode);
+    }
+
+    [Fact]
+    public async Task Exploracion_SinUbicacionUniversidad_DistanciaNulaYFiltro400()
+    {
+        var account = await SeedAdultAsync();
+        var universityId = await SeedUniversityWithoutLocationAsync();
+        var unit = await SeedUnitAsync(
+            account.Id,
+            universityId,
+            "Casa Sin Ubicacion",
+            price: 3000,
+            occupancy: Occupancy.Individual,
+            forWhom: ForWhom.Mixto,
+            state: PublicationState.Aprobada,
+            availability: UnitAvailability.Disponible,
+            latitude: 19.0,
+            longitude: -99.0,
+            hasPhoto: false);
+
+        using var list = await _client.GetAsync(
+            $"/api/v1/exploracion/lista?universidadId={universityId}");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        using var listJson = JsonDocument.Parse(await list.Content.ReadAsStringAsync());
+        var item = Assert.Single(listJson.RootElement.EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("distanciaKm").ValueKind);
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("tiempoTraslado").ValueKind);
+
+        using var withDistanceFilter = await _client.GetAsync(
+            $"/api/v1/exploracion/lista?universidadId={universityId}&distanciaMaxKm=2");
+        Assert.Equal(HttpStatusCode.BadRequest, withDistanceFilter.StatusCode);
+
+        using var card = await _client.GetAsync($"/api/v1/unidades/{unit.Id}/tarjeta");
+        Assert.Equal(HttpStatusCode.OK, card.StatusCode);
+        using var cardJson = JsonDocument.Parse(await card.Content.ReadAsStringAsync());
+        Assert.Equal(
+            JsonValueKind.Null,
+            cardJson.RootElement.GetProperty("distanciaKm").ValueKind);
+        Assert.Equal(
+            JsonValueKind.Null,
+            cardJson.RootElement.GetProperty("tiempoTraslado").ValueKind);
+    }
+
+    [Fact]
+    public async Task EstadosNoPublicos_NoAparecenEnM04YFichaDevuelve404()
+    {
+        var account = await SeedAdultAsync();
+        var universityId = await SeedUniversityAsync();
+        var available = await SeedUnitAsync(
+            account.Id,
+            universityId,
+            "Disponible",
+            price: 3000,
+            occupancy: Occupancy.Individual,
+            forWhom: ForWhom.Mixto,
+            state: PublicationState.Aprobada,
+            availability: UnitAvailability.Disponible,
+            latitude: 19.0,
+            longitude: -99.0,
+            hasPhoto: false);
+        var nonPublic = new[]
+        {
+            await SeedUnitAsync(
+                account.Id, universityId, "Ocupada", 3100, Occupancy.Individual,
+                ForWhom.Mixto, PublicationState.Aprobada, UnitAvailability.Ocupado,
+                19.001, -99.0, hasPhoto: false),
+            await SeedUnitAsync(
+                account.Id, universityId, "Mantenimiento", 3200, Occupancy.Individual,
+                ForWhom.Mixto, PublicationState.Aprobada, UnitAvailability.Mantenimiento,
+                19.002, -99.0, hasPhoto: false),
+            await SeedUnitAsync(
+                account.Id, universityId, "EnRevision", 3300, Occupancy.Individual,
+                ForWhom.Mixto, PublicationState.EnRevision, UnitAvailability.Disponible,
+                19.003, -99.0, hasPhoto: false),
+            await SeedUnitAsync(
+                account.Id, universityId, "Rechazada", 3400, Occupancy.Individual,
+                ForWhom.Mixto, PublicationState.Rechazada, UnitAvailability.Disponible,
+                19.004, -99.0, hasPhoto: false),
+            await SeedUnitAsync(
+                account.Id, universityId, "Borrador", 3500, Occupancy.Individual,
+                ForWhom.Mixto, PublicationState.Borrador, UnitAvailability.Disponible,
+                19.005, -99.0, hasPhoto: false)
+        };
+
+        using var list = await _client.GetAsync(
+            $"/api/v1/exploracion/lista?universidadId={universityId}");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        Assert.Equal("1", list.Headers.GetValues("X-Total-Count").Single());
+        using var listJson = JsonDocument.Parse(await list.Content.ReadAsStringAsync());
+        Assert.Equal(
+            available.Id,
+            Assert.Single(listJson.RootElement.EnumerateArray())
+                .GetProperty("id").GetGuid());
+
+        using var map = await _client.GetAsync(
+            $"/api/v1/exploracion/mapa?universidadId={universityId}");
+        using var mapJson = JsonDocument.Parse(await map.Content.ReadAsStringAsync());
+        Assert.Equal(
+            available.Id,
+            Assert.Single(mapJson.RootElement.EnumerateArray())
+                .GetProperty("id").GetGuid());
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(account));
+
+        foreach (var unit in nonPublic)
+        {
+            using var card = await _client.GetAsync($"/api/v1/unidades/{unit.Id}/tarjeta");
+            using var detail = await _client.GetAsync($"/api/v1/unidades/{unit.Id}/ficha");
+            Assert.Equal(HttpStatusCode.NotFound, card.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, detail.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task UniversidadInexistenteOInactiva_DebeResponder404()
+    {
+        var inactive = University.Restore(
+            Guid.NewGuid(),
+            $"Universidad inactiva {Guid.NewGuid():N}",
+            isActive: false,
+            DateTimeOffset.UtcNow);
+        await _factory.Universities.AddAsync(inactive);
+        var missing = Guid.NewGuid();
+
+        using var inactiveMap = await _client.GetAsync(
+            $"/api/v1/exploracion/mapa?universidadId={inactive.Id}");
+        using var inactiveList = await _client.GetAsync(
+            $"/api/v1/exploracion/lista?universidadId={inactive.Id}");
+        using var missingMap = await _client.GetAsync(
+            $"/api/v1/exploracion/mapa?universidadId={missing}");
+
+        Assert.Equal(HttpStatusCode.NotFound, inactiveMap.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, inactiveList.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, missingMap.StatusCode);
+    }
+
+    [Fact]
+    public async Task Favoritos_Paginacion_DebeRespetarPaginaYTotal()
+    {
+        var account = await SeedAdultAsync();
+        var universityId = await SeedUniversityAsync();
+        var units = new[]
+        {
+            await SeedUnitAsync(
+                account.Id, universityId, "Favorita 1", 3000, Occupancy.Individual,
+                ForWhom.Mixto, PublicationState.Aprobada, UnitAvailability.Disponible,
+                19.0, -99.0, hasPhoto: false),
+            await SeedUnitAsync(
+                account.Id, universityId, "Favorita 2", 3100, Occupancy.Individual,
+                ForWhom.Mixto, PublicationState.Aprobada, UnitAvailability.Disponible,
+                19.0, -99.0, hasPhoto: false),
+            await SeedUnitAsync(
+                account.Id, universityId, "Favorita 3", 3200, Occupancy.Individual,
+                ForWhom.Mixto, PublicationState.Aprobada, UnitAvailability.Disponible,
+                19.0, -99.0, hasPhoto: false)
+        };
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(account));
+
+        foreach (var unit in units)
+        {
+            using var add = await _client.PutAsync($"/api/v1/favoritos/{unit.Id}", null);
+            Assert.Equal(HttpStatusCode.NoContent, add.StatusCode);
+        }
+
+        using var firstPage = await _client.GetAsync("/api/v1/favoritos?page=1&pageSize=2");
+        Assert.Equal(HttpStatusCode.OK, firstPage.StatusCode);
+        Assert.Equal("3", firstPage.Headers.GetValues("X-Total-Count").Single());
+        Assert.Equal("1", firstPage.Headers.GetValues("X-Page").Single());
+        Assert.Equal("2", firstPage.Headers.GetValues("X-Page-Size").Single());
+        using var firstJson = JsonDocument.Parse(
+            await firstPage.Content.ReadAsStringAsync());
+        Assert.Equal(2, firstJson.RootElement.GetArrayLength());
+
+        using var secondPage = await _client.GetAsync("/api/v1/favoritos?page=2&pageSize=2");
+        using var secondJson = JsonDocument.Parse(
+            await secondPage.Content.ReadAsStringAsync());
+        Assert.Single(secondJson.RootElement.EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Favorito_UnidadNoPublicaAjena_DebeResponder404()
+    {
+        var owner = await SeedAdultAsync();
+        var other = await SeedAdultAsync();
+        var universityId = await SeedUniversityAsync();
+        var draft = await SeedUnitAsync(
+            owner.Id,
+            universityId,
+            "Borrador privado",
+            price: 3000,
+            occupancy: Occupancy.Individual,
+            forWhom: ForWhom.Mixto,
+            state: PublicationState.Borrador,
+            availability: UnitAvailability.Disponible,
+            latitude: 19.0,
+            longitude: -99.0,
+            hasPhoto: false);
+
+        using var otherClient = _factory.CreateClient();
+        using var ownerClient = _factory.CreateClient();
+        otherClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(otherClient, other));
+        ownerClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(ownerClient, owner));
+
+        using var forbidden = await otherClient.PutAsync(
+            $"/api/v1/favoritos/{draft.Id}",
+            null);
+        using var otherList = await otherClient.GetAsync("/api/v1/favoritos");
+        using var ownerAdd = await ownerClient.PutAsync(
+            $"/api/v1/favoritos/{draft.Id}",
+            null);
+
+        Assert.Equal(HttpStatusCode.NotFound, forbidden.StatusCode);
+        Assert.Equal("0", otherList.Headers.GetValues("X-Total-Count").Single());
+        Assert.Equal(HttpStatusCode.NoContent, ownerAdd.StatusCode);
+    }
+
+    [Fact]
+    public async Task RecursosInexistentes_DebenResponder404YDeleteIdempotente204()
+    {
+        var account = await SeedAdultAsync();
+        var missing = Guid.NewGuid();
+
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await LoginAsync(account));
+
+        using var add = await _client.PutAsync($"/api/v1/favoritos/{missing}", null);
+        Assert.Equal(HttpStatusCode.NotFound, add.StatusCode);
+
+        using var remove = await _client.DeleteAsync($"/api/v1/favoritos/{missing}");
+        Assert.Equal(HttpStatusCode.NoContent, remove.StatusCode);
+
+        using var card = await _client.GetAsync($"/api/v1/unidades/{missing}/tarjeta");
+        using var detail = await _client.GetAsync($"/api/v1/unidades/{missing}/ficha");
+        Assert.Equal(HttpStatusCode.NotFound, card.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, detail.StatusCode);
+    }
+
+    private async Task<string> LoginAsync(
+        HttpClient client,
+        Domain.Accounts.Account account)
+    {
+        using var login = await AuthTestHelpers.LoginAsync(client, account.Email.Value);
+        var tokens = await AuthTestHelpers.ReadTokensAsync(login);
+        return tokens.AccessToken;
+    }
+
+    private async Task<Guid> SeedUniversityWithoutLocationAsync()
+    {
+        var university = University.Restore(
+            Guid.NewGuid(),
+            $"Universidad sin ubicacion {Guid.NewGuid():N}",
+            true,
+            DateTimeOffset.UtcNow);
+        await _factory.Universities.AddAsync(university);
+        return university.Id;
     }
 
     private async Task<Domain.Accounts.Account> SeedAdultAsync()

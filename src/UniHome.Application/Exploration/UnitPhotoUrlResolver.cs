@@ -17,8 +17,13 @@ public sealed class UnitPhotoUrlResolver
         _storage = storage;
     }
 
-    public string? Primary(Unit unit)
+    public string? Primary(Unit unit, bool allowRead = true)
     {
+        if (!allowRead)
+        {
+            return null;
+        }
+
         UnitPhoto? primary = null;
 
         for (var index = 0; index < unit.Photos.Count; index++)
@@ -38,8 +43,13 @@ public sealed class UnitPhotoUrlResolver
         return primary is null ? null : TryResolve(primary.StorageKey);
     }
 
-    public IReadOnlyList<string> Gallery(Unit unit)
+    public IReadOnlyList<string> Gallery(Unit unit, bool allowRead = true)
     {
+        if (!allowRead)
+        {
+            return [];
+        }
+
         var urls = new List<string>(unit.Photos.Count);
 
         foreach (var photo in unit.Photos.OrderBy(photo => photo.Order))

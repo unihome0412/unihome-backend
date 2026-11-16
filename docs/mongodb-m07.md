@@ -21,7 +21,10 @@ siendo `204`.
 ## Migración
 
 **`M07-001`** crea únicamente `favoritos` con sus dos índices. **No modifica**
-M01-001, M03-001 ni M05-001; por tanto no cambia sus checksums históricos.
+M01-001, M01-002, M03-001 ni M05-001; por tanto no cambia sus checksums
+históricos. La integración con `main` conserva M01-002 (recuperación de
+contraseña) y añade M07-001 al registro, sin reordenar ni reescribir las
+migraciones existentes.
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- apply `
@@ -50,7 +53,9 @@ endpoints para cambiarlo.
 ## Datos y bloqueos
 
 - M06 debe aprobar publicaciones para que existan unidades `Aprobada` reales.
-- DEC-04 debe proveer el almacenamiento de fotos; M07 y M04 devuelven URLs
-  null/vacías si el puerto falla cerrado.
+- Cloudinary es el proveedor vigente de fotografías (DEC-04 cerrado). M07 y M04
+  devuelven URLs del proxy de la API cuando está configurado; si falta
+  configuración, `fotoPrincipalUrl` es null y `galeriaFotos` queda vacía, sin
+  inventar URLs. La prueba real opt-in sigue pendiente de credenciales.
 - La ubicación de universidad debe cargarse por un proceso controlado; el
   contrato M03 actual no la administra.

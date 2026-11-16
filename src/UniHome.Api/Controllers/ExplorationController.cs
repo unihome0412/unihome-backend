@@ -68,6 +68,14 @@ public sealed class ExplorationController : AuthenticatedControllerBase
         Guid? accountId = TryGetAccountId(out var authenticatedId)
             ? authenticatedId
             : null;
+
+        if (accountId is not null)
+        {
+            // La lista personalizada incluye esFavorito; no debe reutilizarse
+            // desde una caché compartida entre cuentas.
+            Response.Headers.CacheControl = "no-store";
+        }
+
         var result = await _explore
             .ListAsync(query.ToApplicationQuery(), accountId, cancellationToken)
             .ConfigureAwait(false);
@@ -108,6 +116,12 @@ public sealed class ExplorationController : AuthenticatedControllerBase
         Guid? accountId = TryGetAccountId(out var authenticatedId)
             ? authenticatedId
             : null;
+
+        if (accountId is not null)
+        {
+            Response.Headers.CacheControl = "no-store";
+        }
+
         var result = await _card
             .GetAsync(unitId, accountId, cancellationToken)
             .ConfigureAwait(false);
@@ -140,6 +154,8 @@ public sealed class ExplorationController : AuthenticatedControllerBase
                 StatusCodes.Status401Unauthorized,
                 "La sesión no es válida.");
         }
+
+        Response.Headers.CacheControl = "no-store";
 
         var result = await _detail
             .GetAsync(unitId, accountId, cancellationToken)

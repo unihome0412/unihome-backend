@@ -1,5 +1,13 @@
 # Promoción controlada de MongoDB y evolución versionada
 
+> **Actualizaci?n 2026-11-13:** el registro incorpora `M01-002` para
+> `restablecimientos_contrasena` y la promoci?n acepta dos destinos fijos:
+> `unihome_desarrollo` y `unihome_verificacion`. Exige que todas las migraciones
+> anteriores est?n aplicadas y verificadas. No se ejecut? ninguna escritura en
+> Atlas. La secuencia de la base operativa es M01-001, M01-002, M03-001 y
+> M05-001. Los detalles de la ventana est?n en
+> [`readiness-despliegue-verificacion.md`](readiness-despliegue-verificacion.md).
+
 **Estado:** mecanismo implementado y probado localmente. **No se ejecutó ninguna
 promoción ni escritura en `unihome_desarrollo`.** La ejecución real sigue bloqueada
 por autorización humana, credencial técnica verificada y respaldo/restauración

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from pathlib import Path
 from typing import Any, Iterable
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 WORK_DIR = ROOT_DIR / ".restler-work"
 STATE_DIR = ROOT_DIR / ".restler-state"
+CI_STATE_DIR = ROOT_DIR / ".ci-state"
 ARTIFACTS_DIR = ROOT_DIR / "artifacts/restler"
 RESTLER_TAG = "v9.3.1"
 RESTLER_COMMIT = "eaacd92733771d35e90acfb2040fe37d4e5d09b1"
@@ -22,9 +22,12 @@ AUTH_OPERATIONS = {
 JWT_PATTERN = re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
 HEADER_PATTERN = re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\r\n]+")
 JSON_SECRET_PATTERN = re.compile(
-    r'(?i)(\\?"(?:accessToken|refreshToken|password|contrasena|codigo)\\?"\s*:\s*\\?")[^"\\]+')
+    r'(?i)(\\?"(?:accessToken|refreshToken|password|contrasena|codigo|token|nuevaContrasena)\\?"\s*:\s*\\?")[^"\\]+')
 BEARER_PATTERN = re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/\-]+=*")
-SECRET_KEYS = {"password", "contrasena", "refreshToken", "accessToken", "codigo"}
+SECRET_KEYS = {
+    "password", "contrasena", "refreshToken", "accessToken", "codigo",
+    "token", "nuevaContrasena",
+}
 
 
 def read_json(path: Path) -> Any:
@@ -53,9 +56,14 @@ def route_key(entry: dict[str, Any]) -> tuple[str, str] | None:
     return method.upper(), endpoint
 
 
+def _load_speccov_files(root: Path) -> list[Path]:
+    """RESTler escribe speccov.json al cerrar Test y speccov-min siempre."""
+    return find_files(root, "speccov.json") + find_files(root, "speccov-min.json")
+
+
 def load_speccov(root: Path) -> dict[tuple[str, str], list[dict[str, Any]]]:
     result: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for path in find_files(root, "speccov.json"):
+    for path in _load_speccov_files(root):
         data = read_json(path)
         if not isinstance(data, dict):
             continue
@@ -212,22 +220,24 @@ def classify(
     return "PASS"
 
 
-def collect_state_secrets(root: Path = STATE_DIR) -> set[str]:
+def _walk_secrets(value: Any, secrets: set[str]) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in SECRET_KEYS and isinstance(child, str) and len(child) >= 4:
+                secrets.add(child)
+            _walk_secrets(child, secrets)
+    elif isinstance(value, list):
+        for child in value:
+            _walk_secrets(child, secrets)
+
+
+def collect_state_secrets(*roots: Path) -> set[str]:
     secrets: set[str] = set()
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key in SECRET_KEYS and isinstance(child, str) and len(child) >= 4:
-                    secrets.add(child)
-                walk(child)
-        elif isinstance(value, list):
-            for child in value:
-                walk(child)
-
-    if root.exists():
+    for root in roots or (STATE_DIR,):
+        if not root.exists():
+            continue
         for path in root.glob("*.json"):
-            walk(read_json(path))
+            _walk_secrets(read_json(path), secrets)
     return secrets
 
 
@@ -276,7 +286,7 @@ def render_markdown(
     *,
     status: str,
     compile_exit: int | None,
-    test_exit: int | None,
+    test_exits: dict[str, int | None],
     fuzz_exit: int | None,
     rows: list[dict[str, Any]],
     technical_errors: list[str],
@@ -292,13 +302,23 @@ def render_markdown(
         f"- **Estado:** **{status}**",
         f"- **RESTler:** `{RESTLER_TAG}` (`{RESTLER_COMMIT}`)",
         "- **Modo:** Compile + Test / Smoke + Fuzz-lean; sin fuzzing exhaustivo.",
-        "- **Límites:** `max_combinations=3`, `max_sequence_length=2`, "
+        "- **Límites:** `max_combinations=2..3`, `max_sequence_length=10` "
+        "(evita el bug de schedule de RESTler en smoke test), "
         "`max_request_execution_time=20s`, presupuesto de shell acotado.",
         "- **Checkers:** conjunto pasivo por defecto de RESTler; no se desactivan.",
+        "- **Respuestas binarias:** `ignore_decoding_failures=true` permite registrar "
+        "el status real de `GET /api/v1/fotos/{photoRef}`; no altera checkers ni cobertura.",
+        "- **Aislamiento destructivo:** `logout` y `DELETE /cuentas/mi-cuenta` "
+        "se ejecutan en pasadas Test separadas para no invalidar el token compartido.",
         f"- **Compile:** {'success' if compile_exit == 0 else 'ERROR'} "
         f"(exit `{compile_exit}`).",
-        f"- **Test/Smoke:** {'success' if test_exit == 0 else 'ERROR'} "
-        f"(exit `{test_exit}`).",
+    ]
+    for name, exit_code in test_exits.items():
+        label = name.removeprefix("Test") or "Main"
+        lines.append(
+            f"- **Test {label}:** {'success' if exit_code == 0 else 'ERROR'} "
+            f"(exit `{exit_code}`).")
+    lines += [
         f"- **Fuzz-lean:** {'success' if fuzz_exit == 0 else 'ERROR'} "
         f"(exit `{fuzz_exit}`).",
         "",
@@ -338,6 +358,14 @@ def render_markdown(
             lines.append(f"- `{bug['name']}`: {bug['count']} ocurrencia(s).")
     else:
         lines.append("No se detectaron bug buckets ni violaciones de checkers.")
+    invalid = [row for row in rows if row["attempted"] and not row["valid"]]
+    if invalid:
+        lines += ["", "## Operaciones sin 2xx", ""]
+        for row in invalid:
+            codes = ", ".join(str(code) for code in row["status_codes"]) or "sin código"
+            lines.append(
+                f"- `{row['method']} {row['path']}`: intentada, códigos {codes}; "
+                "se conserva como WARN, sin ocultarla ni marcarla como 2xx.")
     lines += [
         "",
         "## Compatibilidad OpenAPI",
@@ -356,10 +384,10 @@ def render_markdown(
         "",
         "## Criterio",
         "",
-        "- ERROR si la compilación, el test/fuzz o la cobertura de operaciones falla.",
+        "- ERROR si la compilación, alguna pasada Test/Fuzz o la cobertura de operaciones falla.",
         "- FAIL si aparece un HTTP 5xx o un bug bucket; no se ocultan ni se desactivan checkers.",
-        "- WARN si una operación fue intentada pero no obtuvo 2xx (por ejemplo, datos fuera de banda).",
-        "- PASS solo con las 7 operaciones intentadas, autenticación válida y sin 5xx/bugs.",
+        "- WARN si una operación fue intentada pero no obtuvo 2xx (por ejemplo, multipart no soportado).",
+        f"- PASS solo con las {len(rows)} operaciones intentadas, autenticación válida y sin 5xx/bugs.",
     ]
     if technical_errors:
         lines += ["", "## Errores técnicos", ""] + [f"- {error}" for error in technical_errors]
@@ -375,6 +403,30 @@ def _exit_code(name: str) -> int | None:
         return None
 
 
+def _load_test_results() -> tuple[
+    dict[tuple[str, str], list[dict[str, Any]]],
+    dict[str, int | None],
+    list[str],
+]:
+    combined: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    exits: dict[str, int | None] = {}
+    missing: list[str] = []
+    for name in ("TestMain", "TestLogout", "TestDelete", "Test"):
+        path = WORK_DIR / name
+        if not path.exists():
+            if name != "Test":
+                missing.append(name)
+            continue
+        entries = load_speccov(path)
+        if not entries and name != "Test":
+            missing.append(name)
+        for key, values in entries.items():
+            combined.setdefault(key, []).extend(values)
+        exit_name = "test" if name == "Test" else f"test-{name.removeprefix('Test').lower()}"
+        exits[name] = _exit_code(exit_name)
+    return combined, exits, missing
+
+
 def main() -> int:
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     original = read_json(ARTIFACTS_DIR / "openapi-original.json")
@@ -382,14 +434,14 @@ def main() -> int:
     if not isinstance(original, dict):
         original = read_json(WORK_DIR / "openapi-restler-30.json")
     operations = operations_from_spec(original) if isinstance(original, dict) else []
-    test = load_speccov(WORK_DIR / "Test")
+    test, test_exits, missing_test_dirs = _load_test_results()
     fuzz = load_speccov(WORK_DIR / "FuzzLean")
     rows = compact_coverage(operations, test, fuzz)
     http_codes = collect_http_codes(WORK_DIR)
     bugs = collect_bugs(WORK_DIR)
     requests = count_requests(WORK_DIR)
     sequences = count_sequences(WORK_DIR)
-    secrets = collect_state_secrets(STATE_DIR)
+    secrets = collect_state_secrets(STATE_DIR, CI_STATE_DIR)
 
     technical_errors: list[str] = []
     prepare_error = WORK_DIR / "prepare-error.txt"
@@ -402,16 +454,25 @@ def main() -> int:
         technical_errors.append("No se generó Compile/grammar.py.")
     if compile_exit is None:
         technical_errors.append("No hay código de salida de RESTler compile.")
-    test_exit = _exit_code("test")
-    fuzz_exit = _exit_code("fuzz-lean")
+
     if not test:
-        technical_errors.append("Test no produjo speccov.json.")
+        technical_errors.append("Las pasadas Test no produjeron speccov.")
+    for name in missing_test_dirs:
+        technical_errors.append(f"No se encontró la pasada {name} o su speccov.")
+    for name, exit_code in test_exits.items():
+        if exit_code not in (0, None):
+            technical_errors.append(
+                f"RESTler Test {name} terminó con código {exit_code}.")
+        if exit_code is None and name in {"TestMain", "TestLogout", "TestDelete"}:
+            technical_errors.append(f"No hay código de salida de Test {name}.")
+
+    fuzz_exit = _exit_code("fuzz-lean")
     if not fuzz:
-        technical_errors.append("Fuzz-lean no produjo speccov.json.")
-    if test_exit not in (0, None):
-        technical_errors.append(f"RESTler test terminó con código {test_exit}.")
+        technical_errors.append("Fuzz-lean no produjo speccov-min.json/speccov.json.")
     if fuzz_exit not in (0, None):
         technical_errors.append(f"RESTler fuzz-lean terminó con código {fuzz_exit}.")
+    if fuzz_exit is None:
+        technical_errors.append("No hay código de salida de RESTler fuzz-lean.")
 
     missing = [
         f"{row['method']} {row['path']}"
@@ -428,7 +489,7 @@ def main() -> int:
         "status": status,
         "restler": {"tag": RESTLER_TAG, "commit": RESTLER_COMMIT},
         "compile_exit": compile_exit,
-        "test_exit": test_exit,
+        "test_exits": test_exits,
         "fuzz_lean_exit": fuzz_exit,
         "routes": rows,
         "missing_operations": missing,
@@ -455,7 +516,7 @@ def main() -> int:
     markdown = render_markdown(
         status=status,
         compile_exit=compile_exit,
-        test_exit=test_exit,
+        test_exits=test_exits,
         fuzz_exit=fuzz_exit,
         rows=rows,
         technical_errors=technical_errors,
@@ -468,10 +529,13 @@ def main() -> int:
     (ARTIFACTS_DIR / "restler-summary.md").write_text(markdown, encoding="utf-8")
 
     copied = []
-    copied += copy_evidence_tree(WORK_DIR / "Compile", ARTIFACTS_DIR / "compile", secrets)
-    copied += copy_evidence_tree(WORK_DIR / "Test", ARTIFACTS_DIR / "test", secrets)
-    copied += copy_evidence_tree(WORK_DIR / "FuzzLean", ARTIFACTS_DIR / "fuzz-lean", secrets)
-    for name in ("compile-console.txt", "test-console.txt", "fuzz-lean-console.txt"):
+    for name in ("Compile", "TestMain", "TestLogout", "TestDelete", "FuzzLean", "Test"):
+        copied += copy_evidence_tree(
+            WORK_DIR / name, ARTIFACTS_DIR / name.lower(), secrets)
+    for name in (
+        "compile-console.txt", "test-main-console.txt", "test-logout-console.txt",
+        "test-delete-console.txt", "fuzz-lean-console.txt",
+    ):
         copy_sanitized(WORK_DIR / name, ARTIFACTS_DIR / "logs" / name, secrets)
     (ARTIFACTS_DIR / "request-logs.json").write_text(
         json.dumps({

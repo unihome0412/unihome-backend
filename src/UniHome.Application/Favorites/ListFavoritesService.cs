@@ -105,12 +105,14 @@ public sealed class ListFavoritesService
 
             locationByUniversity.TryGetValue(unit.UniversityId, out var location);
             var distance = ExplorationProjection.Distance(property, location);
+            var canReadPhoto = ExplorationProjection.IsPublic(unit) ||
+                               unit.OwnerAccountId == accountId;
 
             items.Add(new FavoriteView(
                 unit.Id,
                 new FavoriteCardView(
                     unit.Id,
-                    _photos.Primary(unit),
+                    _photos.Primary(unit, canReadPhoto),
                     unit.PricePerPlace,
                     unit.Type,
                     distance,

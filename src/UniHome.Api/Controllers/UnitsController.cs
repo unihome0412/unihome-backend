@@ -14,7 +14,7 @@ namespace UniHome.Api.Controllers;
 public sealed class UnitsController : AuthenticatedControllerBase
 {
     private const long MaxRequestBytes = 8 * 1024;
-    private const long MaxPhotoRequestBytes = 52 * 1024 * 1024;
+    private const long MaxPhotoRequestBytes = UnitPhotoValidator.MaxRequestBytes;
 
     private readonly CreateUnitService _createUnit;
     private readonly AddUnitPhotosService _addPhotos;
@@ -101,6 +101,7 @@ public sealed class UnitsController : AuthenticatedControllerBase
     /// </summary>
     [HttpPost("unidades/{unitId:guid}/fotos")]
     [Authorize]
+    [Consumes("multipart/form-data")]
     [RequestSizeLimit(MaxPhotoRequestBytes)]
     [ProducesResponseType(typeof(UnidadResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
@@ -109,6 +110,7 @@ public sealed class UnitsController : AuthenticatedControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status415UnsupportedMediaType)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> AddPhotos(
         Guid unitId,
