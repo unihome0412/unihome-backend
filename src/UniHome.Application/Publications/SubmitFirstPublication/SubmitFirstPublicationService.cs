@@ -147,4 +147,3 @@ public sealed class SubmitFirstPublicationService
         DateTimeOffset submittedAt) =>
         new(unit.Id, unit.PublicationState, submittedAt);
 }
-

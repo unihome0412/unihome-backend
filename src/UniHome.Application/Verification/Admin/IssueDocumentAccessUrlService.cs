@@ -85,5 +85,3 @@ public sealed class IssueDocumentAccessUrlService
                 document.Tipo));
     }
 }
-
-

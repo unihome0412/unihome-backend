@@ -369,4 +369,3 @@ public sealed class UploadVerificationDocumentService
             _clock.UtcNow,
             Activity.Current?.Id);
 }
-

@@ -135,4 +135,3 @@ public sealed class GetExpedienteDetailService
         return _urls.Build(grant.Token);
     }
 }
-

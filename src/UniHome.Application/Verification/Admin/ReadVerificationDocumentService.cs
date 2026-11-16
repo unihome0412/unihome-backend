@@ -111,4 +111,3 @@ public sealed class ReadVerificationDocumentService
                 preview.IsThumbnail));
     }
 }
-
