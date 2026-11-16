@@ -77,30 +77,44 @@ class FakeHttp:
 
 
 class RestlerPrepareTests(unittest.TestCase):
-    def test_diccionarios_conservan_valores_crudos_sin_tokens_reales(self):
+    def test_diccionarios_evitan_doble_quoting_y_fijan_ids(self):
         dictionaries = prepare.build_private_dictionaries(DATA)
         registro = dictionaries["registro"]["restler_custom_payload"]
-        self.assertEqual('"reg@uni.edu"', registro["correo"][0])
-        self.assertEqual('"Mujer"', registro["genero"][0])
+        self.assertEqual("reg@uni.edu", registro["correo"][0])
+        self.assertEqual("Mujer", registro["genero"][0])
         self.assertEqual("true", registro["aceptoAvisoPrivacidad"][0])
         self.assertEqual(
-            '"123456"',
+            "123456",
             dictionaries["confirmacion"]["restler_custom_payload"]["codigo"][0])
         self.assertEqual(
-            '"refresh-synthetic"',
+            "refresh-synthetic",
             dictionaries["refresh"]["restler_custom_payload"]["refreshToken"][0])
         self.assertEqual(
             "photo-ref",
             dictionaries["photo"]["restler_custom_payload"]["photoRef"][0])
         self.assertEqual(
-            '"Casa"',
-            dictionaries["property"]["restler_custom_payload"]["tipoPropiedad"][0])
+            DATA.university_id,
+            dictionaries["property"]["restler_custom_payload"]["universidadId"][0])
         self.assertEqual(
             "19.4326",
             dictionaries["property"]["restler_custom_payload"]["latitud"][0])
         self.assertEqual(
-            '"Habitacion"',
-            dictionaries["unit"]["restler_custom_payload"]["tipoUnidad"][0])
+            DATA.property_id,
+            dictionaries["unit"]["restler_custom_payload"]["propertyId"][0])
+        self.assertEqual(
+            DATA.unit_id,
+            dictionaries["services"]["restler_custom_payload"]["unitId"][0])
+
+    def test_compile_dictionary_fija_ids_y_no_duplica_quotes(self):
+        dictionary = prepare.build_compile_dictionary(DATA)
+        payload = dictionary["restler_custom_payload"]
+        self.assertEqual(DATA.property_id, payload["propertyId"][0])
+        self.assertEqual(DATA.unit_id, payload["unitId"][0])
+        self.assertEqual(DATA.university_id, payload["id"][0])
+        self.assertEqual("placeholder@uni.edu", payload["correo"][0])
+        self.assertEqual("RESTler Universidad", payload["nombreYCampus"][0])
+        self.assertNotIn("nombre", payload)
+        self.assertNotIn('"', "".join(payload["codigo"]))
 
     def test_settings_contiene_limites_autenticacion_y_aislamiento(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -168,14 +182,14 @@ class RestlerPrepareTests(unittest.TestCase):
                 delete_settings["authentication"]["token"]["module"]["data"]["mode"])
             self.assertEqual(0.08, json.loads(
                 (state / "fuzz-settings.json").read_text(encoding="utf-8"))["time_budget"])
-            self.assertEqual(
-                1,
-                test_settings["per_resource_settings"][
-                    "/api/v1/propiedades"]["create_once"])
-            self.assertNotIn(
-                "create_once",
-                json.loads((state / "fuzz-settings.json").read_text(encoding="utf-8"))
-                ["per_resource_settings"].get("/api/v1/propiedades", {}))
+            for endpoint in (
+                "/api/v1/propiedades",
+                "/api/v1/propiedades/{propertyId}/unidades",
+                "/api/v1/admin/universidades",
+            ):
+                self.assertNotIn(
+                    "create_once",
+                    test_settings["per_resource_settings"].get(endpoint, {}))
 
             public = (artifacts / "prepare-summary.json").read_text(encoding="utf-8")
             self.assertNotIn("register-password", public)

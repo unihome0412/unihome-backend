@@ -39,7 +39,6 @@ ARTIFACTS_DIR = ROOT_DIR / "artifacts/restler"
 WORK_DIR = ROOT_DIR / ".restler-work"
 STATE_DIR = ROOT_DIR / ".restler-state"
 TOKEN_PROVIDER = Path(__file__).with_name("token_provider.py").resolve()
-TERMS_VERSION = "2026-01"
 
 
 @dataclass(frozen=True)
@@ -190,140 +189,94 @@ def _request_password_reset(http: HttpClient, email: str) -> str:
     return wait_for_password_reset_token(MAILBOX_DIR, email)
 
 
-def _quote(value: str) -> str:
-    """Valor JSON string literal para insertarlo crudo en una petición."""
-    return json.dumps(value, ensure_ascii=False)
-
-
 def _custom_dictionary(values: dict[str, str]) -> dict[str, Any]:
     return {"restler_custom_payload": {key: [value] for key, value in values.items()}}
 
 
 def build_private_dictionaries(data: SyntheticData) -> dict[str, dict[str, Any]]:
+    """Valores para restler_custom_payload.
+
+    RESTler ya entrecomilla los payloads de esquemas string. Por eso los
+    strings se guardan sin comillas JSON; los IDs/path y números van crudos.
+    Los enums y campos opcionales se dejan a los valores por defecto válidos
+    del grammar para evitar conflictos de quoting entre endpoints.
+    """
     return {
         "registro": _custom_dictionary({
-            "nombreCompleto": _quote("Cuenta RESTler"),
-            "correo": _quote(data.register_email),
-            "fechaNacimiento": _quote("2004-05-10"),
-            "genero": _quote("Mujer"),
-            "contrasena": _quote(data.register_password),
-            "confirmarContrasena": _quote(data.register_password),
+            "nombreCompleto": "Cuenta RESTler",
+            "correo": data.register_email,
+            "fechaNacimiento": "2004-05-10",
+            "genero": "Mujer",
+            "contrasena": data.register_password,
+            "confirmarContrasena": data.register_password,
             "aceptoAvisoPrivacidad": "true",
-            "versionAvisoPrivacidad": _quote("2026-01"),
+            "versionAvisoPrivacidad": "2026-01",
         }),
         "confirmacion": _custom_dictionary({
-            "correo": _quote(data.confirm_email),
-            "codigo": _quote(data.confirmation_code),
+            "correo": data.confirm_email,
+            "codigo": data.confirmation_code,
         }),
         # Un correo aún no registrado evita invalidar el código de confirmación.
-        "reenvio": _custom_dictionary({"correo": _quote(data.register_email)}),
+        "reenvio": _custom_dictionary({"correo": data.register_email}),
         "login": _custom_dictionary({
-            "correo": _quote(data.login_email),
-            "contrasena": _quote(data.login_password),
+            "correo": data.login_email,
+            "contrasena": data.login_password,
         }),
-        "refresh": _custom_dictionary({
-            "refreshToken": _quote(data.refresh_token),
-        }),
+        "refresh": _custom_dictionary({"refreshToken": data.refresh_token}),
         "delete": _custom_dictionary({
-            "contrasena": _quote(data.delete_password),
+            "contrasena": data.delete_password,
             "confirmacionPerdidaInformacion": "true",
-        }),
-        "admin-list": _custom_dictionary({
-            "page": "1",
-            "pageSize": "50",
         }),
         "admin-update": _custom_dictionary({
             "id": data.university_id,
-            "nombreYCampus": _quote("RESTler Universidad Editada"),
+            "nombreYCampus": "RESTler Universidad Editada",
         }),
         "admin-status": _custom_dictionary({
             "id": data.university_id,
             "activa": "false",
         }),
-        "search": _custom_dictionary({"buscar": "RESTler"}),
         "property": _custom_dictionary({
-            "nombre": _quote("RESTler Propiedad"),
-            "direccion": _quote("Calle RESTler 123"),
-            "colonia": _quote("Centro"),
-            "tipoPropiedad": _quote("Casa"),
-            "universidadId": _quote(data.university_id),
+            "universidadId": data.university_id,
             "latitud": "19.4326",
             "longitud": "-99.1332",
         }),
-        "unit": _custom_dictionary({
-            "tipoUnidad": _quote("Habitacion"),
-            "ocupacion": _quote("Individual"),
-            "lugares": "1",
-            "precioMensualPorLugarMxn": "3500",
-            "tamanoM2": "15",
-            "paraQuien": _quote("Mixto"),
-            "bano": _quote("Privado"),
-            "mobiliario": _quote("Amueblado"),
-            "muebles": _quote("Cama"),
-            "plantillaBase": _quote("HabitacionIndividual"),
-            "propertyId": data.property_id,
-        }),
-        "services": _custom_dictionary({
-            "servicios/[0]/nombre": _quote("Internet"),
-            "servicios/[0]/modalidad": _quote("Incluido"),
-            "servicios/[0]/montoMensualMxn": "500",
-            "unitId": data.unit_id,
-        }),
-        "zone": _custom_dictionary({
-            "informacionZona": _quote("Zona RESTler"),
-            "reglasConvivencia": _quote("Reglas RESTler"),
-            "unitId": data.unit_id,
-        }),
+        "unit": _custom_dictionary({"propertyId": data.property_id}),
+        "services": _custom_dictionary({"unitId": data.unit_id}),
+        "zone": _custom_dictionary({"unitId": data.unit_id}),
         "unit-path": _custom_dictionary({"unitId": data.unit_id}),
         "photo": _custom_dictionary({"photoRef": data.photo_ref}),
-        "terms": _custom_dictionary({
-            "versionTerminos": _quote(TERMS_VERSION),
-        }),
         "recovery-request": _custom_dictionary({
-            "correo": _quote(data.recovery_request_email),
+            "correo": data.recovery_request_email,
         }),
         "recovery-confirm": _custom_dictionary({
-            "token": _quote(data.reset_token),
-            "nuevaContrasena": _quote(data.reset_password),
+            "token": data.reset_token,
+            "nuevaContrasena": data.reset_password,
         }),
     }
 
 
 def build_compile_dictionary(data: SyntheticData) -> dict[str, Any]:
-    """Placeholders válidos; los valores reales se afinan por endpoint."""
+    """Defaults válidos; los valores se afinan por endpoint."""
     return _custom_dictionary({
-        "nombreCompleto": _quote("placeholder"),
-        "correo": _quote("placeholder@uni.edu"),
-        "fechaNacimiento": _quote("2004-05-10"),
-        "genero": _quote("Mujer"),
-        "contrasena": _quote("placeholder"),
-        "confirmarContrasena": _quote("placeholder"),
-        "versionAvisoPrivacidad": _quote("2026-01"),
-        "codigo": _quote(data.confirmation_code),
-        "refreshToken": _quote(data.refresh_token),
-        "token": _quote(data.reset_token),
-        "nuevaContrasena": _quote(data.reset_password),
-        "versionTerminos": _quote(TERMS_VERSION),
+        "nombreCompleto": "placeholder",
+        "correo": "placeholder@uni.edu",
+        "fechaNacimiento": "2004-05-10",
+        "genero": "Mujer",
+        "contrasena": "placeholder",
+        "confirmarContrasena": "placeholder",
+        "versionAvisoPrivacidad": "2026-01",
+        "codigo": data.confirmation_code,
+        "refreshToken": data.refresh_token,
+        "token": data.reset_token,
+        "nuevaContrasena": data.reset_password,
         "photoRef": data.photo_ref,
-        "universidadId": _quote(data.university_id),
-        "nombreYCampus": _quote("RESTler Universidad"),
-        # "Internet" es un nombre de propiedad válido y también un ServiceName.
-        "nombre": _quote("Internet"),
-        "direccion": _quote("Calle RESTler 123"),
-        "colonia": _quote("Centro"),
-        "tipoPropiedad": _quote("Casa"),
+        "universidadId": data.university_id,
+        "nombreYCampus": "RESTler Universidad",
+        "propertyId": data.property_id,
+        "unitId": data.unit_id,
+        "id": data.university_id,
         "latitud": "19.4326",
         "longitud": "-99.1332",
-        "tipoUnidad": _quote("Habitacion"),
-        "ocupacion": _quote("Individual"),
-        "lugares": "1",
-        "precioMensualPorLugarMxn": "3500",
-        "tamanoM2": "15",
-        "paraQuien": _quote("Mixto"),
-        "bano": _quote("Privado"),
-        "mobiliario": _quote("SinMuebles"),
-        "muebles": _quote("Cama"),
-        "plantillaBase": _quote("HabitacionIndividual"),
     })
 
 
@@ -524,10 +477,8 @@ def prepare() -> dict[str, Any]:
         "/api/v1/auth/recuperacion/solicitud": dictionary_paths["recovery-request"],
         "/api/v1/auth/recuperacion/confirmacion": dictionary_paths["recovery-confirm"],
         "/api/v1/cuentas/mi-cuenta": dictionary_paths["delete"],
-        "/api/v1/admin/universidades": dictionary_paths["admin-list"],
         "/api/v1/admin/universidades/{id}": dictionary_paths["admin-update"],
         "/api/v1/admin/universidades/{id}/estado": dictionary_paths["admin-status"],
-        "/api/v1/universidades": dictionary_paths["search"],
         "/api/v1/propiedades": dictionary_paths["property"],
         "/api/v1/propiedades/{propertyId}/unidades": dictionary_paths["unit"],
         "/api/v1/unidades/{unitId}/servicios": dictionary_paths["services"],
@@ -535,7 +486,6 @@ def prepare() -> dict[str, Any]:
         "/api/v1/unidades/{unitId}/fotos": dictionary_paths["unit-path"],
         "/api/v1/unidades/{unitId}/vista-previa": dictionary_paths["unit-path"],
         "/api/v1/fotos/{photoRef}": dictionary_paths["photo"],
-        "/api/v1/publicaciones/primera/terminos": dictionary_paths["terms"],
     }
 
     test_settings = build_engine_settings(
@@ -571,19 +521,9 @@ def prepare() -> dict[str, Any]:
         include_requests=delete_only,
     )
 
-    # Los productores con nombre fijo se crean una sola vez y su ID se fija en
-    # las operaciones dependientes. Así una repetición de smoke test no choca
-    # con la restricción de unicidad de propiedad/universidad.
-    # Solo TestMain usa create_once. Fuzz-lean corre después contra la misma
-    # base y no debe volver a crear los mismos nombres fijos.
-    for endpoint in (
-        "/api/v1/propiedades",
-        "/api/v1/propiedades/{propertyId}/unidades",
-        "/api/v1/admin/universidades",
-    ):
-        test_settings["per_resource_settings"].setdefault(
-            endpoint, {})["create_once"] = 1
-
+    # Los IDs de entrada se fijan por diccionario. No se usa create_once:
+    # un fallo de preprocesamiento abortaba TestMain antes de ejecutar el
+    # catálogo completo.
     settings_paths = {
         "test-settings.json": test_settings,
         "fuzz-settings.json": fuzz_settings,
