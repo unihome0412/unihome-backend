@@ -7,19 +7,58 @@ from unittest.mock import patch
 
 import restler.restler_prepare as prepare
 
+OPERATIONS = [
+    ("get", "/api/v1/admin/universidades"),
+    ("post", "/api/v1/admin/universidades"),
+    ("put", "/api/v1/admin/universidades/{id}"),
+    ("put", "/api/v1/admin/universidades/{id}/estado"),
+    ("post", "/api/v1/auth/confirmacion-correo"),
+    ("post", "/api/v1/auth/confirmacion-correo/reenvio"),
+    ("post", "/api/v1/auth/login"),
+    ("post", "/api/v1/auth/logout"),
+    ("post", "/api/v1/auth/recuperacion/confirmacion"),
+    ("post", "/api/v1/auth/recuperacion/solicitud"),
+    ("post", "/api/v1/auth/refresh"),
+    ("post", "/api/v1/auth/registro"),
+    ("delete", "/api/v1/cuentas/mi-cuenta"),
+    ("get", "/api/v1/fotos/{photoRef}"),
+    ("get", "/api/v1/perfil/mi-perfil"),
+    ("post", "/api/v1/propiedades"),
+    ("post", "/api/v1/propiedades/{propertyId}/unidades"),
+    ("post", "/api/v1/publicaciones/primera/terminos"),
+    ("post", "/api/v1/unidades/{unitId}/fotos"),
+    ("put", "/api/v1/unidades/{unitId}/servicios"),
+    ("get", "/api/v1/unidades/{unitId}/vista-previa"),
+    ("put", "/api/v1/unidades/{unitId}/zona-reglas"),
+    ("get", "/api/v1/universidades"),
+]
 
 SPEC = {
     "openapi": "3.1.1",
     "paths": {
-        "/api/v1/auth/registro": {"post": {}},
-        "/api/v1/auth/confirmacion-correo": {"post": {}},
-        "/api/v1/auth/confirmacion-correo/reenvio": {"post": {}},
-        "/api/v1/auth/login": {"post": {}},
-        "/api/v1/auth/refresh": {"post": {}},
-        "/api/v1/auth/logout": {"post": {}},
-        "/api/v1/cuentas/mi-cuenta": {"delete": {}},
+        path: {method: {} for method, candidate in OPERATIONS if candidate == path}
+        for _, path in OPERATIONS
     },
 }
+
+DATA = prepare.SyntheticData(
+    register_email="reg@uni.edu",
+    register_password="register-password",
+    confirm_email="confirm@uni.edu",
+    confirmation_code="123456",
+    login_email="login@uni.edu",
+    login_password="login-password",
+    refresh_token="refresh-synthetic",
+    delete_password="delete-password",
+    university_id="11111111-1111-1111-1111-111111111111",
+    property_id="22222222-2222-2222-2222-222222222222",
+    unit_id="33333333-3333-3333-3333-333333333333",
+    photo_ref="photo-ref",
+    recovery_email="recovery@uni.edu",
+    recovery_request_email="recovery-request@uni.edu",
+    reset_token="reset-token",
+    reset_password="reset-password",
+)
 
 
 class FakeHttp:
@@ -30,12 +69,6 @@ class FakeHttp:
         del body, openapi, note
         if method == "GET" and path == "/openapi/v1.json":
             status, payload = 200, json.dumps(SPEC).encode()
-        elif method == "POST" and path == "/api/v1/auth/registro":
-            status, payload = 201, b'{"correoConfirmacionEnviado":true}'
-        elif method == "POST" and path == "/api/v1/auth/confirmacion-correo":
-            status, payload = 200, b'{"correoConfirmado":true}'
-        elif method == "POST" and path == "/api/v1/auth/login":
-            status, payload = 200, b'{"accessToken":"synthetic-access","refreshToken":"synthetic-refresh"}'
         else:
             raise AssertionError(f"Ruta simulada inesperada: {method} {path}")
         if expected is not None and status not in expected:
@@ -44,45 +77,53 @@ class FakeHttp:
 
 
 class RestlerPrepareTests(unittest.TestCase):
-    def test_diccionarios_conservan_valores_sin_tokens_reales(self):
-        dictionaries = prepare.build_private_dictionaries(
-            register_email="reg@uni.edu",
-            register_password="register-password",
-            confirm_email="confirm@uni.edu",
-            confirmation_code="123456",
-            login_email="login@uni.edu",
-            login_password="login-password",
-            refresh_token="refresh-synthetic",
-            token_password="token-password",
-        )
+    def test_diccionarios_conservan_valores_crudos_sin_tokens_reales(self):
+        dictionaries = prepare.build_private_dictionaries(DATA)
+        registro = dictionaries["registro"]["restler_custom_payload"]
+        self.assertEqual('"reg@uni.edu"', registro["correo"][0])
+        self.assertEqual('"Mujer"', registro["genero"][0])
+        self.assertEqual("true", registro["aceptoAvisoPrivacidad"][0])
         self.assertEqual(
-            "reg@uni.edu",
-            dictionaries["registro"]["restler_custom_payload"]["correo"][0])
-        self.assertEqual(
-            "123456",
+            '"123456"',
             dictionaries["confirmacion"]["restler_custom_payload"]["codigo"][0])
         self.assertEqual(
-            "refresh-synthetic",
+            '"refresh-synthetic"',
             dictionaries["refresh"]["restler_custom_payload"]["refreshToken"][0])
         self.assertEqual(
-            '"Mujer"',
-            dictionaries["registro"]["restler_custom_payload"]["genero"][0])
+            "photo-ref",
+            dictionaries["photo"]["restler_custom_payload"]["photoRef"][0])
+        self.assertEqual(
+            '"Casa"',
+            dictionaries["property"]["restler_custom_payload"]["tipoPropiedad"][0])
+        self.assertEqual(
+            "19.4326",
+            dictionaries["property"]["restler_custom_payload"]["latitud"][0])
+        self.assertEqual(
+            '"Habitacion"',
+            dictionaries["unit"]["restler_custom_payload"]["tipoUnidad"][0])
 
-    def test_settings_contiene_limites_y_modulo_de_autenticacion(self):
+    def test_settings_contiene_limites_autenticacion_y_aislamiento(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             settings = prepare.build_engine_settings(
-                token_password="token-password",
+                token_data={"mode": "admin", "state_file": "state.json"},
                 per_resource={"/api/v1/auth/login": root / "login.json"},
+                max_sequence_length=5,
+                max_combinations=3,
+                time_budget=1,
+                exclude_requests=[{"endpoint": "/api/v1/auth/logout"}],
             )
         self.assertEqual(3, settings["max_combinations"])
-        self.assertEqual(2, settings["max_sequence_length"])
+        self.assertEqual(5, settings["max_sequence_length"])
         self.assertEqual(20, settings["max_request_execution_time"])
         self.assertTrue(settings["save_results_in_fixed_dirname"])
         self.assertEqual(
             "acquire_token",
             settings["authentication"]["token"]["module"]["function"])
+        self.assertEqual("admin",
+                         settings["authentication"]["token"]["module"]["data"]["mode"])
         self.assertIn("/api/v1/auth/login", settings["per_resource_settings"])
+        self.assertIn("exclude_requests", settings)
 
     def test_prepare_escribe_estado_privado_y_reporte_publico(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -91,6 +132,7 @@ class RestlerPrepareTests(unittest.TestCase):
             work = root / "work"
             state = root / "state"
             mailbox = root / "mail"
+            admin_state = root / "admin.json"
             with (
                 patch.object(prepare, "ARTIFACTS_DIR", artifacts),
                 patch.object(prepare, "WORK_DIR", work),
@@ -98,23 +140,48 @@ class RestlerPrepareTests(unittest.TestCase):
                 patch.object(prepare, "MAILBOX_DIR", mailbox),
                 patch.object(prepare, "TOKEN_PROVIDER", root / "token_provider.py"),
                 patch.object(prepare, "HttpClient", FakeHttp),
-                patch.object(prepare, "wait_for_verification_code", return_value="123456"),
+                patch.object(prepare, "_provision_synthetic_data", return_value=DATA),
+                patch.dict("os.environ", {"UNIHOME_ADMIN_STATE": str(admin_state)}),
             ):
                 summary = prepare.prepare()
 
-            self.assertEqual(7, summary["operations"])
+            self.assertEqual(23, summary["operations"])
+            self.assertTrue(summary["destructive_operations_isolated"])
+            self.assertTrue(summary["admin_token_provider_configured"])
             self.assertTrue((artifacts / "openapi-original.json").exists())
             self.assertTrue((artifacts / "openapi-restler-30.json").exists())
             self.assertTrue((artifacts / "openapi-transformation.json").exists())
-            self.assertTrue((state / "engine-settings.json").exists())
+            self.assertTrue((state / "test-settings.json").exists())
+            self.assertTrue((state / "fuzz-settings.json").exists())
+            self.assertTrue((state / "logout-settings.json").exists())
+            self.assertTrue((state / "delete-settings.json").exists())
             self.assertTrue((state / "dict-registro.json").exists())
             self.assertTrue((state / "compile-config.json").exists())
+
+            test_settings = json.loads(
+                (state / "test-settings.json").read_text(encoding="utf-8"))
+            delete_settings = json.loads(
+                (state / "delete-settings.json").read_text(encoding="utf-8"))
+            self.assertTrue(test_settings["exclude_requests"])
+            self.assertEqual(
+                "disposable",
+                delete_settings["authentication"]["token"]["module"]["data"]["mode"])
+            self.assertEqual(0.08, json.loads(
+                (state / "fuzz-settings.json").read_text(encoding="utf-8"))["time_budget"])
+            self.assertEqual(
+                1,
+                test_settings["per_resource_settings"][
+                    "/api/v1/propiedades"]["create_once"])
+            self.assertNotIn(
+                "create_once",
+                json.loads((state / "fuzz-settings.json").read_text(encoding="utf-8"))
+                ["per_resource_settings"].get("/api/v1/propiedades", {}))
+
             public = (artifacts / "prepare-summary.json").read_text(encoding="utf-8")
             self.assertNotIn("register-password", public)
             self.assertNotIn("synthetic-refresh", public)
             self.assertNotIn("123456", public)
-            settings = json.loads((state / "engine-settings.json").read_text(encoding="utf-8"))
-            self.assertIn("password", settings["authentication"]["token"]["module"]["data"])
+            self.assertNotIn("reset-token", public)
 
 
 if __name__ == "__main__":

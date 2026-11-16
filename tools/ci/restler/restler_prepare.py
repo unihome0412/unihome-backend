@@ -2,15 +2,19 @@
 """Prepara RESTler y los datos sintéticos sobre la API efímera de UniHome.
 
 El script usa únicamente la API real y el SMTP de captura local. Los valores
-sensibles (contraseñas, tokens y códigos) quedan en `.restler-state`, fuera de
-los artefactos; el reporte solo contiene metadatos no sensibles.
+sensibles (contraseñas, tokens y códigos) quedan en `.restler-state` y
+`.ci-state`, fuera de los artefactos; el reporte solo contiene metadatos no
+sensibles. La cuenta administradora la provisiona `provision_admin.py` antes de
+reiniciar la API con `Admin__AccountIds`.
 """
 from __future__ import annotations
 
 import json
 import os
 import sys
+import urllib.parse
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +22,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from restler import normalize_openapi
 from zap_dast import (
+    DAST_PHOTO_PNG,
     HttpClient,
     _generate_password,
     _json_body,
     _register_payload,
+    load_admin_state,
+    wait_for_password_reset_token,
     wait_for_verification_code,
 )
 
@@ -32,6 +39,27 @@ ARTIFACTS_DIR = ROOT_DIR / "artifacts/restler"
 WORK_DIR = ROOT_DIR / ".restler-work"
 STATE_DIR = ROOT_DIR / ".restler-state"
 TOKEN_PROVIDER = Path(__file__).with_name("token_provider.py").resolve()
+TERMS_VERSION = "2026-01"
+
+
+@dataclass(frozen=True)
+class SyntheticData:
+    register_email: str
+    register_password: str
+    confirm_email: str
+    confirmation_code: str
+    login_email: str
+    login_password: str
+    refresh_token: str
+    delete_password: str
+    university_id: str
+    property_id: str
+    unit_id: str
+    photo_ref: str
+    recovery_email: str
+    recovery_request_email: str
+    reset_token: str
+    reset_password: str
 
 
 def _write_json(path: Path, value: Any, private: bool = False) -> None:
@@ -77,87 +105,262 @@ def _login(http: HttpClient, email: str, password: str) -> dict[str, Any]:
     return tokens
 
 
+def _create_university(http: HttpClient, token: str) -> str:
+    _, payload, _ = http.request(
+        "POST", "/api/v1/admin/universidades",
+        body={"nombreYCampus": f"RESTler Base {uuid.uuid4().hex}"},
+        token=token, expected={201}, note="restler universidad base")
+    value = _json_object(payload)
+    identifier = str(value.get("id") or "")
+    if not identifier:
+        raise RuntimeError("El alta de universidad no devolvió id.")
+    return identifier
+
+
+def _create_property(
+    http: HttpClient, token: str, university_id: str,
+) -> str:
+    _, payload, _ = http.request(
+        "POST", "/api/v1/propiedades",
+        body={
+            "nombre": f"RESTler Propiedad Base {uuid.uuid4().hex}",
+            "direccion": "Calle RESTler 123",
+            "colonia": "Centro",
+            "tipoPropiedad": "Casa",
+            "universidadId": university_id,
+            "latitud": 19.4326,
+            "longitud": -99.1332,
+        },
+        token=token, expected={201}, note="restler propiedad base")
+    value = _json_object(payload)
+    identifier = str(value.get("id") or "")
+    if not identifier:
+        raise RuntimeError("El alta de propiedad no devolvió id.")
+    return identifier
+
+
+def _create_unit(http: HttpClient, token: str, property_id: str) -> str:
+    _, payload, _ = http.request(
+        "POST", f"/api/v1/propiedades/{property_id}/unidades",
+        body={
+            "tipoUnidad": "Habitacion",
+            "ocupacion": "Individual",
+            "lugares": 1,
+            "precioMensualPorLugarMxn": 3500,
+            "tamanoM2": 15,
+            "paraQuien": "Mixto",
+            "bano": "Privado",
+            "mobiliario": "Amueblado",
+            "muebles": ["Cama"],
+            "plantillaBase": "HabitacionIndividual",
+        },
+        token=token, expected={201}, note="restler unidad base")
+    value = _json_object(payload)
+    identifier = str(value.get("id") or "")
+    if not identifier:
+        raise RuntimeError("El alta de unidad no devolvió id.")
+    return identifier
+
+
+def _upload_photo_and_read_ref(
+    http: HttpClient,
+    token: str,
+    unit_id: str,
+) -> str:
+    http.request_multipart(
+        "POST", f"/api/v1/unidades/{unit_id}/fotos",
+        files=[("Fotos", "foto.png", "image/png", DAST_PHOTO_PNG)],
+        token=token, expected={200}, note="restler foto base")
+    _, payload, _ = http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/vista-previa",
+        token=token, expected={200}, auth=True, note="restler vista previa base")
+    value = _json_object(payload)
+    url = str(value.get("fotoPrincipalUrl") or "")
+    path = urllib.parse.urlsplit(url).path
+    prefix = "/api/v1/fotos/"
+    if not path.startswith(prefix) or len(path) <= len(prefix):
+        raise RuntimeError("La vista previa no devolvió una referencia de foto.")
+    return path[len(prefix):]
+
+
+def _request_password_reset(http: HttpClient, email: str) -> str:
+    http.request(
+        "POST", "/api/v1/auth/recuperacion/solicitud",
+        body={"correo": email}, expected={200}, note="restler recuperación")
+    return wait_for_password_reset_token(MAILBOX_DIR, email)
+
+
+def _quote(value: str) -> str:
+    """Valor JSON string literal para insertarlo crudo en una petición."""
+    return json.dumps(value, ensure_ascii=False)
+
+
 def _custom_dictionary(values: dict[str, str]) -> dict[str, Any]:
     return {"restler_custom_payload": {key: [value] for key, value in values.items()}}
 
 
-def build_private_dictionaries(
-    *,
-    register_email: str,
-    register_password: str,
-    confirm_email: str,
-    confirmation_code: str,
-    login_email: str,
-    login_password: str,
-    refresh_token: str,
-    token_password: str,
-) -> dict[str, dict[str, Any]]:
-    common_registration = {
-        "nombreCompleto": "Cuenta RESTler",
-        "correo": register_email,
-        "fechaNacimiento": "2004-05-10",
-        # El OpenAPI actual declara Gender como integer, pero la API serializa
-        # el enum como string. Se envía el JSON string literal sin ocultar la
-        # discrepancia de contrato; queda registrada en el reporte.
-        "genero": '"Mujer"',
-        "contrasena": register_password,
-        "confirmarContrasena": register_password,
-        "versionAvisoPrivacidad": "2026-01",
-    }
+def build_private_dictionaries(data: SyntheticData) -> dict[str, dict[str, Any]]:
     return {
-        "registro": _custom_dictionary(common_registration),
+        "registro": _custom_dictionary({
+            "nombreCompleto": _quote("Cuenta RESTler"),
+            "correo": _quote(data.register_email),
+            "fechaNacimiento": _quote("2004-05-10"),
+            "genero": _quote("Mujer"),
+            "contrasena": _quote(data.register_password),
+            "confirmarContrasena": _quote(data.register_password),
+            "aceptoAvisoPrivacidad": "true",
+            "versionAvisoPrivacidad": _quote("2026-01"),
+        }),
         "confirmacion": _custom_dictionary({
-            "correo": confirm_email,
-            "codigo": confirmation_code,
+            "correo": _quote(data.confirm_email),
+            "codigo": _quote(data.confirmation_code),
         }),
-        "reenvio": _custom_dictionary({"correo": confirm_email}),
+        # Un correo aún no registrado evita invalidar el código de confirmación.
+        "reenvio": _custom_dictionary({"correo": _quote(data.register_email)}),
         "login": _custom_dictionary({
-            "correo": login_email,
-            "contrasena": login_password,
+            "correo": _quote(data.login_email),
+            "contrasena": _quote(data.login_password),
         }),
-        "refresh": _custom_dictionary({"refreshToken": refresh_token}),
-        "delete": _custom_dictionary({"contrasena": token_password}),
+        "refresh": _custom_dictionary({
+            "refreshToken": _quote(data.refresh_token),
+        }),
+        "delete": _custom_dictionary({
+            "contrasena": _quote(data.delete_password),
+            "confirmacionPerdidaInformacion": "true",
+        }),
+        "admin-list": _custom_dictionary({
+            "page": "1",
+            "pageSize": "50",
+        }),
+        "admin-update": _custom_dictionary({
+            "id": data.university_id,
+            "nombreYCampus": _quote("RESTler Universidad Editada"),
+        }),
+        "admin-status": _custom_dictionary({
+            "id": data.university_id,
+            "activa": "false",
+        }),
+        "search": _custom_dictionary({"buscar": "RESTler"}),
+        "property": _custom_dictionary({
+            "nombre": _quote("RESTler Propiedad"),
+            "direccion": _quote("Calle RESTler 123"),
+            "colonia": _quote("Centro"),
+            "tipoPropiedad": _quote("Casa"),
+            "universidadId": _quote(data.university_id),
+            "latitud": "19.4326",
+            "longitud": "-99.1332",
+        }),
+        "unit": _custom_dictionary({
+            "tipoUnidad": _quote("Habitacion"),
+            "ocupacion": _quote("Individual"),
+            "lugares": "1",
+            "precioMensualPorLugarMxn": "3500",
+            "tamanoM2": "15",
+            "paraQuien": _quote("Mixto"),
+            "bano": _quote("Privado"),
+            "mobiliario": _quote("Amueblado"),
+            "muebles": _quote("Cama"),
+            "plantillaBase": _quote("HabitacionIndividual"),
+            "propertyId": data.property_id,
+        }),
+        "services": _custom_dictionary({
+            "servicios/[0]/nombre": _quote("Internet"),
+            "servicios/[0]/modalidad": _quote("Incluido"),
+            "servicios/[0]/montoMensualMxn": "500",
+            "unitId": data.unit_id,
+        }),
+        "zone": _custom_dictionary({
+            "informacionZona": _quote("Zona RESTler"),
+            "reglasConvivencia": _quote("Reglas RESTler"),
+            "unitId": data.unit_id,
+        }),
+        "unit-path": _custom_dictionary({"unitId": data.unit_id}),
+        "photo": _custom_dictionary({"photoRef": data.photo_ref}),
+        "terms": _custom_dictionary({
+            "versionTerminos": _quote(TERMS_VERSION),
+        }),
+        "recovery-request": _custom_dictionary({
+            "correo": _quote(data.recovery_request_email),
+        }),
+        "recovery-confirm": _custom_dictionary({
+            "token": _quote(data.reset_token),
+            "nuevaContrasena": _quote(data.reset_password),
+        }),
     }
 
 
-def build_compile_dictionary() -> dict[str, Any]:
-    """Fuerza custom payloads en la gramática; los valores reales van por endpoint."""
+def build_compile_dictionary(data: SyntheticData) -> dict[str, Any]:
+    """Placeholders válidos; los valores reales se afinan por endpoint."""
     return _custom_dictionary({
-        "nombreCompleto": "placeholder",
-        "correo": "placeholder@uni.edu",
-        "fechaNacimiento": "2004-05-10",
-        "genero": '"Mujer"',
-        "contrasena": "placeholder",
-        "confirmarContrasena": "placeholder",
-        "versionAvisoPrivacidad": "2026-01",
-        "codigo": "000000",
-        "refreshToken": "placeholder",
+        "nombreCompleto": _quote("placeholder"),
+        "correo": _quote("placeholder@uni.edu"),
+        "fechaNacimiento": _quote("2004-05-10"),
+        "genero": _quote("Mujer"),
+        "contrasena": _quote("placeholder"),
+        "confirmarContrasena": _quote("placeholder"),
+        "versionAvisoPrivacidad": _quote("2026-01"),
+        "codigo": _quote(data.confirmation_code),
+        "refreshToken": _quote(data.refresh_token),
+        "token": _quote(data.reset_token),
+        "nuevaContrasena": _quote(data.reset_password),
+        "versionTerminos": _quote(TERMS_VERSION),
+        "photoRef": data.photo_ref,
+        "universidadId": _quote(data.university_id),
+        "nombreYCampus": _quote("RESTler Universidad"),
+        # "Internet" es un nombre de propiedad válido y también un ServiceName.
+        "nombre": _quote("Internet"),
+        "direccion": _quote("Calle RESTler 123"),
+        "colonia": _quote("Centro"),
+        "tipoPropiedad": _quote("Casa"),
+        "latitud": "19.4326",
+        "longitud": "-99.1332",
+        "tipoUnidad": _quote("Habitacion"),
+        "ocupacion": _quote("Individual"),
+        "lugares": "1",
+        "precioMensualPorLugarMxn": "3500",
+        "tamanoM2": "15",
+        "paraQuien": _quote("Mixto"),
+        "bano": _quote("Privado"),
+        "mobiliario": _quote("SinMuebles"),
+        "muebles": _quote("Cama"),
+        "plantillaBase": _quote("HabitacionIndividual"),
     })
 
 
 def build_engine_settings(
     *,
-    token_password: str,
+    token_data: dict[str, Any],
     per_resource: dict[str, Path],
+    max_sequence_length: int,
+    max_combinations: int,
+    time_budget: float,
+    exclude_requests: list[dict[str, Any]] | None = None,
+    include_requests: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
-        "max_combinations": 3,
-        "max_sequence_length": 2,
+    settings: dict[str, Any] = {
+        "max_combinations": max_combinations,
+        "max_schema_combinations": 1,
+        "max_sequence_length": max_sequence_length,
         "max_request_execution_time": 20,
         "max_async_resource_creation_time": 10,
         "garbage_collection_interval": 30,
         "garbage_collector_cleanup_time": 30,
         "dyn_objects_cache_size": 5,
         "request_throttle_ms": 50,
+        "time_budget": time_budget,
         "save_results_in_fixed_dirname": True,
+        "custom_retry_settings": {
+            "status_codes": ["429"],
+            "interval_sec": 1,
+        },
         "authentication": {
             "token": {
                 "module": {
                     "file": str(TOKEN_PROVIDER),
                     "function": "acquire_token",
-                    "data": {"password": token_password},
+                    "data": token_data,
                 },
-                "token_refresh_interval": 120,
+                "token_refresh_interval": 300,
             }
         },
         "per_resource_settings": {
@@ -165,6 +368,11 @@ def build_engine_settings(
             for endpoint, path in per_resource.items()
         },
     }
+    if exclude_requests:
+        settings["exclude_requests"] = exclude_requests
+    if include_requests:
+        settings["include_requests"] = include_requests
+    return settings
 
 
 def build_compile_config(
@@ -196,6 +404,68 @@ def build_compile_config(
     }
 
 
+def _provision_synthetic_data(http: HttpClient) -> SyntheticData:
+    admin_state = Path(os.environ.get(
+        "UNIHOME_ADMIN_STATE", ROOT_DIR / ".ci-state/admin.json"))
+    admin = load_admin_state(admin_state)
+    admin_tokens = _login(http, admin["email"], admin["password"])
+    admin_access = str(admin_tokens["accessToken"])
+
+    login_email = f"restler.login.{uuid.uuid4().hex}@uni.edu"
+    login_password = _generate_password()
+    login_code = _register(http, login_email, login_password)
+    _confirm(http, login_email, login_code)
+    login_tokens = _login(http, login_email, login_password)
+
+    # Los recursos base pertenecen a la cuenta administradora porque el token
+    # provider de Test/Fuzz usa esa misma cuenta. Así las rutas de unidad y
+    # foto conservan la comprobación real de propiedad.
+    university_id = _create_university(http, admin_access)
+    property_id = _create_property(http, admin_access, university_id)
+    unit_id = _create_unit(http, admin_access, property_id)
+    photo_ref = _upload_photo_and_read_ref(http, admin_access, unit_id)
+
+    confirm_email = f"restler.confirm.{uuid.uuid4().hex}@uni.edu"
+    confirm_password = _generate_password()
+    confirmation_code = _register(http, confirm_email, confirm_password)
+
+    recovery_email = f"restler.recovery.{uuid.uuid4().hex}@uni.edu"
+    recovery_password = _generate_password()
+    recovery_code = _register(http, recovery_email, recovery_password)
+    _confirm(http, recovery_email, recovery_code)
+    reset_token = _request_password_reset(http, recovery_email)
+    reset_password = _generate_password()
+
+    recovery_request_email = f"restler.recovery.request.{uuid.uuid4().hex}@uni.edu"
+    recovery_request_password = _generate_password()
+    recovery_request_code = _register(
+        http, recovery_request_email, recovery_request_password)
+    _confirm(http, recovery_request_email, recovery_request_code)
+
+    register_email = f"restler.register.{uuid.uuid4().hex}@uni.edu"
+    register_password = _generate_password()
+    delete_password = _generate_password()
+
+    return SyntheticData(
+        register_email=register_email,
+        register_password=register_password,
+        confirm_email=confirm_email,
+        confirmation_code=confirmation_code,
+        login_email=login_email,
+        login_password=login_password,
+        refresh_token=str(login_tokens["refreshToken"]),
+        delete_password=delete_password,
+        university_id=university_id,
+        property_id=property_id,
+        unit_id=unit_id,
+        photo_ref=photo_ref,
+        recovery_email=recovery_email,
+        recovery_request_email=recovery_request_email,
+        reset_token=reset_token,
+        reset_password=reset_password,
+    )
+
+
 def prepare() -> dict[str, Any]:
     for directory in (ARTIFACTS_DIR, WORK_DIR, STATE_DIR, MAILBOX_DIR):
         directory.mkdir(parents=True, exist_ok=True)
@@ -213,30 +483,8 @@ def prepare() -> dict[str, Any]:
     transformation = normalize_openapi.report(source_spec, normalized_spec, changes)
     _write_json(ARTIFACTS_DIR / "openapi-transformation.json", transformation)
 
-    register_email = f"restler.register.{uuid.uuid4().hex}@uni.edu"
-    register_password = _generate_password()
-
-    confirm_email = f"restler.confirm.{uuid.uuid4().hex}@uni.edu"
-    confirm_password = _generate_password()
-    confirmation_code = _register(http, confirm_email, confirm_password)
-
-    login_email = f"restler.login.{uuid.uuid4().hex}@uni.edu"
-    login_password = _generate_password()
-    login_code = _register(http, login_email, login_password)
-    _confirm(http, login_email, login_code)
-    tokens = _login(http, login_email, login_password)
-
-    token_password = _generate_password()
-    dictionaries = build_private_dictionaries(
-        register_email=register_email,
-        register_password=register_password,
-        confirm_email=confirm_email,
-        confirmation_code=confirmation_code,
-        login_email=login_email,
-        login_password=login_password,
-        refresh_token=str(tokens["refreshToken"]),
-        token_password=token_password,
-    )
+    data = _provision_synthetic_data(http)
+    dictionaries = build_private_dictionaries(data)
     dictionary_paths: dict[str, Path] = {}
     for name, value in dictionaries.items():
         path = STATE_DIR / f"dict-{name}.json"
@@ -244,7 +492,28 @@ def prepare() -> dict[str, Any]:
         dictionary_paths[name] = path
 
     compile_dictionary = STATE_DIR / "compile-dict.json"
-    _write_json(compile_dictionary, build_compile_dictionary(), private=True)
+    _write_json(compile_dictionary, build_compile_dictionary(data), private=True)
+
+    admin_state = Path(os.environ.get(
+        "UNIHOME_ADMIN_STATE", ROOT_DIR / ".ci-state/admin.json"))
+    admin_token_data = {
+        "mode": "admin",
+        "state_file": str(admin_state.resolve()),
+    }
+    delete_token_data = {
+        "mode": "disposable",
+        "password": data.delete_password,
+    }
+    excluded = [
+        {"endpoint": "/api/v1/auth/logout", "methods": ["POST"]},
+        {"endpoint": "/api/v1/cuentas/mi-cuenta", "methods": ["DELETE"]},
+    ]
+    logout_only = [
+        {"endpoint": "/api/v1/auth/logout", "methods": ["POST"]},
+    ]
+    delete_only = [
+        {"endpoint": "/api/v1/cuentas/mi-cuenta", "methods": ["DELETE"]},
+    ]
 
     per_resource = {
         "/api/v1/auth/registro": dictionary_paths["registro"],
@@ -252,17 +521,82 @@ def prepare() -> dict[str, Any]:
         "/api/v1/auth/confirmacion-correo/reenvio": dictionary_paths["reenvio"],
         "/api/v1/auth/login": dictionary_paths["login"],
         "/api/v1/auth/refresh": dictionary_paths["refresh"],
+        "/api/v1/auth/recuperacion/solicitud": dictionary_paths["recovery-request"],
+        "/api/v1/auth/recuperacion/confirmacion": dictionary_paths["recovery-confirm"],
         "/api/v1/cuentas/mi-cuenta": dictionary_paths["delete"],
+        "/api/v1/admin/universidades": dictionary_paths["admin-list"],
+        "/api/v1/admin/universidades/{id}": dictionary_paths["admin-update"],
+        "/api/v1/admin/universidades/{id}/estado": dictionary_paths["admin-status"],
+        "/api/v1/universidades": dictionary_paths["search"],
+        "/api/v1/propiedades": dictionary_paths["property"],
+        "/api/v1/propiedades/{propertyId}/unidades": dictionary_paths["unit"],
+        "/api/v1/unidades/{unitId}/servicios": dictionary_paths["services"],
+        "/api/v1/unidades/{unitId}/zona-reglas": dictionary_paths["zone"],
+        "/api/v1/unidades/{unitId}/fotos": dictionary_paths["unit-path"],
+        "/api/v1/unidades/{unitId}/vista-previa": dictionary_paths["unit-path"],
+        "/api/v1/fotos/{photoRef}": dictionary_paths["photo"],
+        "/api/v1/publicaciones/primera/terminos": dictionary_paths["terms"],
     }
-    settings = build_engine_settings(
-        token_password=token_password, per_resource=per_resource)
-    settings_path = STATE_DIR / "engine-settings.json"
-    _write_json(settings_path, settings, private=True)
+
+    test_settings = build_engine_settings(
+        token_data=admin_token_data,
+        per_resource=per_resource,
+        max_sequence_length=10,
+        max_combinations=3,
+        time_budget=1,
+        exclude_requests=excluded,
+    )
+    fuzz_settings = build_engine_settings(
+        token_data=admin_token_data,
+        per_resource=per_resource,
+        max_sequence_length=10,
+        max_combinations=2,
+        time_budget=0.08,
+        exclude_requests=excluded,
+    )
+    logout_settings = build_engine_settings(
+        token_data=admin_token_data,
+        per_resource=per_resource,
+        max_sequence_length=3,
+        max_combinations=2,
+        time_budget=1,
+        include_requests=logout_only,
+    )
+    delete_settings = build_engine_settings(
+        token_data=delete_token_data,
+        per_resource=per_resource,
+        max_sequence_length=3,
+        max_combinations=2,
+        time_budget=1,
+        include_requests=delete_only,
+    )
+
+    # Los productores con nombre fijo se crean una sola vez y su ID se fija en
+    # las operaciones dependientes. Así una repetición de smoke test no choca
+    # con la restricción de unicidad de propiedad/universidad.
+    # Solo TestMain usa create_once. Fuzz-lean corre después contra la misma
+    # base y no debe volver a crear los mismos nombres fijos.
+    for endpoint in (
+        "/api/v1/propiedades",
+        "/api/v1/propiedades/{propertyId}/unidades",
+        "/api/v1/admin/universidades",
+    ):
+        test_settings["per_resource_settings"].setdefault(
+            endpoint, {})["create_once"] = 1
+
+    settings_paths = {
+        "test-settings.json": test_settings,
+        "fuzz-settings.json": fuzz_settings,
+        "logout-settings.json": logout_settings,
+        "delete-settings.json": delete_settings,
+    }
+    for name, value in settings_paths.items():
+        _write_json(STATE_DIR / name, value, private=True)
 
     compile_config = build_compile_config(
         normalized_spec=WORK_DIR / "openapi-restler-30.json",
         compile_dictionary=compile_dictionary,
-        engine_settings=settings_path,
+        engine_settings=STATE_DIR / "test-settings.json",
     )
     _write_json(STATE_DIR / "compile-config.json", compile_config, private=True)
 
@@ -272,16 +606,22 @@ def prepare() -> dict[str, Any]:
         "target_openapi": normalized_spec.get("openapi"),
         "operations": len(normalize_openapi.operation_keys(source_spec)),
         "transformation_changes": len(changes),
+        "synthetic_university_prepared": True,
+        "synthetic_property_prepared": True,
+        "synthetic_unit_prepared": True,
+        "synthetic_photo_prepared": True,
         "confirmation_account_prepared": True,
-        "login_account_prepared": True,
-        "registration_dictionary_prepared": True,
-        "token_provider_configured": True,
+        "recovery_account_prepared": True,
+        "admin_token_provider_configured": True,
+        "destructive_operations_isolated": True,
+        "fuzz_time_budget_hours": fuzz_settings["time_budget"],
     }
     _write_json(ARTIFACTS_DIR / "prepare-summary.json", summary)
     print(
         "RESTler preparado: "
         f"{summary['operations']} operaciones, "
-        f"{summary['transformation_changes']} conversiones OpenAPI 3.1->3.0.")
+        f"{summary['transformation_changes']} conversiones OpenAPI 3.1->3.0, "
+        "recursos sintéticos y operaciones destructivas aisladas.")
     return summary
 
 

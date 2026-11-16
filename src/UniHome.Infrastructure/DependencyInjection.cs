@@ -156,6 +156,14 @@ public static class DependencyInjection
                 .GetRequiredService<IOptions<CloudinaryOptions>>()
                 .Value;
 
+            // Los harnesses DAST/RESTler se ejecutan en Development y necesitan
+            // un backend real de fotos sin usar Cloudinary ni secretos. Fuera de
+            // Development este flag se ignora y se conserva el fail-closed.
+            if (isDevelopment && options.UseEphemeralStorage)
+            {
+                return new EphemeralUnitPhotoStorage();
+            }
+
             if (!options.IsConfigured)
             {
                 return new UnconfiguredUnitPhotoStorage();

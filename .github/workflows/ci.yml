@@ -1002,45 +1002,93 @@ jobs:
           Smtp__FromEmail: no-reply@unihome.test
           Smtp__FromName: UniHome DAST
           Smtp__TimeoutSeconds: '15'
+          PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          Cloudinary__UseEphemeralStorage: 'true'
+          Auth__RateLimit__LoginPermitLimit: '10000'
+          Auth__RateLimit__RefreshPermitLimit: '10000'
+          Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
+          Auth__RateLimit__ResendPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetRequestPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetConfirmPermitLimit: '10000'
           SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
           SSL_CERT_DIR: /etc/ssl/certs
         run: |
           set -euo pipefail
-          mkdir -p artifacts/dast-zap
+          mkdir -p artifacts/dast-zap .ci-state
           API_DLL="$GITHUB_WORKSPACE/src/UniHome.Api/bin/Release/net10.0/UniHome.Api.dll"
           test -f "$API_DLL"
-          (
-            cd "$(dirname "$API_DLL")"
-            nohup dotnet UniHome.Api.dll --urls "$DAST_TARGET" \
-              > "$GITHUB_WORKSPACE/artifacts/dast-zap/api.log" 2>&1 &
-            echo $! > "$API_PID_FILE"
-          )
-          live_code=""
-          for attempt in $(seq 1 60); do
-            live_code=$(curl -sS -o artifacts/dast-zap/health-live.json \
-              -w '%{http_code}' "$DAST_TARGET/health/live" || true)
-            if [ "$live_code" = "200" ]; then break; fi
-            if ! kill -0 "$(cat "$API_PID_FILE")" 2>/dev/null; then
-              sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
-                artifacts/dast-zap/api.log | tail -40
-              echo "::error::La API DAST terminó antes de responder /health/live."
+
+          start_api() {
+            (
+              cd "$(dirname "$API_DLL")"
+              nohup dotnet UniHome.Api.dll --urls "$DAST_TARGET" \
+                > "$GITHUB_WORKSPACE/artifacts/dast-zap/api.log" 2>&1 &
+              echo $! > "$API_PID_FILE"
+            )
+          }
+
+          stop_api() {
+            if [ ! -f "$API_PID_FILE" ]; then
+              return 0
+            fi
+            local api_pid
+            api_pid=$(cat "$API_PID_FILE")
+            kill "$api_pid" 2>/dev/null || true
+            for attempt in $(seq 1 20); do
+              if ! kill -0 "$api_pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if kill -0 "$api_pid" 2>/dev/null; then
+              echo "::error::La API DAST no se detuvo para reiniciar con el administrador sintético."
               exit 1
             fi
-            sleep 2
-          done
-          if [ "$live_code" != "200" ]; then
-            echo "::error::La API DAST no respondió /health/live con HTTP 200."
-            sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
-              artifacts/dast-zap/api.log | tail -40
-            exit 1
-          fi
-          ready_code=$(curl -sS -o artifacts/dast-zap/health-ready.json \
-            -w '%{http_code}' "$DAST_TARGET/health/ready" || true)
-          if [ "$ready_code" != "200" ]; then
-            echo "::error::La API DAST no respondió /health/ready con HTTP 200; MongoDB no está listo."
-            cat artifacts/dast-zap/health-ready.json || true
-            exit 1
-          fi
+            rm -f "$API_PID_FILE"
+            sleep 1
+          }
+
+          wait_api() {
+            live_code=""
+            for attempt in $(seq 1 60); do
+              live_code=$(curl -sS -o artifacts/dast-zap/health-live.json \
+                -w '%{http_code}' "$DAST_TARGET/health/live" || true)
+              if [ "$live_code" = "200" ]; then break; fi
+              if ! kill -0 "$(cat "$API_PID_FILE")" 2>/dev/null; then
+                sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+                  artifacts/dast-zap/api.log | tail -40
+                echo "::error::La API DAST terminó antes de responder /health/live."
+                exit 1
+              fi
+              sleep 2
+            done
+            if [ "$live_code" != "200" ]; then
+              echo "::error::La API DAST no respondió /health/live con HTTP 200."
+              sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+                artifacts/dast-zap/api.log | tail -40
+              exit 1
+            fi
+            ready_code=$(curl -sS -o artifacts/dast-zap/health-ready.json \
+              -w '%{http_code}' "$DAST_TARGET/health/ready" || true)
+            if [ "$ready_code" != "200" ]; then
+              echo "::error::La API DAST no respondió /health/ready con HTTP 200; MongoDB no está listo."
+              cat artifacts/dast-zap/health-ready.json || true
+              exit 1
+            fi
+          }
+
+          start_api
+          wait_api
+
+          python3 tools/ci/provision_admin.py \
+            --target "$DAST_TARGET" \
+            --mailbox "$SMTP_DAST_MAILBOX" \
+            --state-file .ci-state/admin.json
+          ADMIN_ID=$(python3 -c 'import json; print(json.load(open(".ci-state/admin.json", encoding="utf-8"))["accountId"])')
+
+          stop_api
+          export Admin__AccountIds__0="$ADMIN_ID"
+          start_api
+          wait_api
+
           {
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "target=$DAST_TARGET"
@@ -1049,6 +1097,7 @@ jobs:
             echo "health_ready_http=$ready_code"
             echo "api_pid=$(cat "$API_PID_FILE")"
             echo "smtp_capture=127.0.0.1:587"
+            echo "admin_synthetic=true"
           } > artifacts/dast-zap/startup-summary.txt
           sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g; s#(Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
             artifacts/dast-zap/api.log | tail -40 >> artifacts/dast-zap/startup-summary.txt
@@ -1159,6 +1208,7 @@ jobs:
             echo "mongo_database_dropped=false" >> "$SUMMARY"
             exit 1
           fi
+          rm -rf .ci-state .dast-mail
       - name: Publicar evidencia DAST
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -1357,6 +1407,10 @@ jobs:
           Auth__RateLimit__RefreshPermitLimit: '10000'
           Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
           Auth__RateLimit__ResendPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetRequestPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetConfirmPermitLimit: '10000'
+          PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          Cloudinary__UseEphemeralStorage: 'true'
           Smtp__Host: 127.0.0.1
           Smtp__Port: '587'
           Smtp__UseStartTls: 'true'
@@ -1413,6 +1467,106 @@ jobs:
             echo "health_ready_http=$ready_code"
             echo "api_pid=$(cat "$API_PID_FILE")"
             echo "smtp_capture=127.0.0.1:587"
+          } > artifacts/restler/startup-summary.txt
+          sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g; s#(Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+            artifacts/restler/api.log | tail -40 >> artifacts/restler/startup-summary.txt
+      - name: Provisionar administrador sintético RESTler
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-state
+          python3 tools/ci/provision_admin.py \
+            --target "$RESTLER_TARGET" \
+            --mailbox "$SMTP_DAST_MAILBOX" \
+            --state-file .ci-state/admin.json
+      - name: Reiniciar API RESTler con administrador sintético
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          Api__EnableSwagger: 'true'
+          MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+          MongoDb__DatabaseName: unihome_restler
+          MongoDb__ServerSelectionTimeoutSeconds: '5'
+          Jwt__SigningKey: 'restler-synthetic-jwt-signing-key-not-a-production-secret-0123456789'
+          VerificationCode__HmacSecret: 'restler-synthetic-hmac-secret-not-a-production-secret-0123456789'
+          Auth__RateLimit__LoginPermitLimit: '10000'
+          Auth__RateLimit__RefreshPermitLimit: '10000'
+          Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
+          Auth__RateLimit__ResendPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetRequestPermitLimit: '10000'
+          Auth__RateLimit__PasswordResetConfirmPermitLimit: '10000'
+          PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          Cloudinary__UseEphemeralStorage: 'true'
+          Smtp__Host: 127.0.0.1
+          Smtp__Port: '587'
+          Smtp__UseStartTls: 'true'
+          Smtp__CheckCertificateRevocation: 'false'
+          Smtp__Username: unihome-restler
+          Smtp__Password: synthetic-not-a-secret
+          Smtp__FromEmail: no-reply@unihome.test
+          Smtp__FromName: UniHome RESTler
+          Smtp__TimeoutSeconds: '15'
+          SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+          SSL_CERT_DIR: /etc/ssl/certs
+        run: |
+          set -euo pipefail
+          ADMIN_ID=$(python3 -c 'import json; print(json.load(open(".ci-state/admin.json", encoding="utf-8"))["accountId"])')
+          if [ -f "$API_PID_FILE" ]; then
+            api_pid=$(cat "$API_PID_FILE")
+            kill "$api_pid" 2>/dev/null || true
+            for attempt in $(seq 1 20); do
+              if ! kill -0 "$api_pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            if kill -0 "$api_pid" 2>/dev/null; then
+              echo "::error::La API RESTler no se detuvo para reiniciar con el administrador sintético."
+              exit 1
+            fi
+            rm -f "$API_PID_FILE"
+            sleep 1
+          fi
+          API_DLL="$GITHUB_WORKSPACE/src/UniHome.Api/bin/Release/net10.0/UniHome.Api.dll"
+          test -f "$API_DLL"
+          export Admin__AccountIds__0="$ADMIN_ID"
+          (
+            cd "$(dirname "$API_DLL")"
+            nohup dotnet UniHome.Api.dll --urls "$RESTLER_TARGET" \
+              > "$GITHUB_WORKSPACE/artifacts/restler/api.log" 2>&1 &
+            echo $! > "$API_PID_FILE"
+          )
+          live_code=""
+          for attempt in $(seq 1 60); do
+            live_code=$(curl -sS -o artifacts/restler/health-live.json \
+              -w '%{http_code}' "$RESTLER_TARGET/health/live" || true)
+            if [ "$live_code" = "200" ]; then break; fi
+            if ! kill -0 "$(cat "$API_PID_FILE")" 2>/dev/null; then
+              sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+                artifacts/restler/api.log | tail -40
+              echo "::error::La API RESTler terminó antes de responder /health/live."
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$live_code" != "200" ]; then
+            echo "::error::La API RESTler no respondió /health/live con HTTP 200."
+            sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g' \
+              artifacts/restler/api.log | tail -40
+            exit 1
+          fi
+          ready_code=$(curl -sS -o artifacts/restler/health-ready.json \
+            -w '%{http_code}' "$RESTLER_TARGET/health/ready" || true)
+          if [ "$ready_code" != "200" ]; then
+            echo "::error::La API RESTler no respondió /health/ready con HTTP 200."
+            cat artifacts/restler/health-ready.json || true
+            exit 1
+          fi
+          {
+            echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "target=$RESTLER_TARGET"
+            echo "mongo_database=$MONGO_RESTLER_DATABASE"
+            echo "health_live_http=$live_code"
+            echo "health_ready_http=$ready_code"
+            echo "api_pid=$(cat "$API_PID_FILE")"
+            echo "smtp_capture=127.0.0.1:587"
+            echo "admin_synthetic=true"
           } > artifacts/restler/startup-summary.txt
           sed -E 's#mongodb(\+srv)?://[^[:space:]]+#mongodb://[REDACTED]#g; s#(Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
             artifacts/restler/api.log | tail -40 >> artifacts/restler/startup-summary.txt
@@ -1495,7 +1649,7 @@ jobs:
             echo "mongo_database_dropped=false" >> "$SUMMARY"
             exit 1
           fi
-          rm -rf .restler-state
+          rm -rf .restler-state .ci-state .dast-mail
       - name: Publicar evidencia RESTler
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

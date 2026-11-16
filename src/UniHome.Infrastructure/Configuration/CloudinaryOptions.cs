@@ -30,6 +30,13 @@ public sealed class CloudinaryOptions
 
     public int TimeoutSeconds { get; set; } = DefaultTimeoutSeconds;
 
+    /// <summary>
+    /// Almacenamiento efímero en memoria para los jobs DAST/RESTler aislados.
+    /// Solo se resuelve cuando el host está en Development; producción sigue
+    /// exigiendo Cloudinary o fallando cerrado.
+    /// </summary>
+    public bool UseEphemeralStorage { get; set; }
+
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(CloudName) &&
         !string.IsNullOrWhiteSpace(ApiKey) &&
