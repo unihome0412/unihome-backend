@@ -19,7 +19,8 @@ public abstract class AuthenticatedControllerBase : ControllerBase
         Func<T, IActionResult> success,
         string notFoundDetail,
         string forbiddenDetail,
-        string conflictDetail) =>
+        string conflictDetail,
+        string unprocessableDetail = "La solicitud no cumple una regla de negocio.") =>
         result.Status switch
         {
             OperationStatus.Success => success(result.Value!),
@@ -33,6 +34,9 @@ public abstract class AuthenticatedControllerBase : ControllerBase
             OperationStatus.Conflict => CreateProblemResult(
                 StatusCodes.Status409Conflict,
                 conflictDetail),
+            OperationStatus.Unprocessable => CreateProblemResult(
+                StatusCodes.Status422UnprocessableEntity,
+                unprocessableDetail),
             _ => CreateProblemResult(
                 StatusCodes.Status500InternalServerError,
                 "No se pudo completar la operación.")

@@ -6,6 +6,7 @@ using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
+using UniHome.Infrastructure.Persistence.Mongo.Verification;
 
 namespace UniHome.Infrastructure.Persistence.Mongo;
 
@@ -22,7 +23,8 @@ internal static class MongoIdentitySchemaGuard
         MongoPasswordResetIndexes.Definition,
         MongoUniversityIndexes.Definition,
         .. MongoPublicationIndexes.Definitions,
-        MongoExplorationIndexes.Definition
+        MongoExplorationIndexes.Definition,
+        .. MongoVerificationIndexes.Definitions
     ];
 
     public static async Task EnsureAsync<TDocument>(

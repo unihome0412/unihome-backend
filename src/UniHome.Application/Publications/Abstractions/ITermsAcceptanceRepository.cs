@@ -12,4 +12,12 @@ public interface ITermsAcceptanceRepository
         Guid accountId,
         string version,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Indica si la cuenta aceptó alguna versión de términos. Sprint 4 no fija
+    /// una versión vigente; el envío a revisión exige al menos una aceptación.
+    /// </summary>
+    Task<bool> ExistsAnyAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default);
 }

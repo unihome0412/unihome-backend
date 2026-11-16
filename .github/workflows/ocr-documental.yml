@@ -1,0 +1,102 @@
+name: OCR documental M06 (manual, motor real)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Rama o SHA a verificar
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ocr-documental-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
+
+jobs:
+  ocr-documental:
+    name: OCR real con Tesseract (sin servicios externos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Instalar motor OCR local
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
+          command -v tesseract
+          tesseract --version | head -2
+      - name: Restore y build
+        run: |
+          dotnet restore UniHome.Backend.slnx --locked-mode
+          dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
+      - name: Prueba unitaria real de OCR
+        run: |
+          dotnet test tests/UniHome.UnitTests/UniHome.UnitTests.csproj \
+            --configuration Release --no-build --no-restore \
+            --filter "FullyQualifiedName~RealOcrTests" \
+            --logger "trx;LogFileName=real-ocr-unit.trx" \
+            --results-directory TestResults/ocr
+      - name: Prueba end-to-end real de OCR
+        run: |
+          dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj \
+            --configuration Release --no-build --no-restore \
+            --filter "FullyQualifiedName~RealOcrVerificationEndpointTests" \
+            --logger "trx;LogFileName=real-ocr-integration.trx" \
+            --results-directory TestResults/ocr
+      - name: Exigir ejecución real y cero omisiones
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          files = glob.glob("TestResults/ocr/*.trx")
+          if not files:
+              raise SystemExit("No se generaron evidencias TRX de OCR.")
+
+          executed = 0
+          skipped = 0
+          failed = 0
+          for path in files:
+              root = ET.parse(path).getroot()
+              counters = root.find(".//Counters")
+              if counters is None:
+                  raise SystemExit(f"Sin contadores en {path}")
+              executed += int(counters.attrib.get("executed", "0"))
+              skipped += int(counters.attrib.get("notExecuted", "0"))
+              failed += int(counters.attrib.get("failed", "0"))
+
+          print(f"OCR ejecutadas={executed} omitidas={skipped} fallidas={failed}")
+          if executed < 3:
+              raise SystemExit("Se esperaban al menos 3 pruebas reales de OCR ejecutadas.")
+          if skipped != 0:
+              raise SystemExit("Una prueba real de OCR fue omitida; el motor no está validado.")
+          if failed != 0:
+              raise SystemExit("Falló una prueba real de OCR.")
+          PY
+      - name: Publicar evidencia OCR
+        if: always()
+        uses: actions/upload-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ocr-documental-results
+          path: TestResults/ocr/**/*.trx
+          if-no-files-found: warn

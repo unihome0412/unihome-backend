@@ -56,6 +56,14 @@ public sealed class AuthRateLimitOptions
     public int PasswordResetConfirmPermitLimit { get; set; } = 10;
 
     public int PasswordResetConfirmWindowSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Límite provisional por IP para cargas de documentos de verificación. Cada
+    /// solicitud puede ejecutar OCR/ELA y almacenar hasta 10 MB.
+    /// </summary>
+    public int DocumentUploadPermitLimit { get; set; } = 10;
+
+    public int DocumentUploadWindowSeconds { get; set; } = 60;
 }
 
 public static class AuthRateLimitPolicies
@@ -66,4 +74,5 @@ public static class AuthRateLimitPolicies
     public const string Resend = "auth-confirm-email-resend";
     public const string PasswordResetRequest = "auth-password-reset-request";
     public const string PasswordResetConfirm = "auth-password-reset-confirm";
+    public const string DocumentUpload = "verification-document-upload";
 }

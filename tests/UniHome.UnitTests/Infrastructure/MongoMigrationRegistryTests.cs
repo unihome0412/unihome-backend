@@ -5,13 +5,14 @@ using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
+using UniHome.Infrastructure.Persistence.Mongo.Verification;
 
 namespace UniHome.UnitTests.Infrastructure;
 
 public sealed class MongoMigrationRegistryTests
 {
     [Fact]
-    public void RegistroPorDefecto_DebeContenerM01M01_002M03M05YM07EnOrden()
+    public void RegistroPorDefecto_DebeContenerM01M01_002M03M05M06YM07EnOrden()
     {
         var registry = MongoMigrationRegistry.Default;
 
@@ -21,6 +22,7 @@ public sealed class MongoMigrationRegistryTests
                 MongoPasswordResetMigration.Version,
                 MongoUniversityMigration.Version,
                 MongoPublicationMigration.Version,
+                MongoVerificationMigration.Version,
                 MongoExplorationMigration.Version
             ],
             registry.Migrations.Select(migration => migration.Version));
@@ -28,13 +30,17 @@ public sealed class MongoMigrationRegistryTests
         Assert.Equal(MongoPasswordResetMigration.Definition.Checksum, registry.Migrations[1].Checksum);
         Assert.Equal(MongoUniversityMigration.Definition.Checksum, registry.Migrations[2].Checksum);
         Assert.Equal(MongoPublicationMigration.Definition.Checksum, registry.Migrations[3].Checksum);
-        Assert.Equal(MongoExplorationMigration.Definition.Checksum, registry.Migrations[4].Checksum);
+        Assert.Equal(MongoVerificationMigration.Definition.Checksum, registry.Migrations[4].Checksum);
+        Assert.Equal(MongoExplorationMigration.Definition.Checksum, registry.Migrations[5].Checksum);
         Assert.Contains(MongoIdentitySchema.AccountsCollection, registry.ManagedCollections);
         Assert.Contains(MongoIdentitySchema.AccountRecoveryCollection, registry.ManagedCollections);
         Assert.Contains(MongoUniversitySchema.Collection, registry.ManagedCollections);
         Assert.Contains(MongoPublicationSchema.PropertiesCollection, registry.ManagedCollections);
         Assert.Contains(MongoPublicationSchema.UnitsCollection, registry.ManagedCollections);
         Assert.Contains(MongoPublicationSchema.TermsCollection, registry.ManagedCollections);
+        Assert.Contains(MongoVerificationSchema.ExpedientesCollection, registry.ManagedCollections);
+        Assert.Contains(MongoVerificationSchema.DocumentsCollection, registry.ManagedCollections);
+        Assert.Contains(MongoVerificationSchema.AuditCollection, registry.ManagedCollections);
         Assert.Contains(MongoExplorationSchema.FavoritesCollection, registry.ManagedCollections);
     }
 

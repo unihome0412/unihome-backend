@@ -84,7 +84,7 @@ public sealed class Unit
     public string? Rules { get; private set; }
     public IReadOnlyList<ServiceCharge> Services => _services.AsReadOnly();
     public IReadOnlyList<UnitPhoto> Photos => _photos.AsReadOnly();
-    public PublicationState PublicationState { get; }
+    public PublicationState PublicationState { get; private set; }
     public UnitAvailability Availability { get; }
     public DateTimeOffset CreatedAt { get; }
 
@@ -218,6 +218,27 @@ public sealed class Unit
     {
         ZoneInfo = OptionalText(zoneInfo, MaxZoneInfoLength, "La información de zona es demasiado larga.");
         Rules = OptionalText(rules, MaxRulesLength, "Las reglas de convivencia son demasiado largas.");
+    }
+
+    /// <summary>
+    /// HU-013/HU-027: la primera unidad pasa a En revisión al completar la
+    /// verificación documental. Una unidad aprobada no vuelve a este estado.
+    /// Devuelve false si ya estaba en revisión (operación idempotente).
+    /// </summary>
+    public bool SubmitForReview()
+    {
+        if (PublicationState == PublicationState.Aprobada)
+        {
+            throw new InvalidOperationException("Una publicación aprobada no puede volver a revisión.");
+        }
+
+        if (PublicationState == PublicationState.EnRevision)
+        {
+            return false;
+        }
+
+        PublicationState = PublicationState.EnRevision;
+        return true;
     }
 
     public void AppendPhotos(IEnumerable<UnitPhoto> photos)

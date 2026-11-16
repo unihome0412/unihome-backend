@@ -39,4 +39,14 @@ public sealed class InMemoryTermsAcceptanceRepository : ITermsAcceptanceReposito
             return Task.FromResult(_keys.Contains($"{accountId:N}|{version}"));
         }
     }
+
+    public Task<bool> ExistsAnyAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(_items.Any(item => item.AccountId == accountId));
+        }
+    }
 }

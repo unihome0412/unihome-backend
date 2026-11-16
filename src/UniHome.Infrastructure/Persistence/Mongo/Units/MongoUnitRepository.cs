@@ -65,6 +65,68 @@ internal sealed class MongoUnitRepository : IUnitRepository
         }
     }
 
+    public async Task<Unit?> FindFirstOwnedAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var document = await collection
+                .Find(Builders<UnitDocument>.Filter.Eq(
+                    unit => unit.OwnerAccountId,
+                    ownerAccountId.ToString("N", CultureInfo.InvariantCulture)))
+                .Sort(Builders<UnitDocument>.Sort
+                    .Ascending(unit => unit.CreatedAt)
+                    .Ascending(unit => unit.Id))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return document is null ? null : ToDomain(document);
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<bool> TrySubmitForReviewAsync(
+        Guid id,
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UnitDocument>.Filter.And(
+                ByIdFilter(id),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.OwnerAccountId,
+                    ownerAccountId.ToString("N", CultureInfo.InvariantCulture)),
+                Builders<UnitDocument>.Filter.In(
+                    document => document.PublicationState,
+                    [
+                        PublicationState.Borrador.ToString(),
+                        PublicationState.EnRevision.ToString(),
+                        PublicationState.Rechazada.ToString()
+                    ]));
+            var update = Builders<UnitDocument>.Update.Set(
+                document => document.PublicationState,
+                PublicationState.EnRevision.ToString());
+
+            var result = await collection
+                .UpdateOneAsync(filter, update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return result.MatchedCount == 1;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<Unit?> FindByPhotoStorageKeyAsync(
         string storageKey,
         CancellationToken cancellationToken = default)

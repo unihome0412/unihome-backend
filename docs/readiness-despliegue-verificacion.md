@@ -192,12 +192,20 @@ opt-in no sustituye esta comprobación.
 
 ## 7. Requisitos de arranque
 
+> **Actualización Sprint 4 (16-nov-2026):** además de lo listado, fuera de
+> Development es obligatoria `DocumentSecurity__EncryptionKey` (32 bytes Base64)
+> y debe aplicarse `M06-001` antes de usar los endpoints de verificación.
+> `Api__EnableSwagger` debe permanecer en `false` hasta nueva autorización. Esta
+> tabla conserva el estado histórico de la auditoría; no se modificó Azure.
+
 | Requisito | Estado actual |
 |---|---|
 | `MongoDb__ConnectionString` | Presente como secreto |
 | `MongoDb__DatabaseName=unihome_verificacion` | Presente |
 | `Jwt__SigningKey` | Presente como secreto |
 | `VerificationCode__HmacSecret` | Presente como secreto |
+| `DocumentSecurity__EncryptionKey` | **Faltante; obligatoria para Sprint 4** |
+| `M06-001` en la base | **Faltante; aplicar antes de M06** |
 | SMTP | Presente |
 | `Proxy__TrustForwardedHeaders=true` | Presente |
 | `Redis__*` | **Faltante** |
@@ -205,7 +213,7 @@ opt-in no sustituye esta comprobación.
 | Cloudinary env refs | **Faltantes** |
 | `Cloudinary__PublicBaseUrl` | **Faltante** |
 | `PasswordRecovery__ResetLinkBaseUrl` | Faltante; necesario para recuperación |
-| `Admin__AccountIds` | Faltante; no hay M06, no inventar |
+| `Admin__AccountIds` | Faltante; M06 ya existe, provisión formal pendiente de M13 |
 
 `Api__EnableSwagger=true` está activo en Production; se recomienda cambiarlo a
 `false` en la ventana de configuración.

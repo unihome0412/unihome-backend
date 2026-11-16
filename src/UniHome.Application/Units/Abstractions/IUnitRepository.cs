@@ -8,6 +8,20 @@ public interface IUnitRepository
 
     Task<Unit?> FindByIdAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>Primera publicación del titular: unidad más antigua por fecha e id.</summary>
+    Task<Unit?> FindFirstOwnedAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lleva una unidad a En revisión si pertenece al titular y no está aprobada.
+    /// Es idempotente si ya estaba En revisión. Devuelve false si no cumple.
+    /// </summary>
+    Task<bool> TrySubmitForReviewAsync(
+        Guid id,
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default);
+
     Task<Unit?> FindByPhotoStorageKeyAsync(
         string storageKey,
         CancellationToken cancellationToken = default) =>

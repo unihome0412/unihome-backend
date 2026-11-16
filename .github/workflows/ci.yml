@@ -501,7 +501,7 @@ jobs:
         run: dotnet restore UniHome.Backend.slnx --locked-mode
       - name: Build Release
         run: dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
-      - name: Inicializar base efímera con M01-001, M01-002, M03-001, M05-001 y M07-001
+      - name: Inicializar base efímera con M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001
         id: mongo-migration
         run: |
           set -euo pipefail
@@ -560,6 +560,19 @@ jobs:
           grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m05.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
+            apply --database unihome_ci_verificacion --confirm --version M06-001 \
+            | tee TestResults/mongo/migration-apply-m06.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database unihome_ci_verificacion --version M06-001 \
+            | tee TestResults/mongo/migration-verify-m06.txt
+          grep -F 'Registrada: True' TestResults/mongo/migration-verify-m06.txt
+          grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify-m06.txt
+          grep -F 'Índices M06-001 coinciden: True' TestResults/mongo/migration-verify-m06.txt
+          grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m06.txt
+          grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m06.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
             apply --database unihome_ci_verificacion --confirm --version M07-001 \
             | tee TestResults/mongo/migration-apply-m07.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
@@ -576,7 +589,7 @@ jobs:
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
           --configuration Release --no-build --no-restore
-          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests|FullyQualifiedName~MongoPasswordResetPersistenceTests|FullyQualifiedName~MongoUniversityPersistenceTests|FullyQualifiedName~MongoPublicationPersistenceTests|FullyQualifiedName~MongoExplorationPersistenceTests"
+          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests|FullyQualifiedName~MongoPasswordResetPersistenceTests|FullyQualifiedName~MongoUniversityPersistenceTests|FullyQualifiedName~MongoPublicationPersistenceTests|FullyQualifiedName~MongoVerificationPersistenceTests|FullyQualifiedName~MongoExplorationPersistenceTests"
           --logger "trx;LogFileName=mongo-ci.trx"
           --results-directory TestResults/mongo
       - name: Validar evidencias y resumir MongoDB
@@ -844,6 +857,8 @@ jobs:
             -e Jwt__SigningKey=unihome-smoke-signing-key-0123456789-abcdefghijklmnopqrstuvwxyz \
             -e VerificationCode__HmacSecret=unihome-smoke-hmac-secret-0123456789-abcdefghijklmnopqrstuvwxyz \
             -e Auth__RateLimit__IpHashSalt=unihome-smoke-ip-salt-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e DocumentSecurity__EncryptionKey=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+            -e DocumentSecurity__UrlSigningKey=unihome-smoke-document-url-key-0123456789-abcdef \
             -e Redis__Enabled=true \
             -e Redis__RestUrl=https://smoke.invalid \
             -e Redis__RestToken=smoke-test-token \
@@ -920,6 +935,8 @@ jobs:
             -e Jwt__SigningKey=unihome-smoke-signing-key-0123456789-abcdefghijklmnopqrstuvwxyz \
             -e VerificationCode__HmacSecret=unihome-smoke-hmac-secret-0123456789-abcdefghijklmnopqrstuvwxyz \
             -e Auth__RateLimit__IpHashSalt=unihome-smoke-ip-salt-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e DocumentSecurity__EncryptionKey=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+            -e DocumentSecurity__UrlSigningKey=unihome-smoke-document-url-key-0123456789-abcdef \
             -e Redis__Enabled=true \
             -e Redis__RestUrl="https://127.0.0.1:${SMOKE_UPSTASH_PORT}" \
             -e Redis__RestToken=smoke-test-token \
@@ -1131,7 +1148,7 @@ jobs:
           done
           echo "::error::MongoDB efímero no disponible para DAST."
           exit 1
-      - name: Inicializar base efímera DAST con M01-001, M01-002, M03-001, M05-001 y M07-001
+      - name: Inicializar base efímera DAST con M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001
         run: |
           set -euo pipefail
           mkdir -p artifacts/dast-zap
@@ -1171,6 +1188,19 @@ jobs:
             verify --database "$MONGO_DAST_DATABASE" --version M05-001 \
             | tee artifacts/dast-zap/migration-verify-m05.txt
           grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m05.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_DAST_DATABASE" --confirm --version M06-001 \
+            | tee artifacts/dast-zap/migration-apply-m06.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_DAST_DATABASE" --version M06-001 \
+            | tee artifacts/dast-zap/migration-verify-m06.txt
+          grep -F 'Registrada: True' artifacts/dast-zap/migration-verify-m06.txt
+          grep -F 'Checksum coincide: True' artifacts/dast-zap/migration-verify-m06.txt
+          grep -F 'Índices M06-001 coinciden: True' artifacts/dast-zap/migration-verify-m06.txt
+          grep -F 'Escrituras pendientes: 0' artifacts/dast-zap/migration-verify-m06.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m06.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
             apply --database "$MONGO_DAST_DATABASE" --confirm --version M07-001 \
@@ -1646,7 +1676,7 @@ jobs:
           done
           echo "::error::MongoDB efímero no disponible para RESTler."
           exit 1
-      - name: Inicializar base efímera RESTler con M01-001, M01-002, M03-001, M05-001 y M07-001
+      - name: Inicializar base efímera RESTler con M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001
         run: |
           set -euo pipefail
           mkdir -p artifacts/restler
@@ -1686,6 +1716,19 @@ jobs:
             verify --database "$MONGO_RESTLER_DATABASE" --version M05-001 \
             | tee artifacts/restler/migration-verify-m05.txt
           grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m05.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M06-001 \
+            | tee artifacts/restler/migration-apply-m06.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_RESTLER_DATABASE" --version M06-001 \
+            | tee artifacts/restler/migration-verify-m06.txt
+          grep -F 'Registrada: True' artifacts/restler/migration-verify-m06.txt
+          grep -F 'Checksum coincide: True' artifacts/restler/migration-verify-m06.txt
+          grep -F 'Índices M06-001 coinciden: True' artifacts/restler/migration-verify-m06.txt
+          grep -F 'Escrituras pendientes: 0' artifacts/restler/migration-verify-m06.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m06.txt
           dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
             --configuration Release --no-build -- \
             apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M07-001 \

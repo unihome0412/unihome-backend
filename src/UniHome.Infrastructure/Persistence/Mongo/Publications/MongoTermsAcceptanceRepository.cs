@@ -87,6 +87,28 @@ internal sealed class MongoTermsAcceptanceRepository : ITermsAcceptanceRepositor
         }
     }
 
+    public async Task<bool> ExistsAnyAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var count = await collection.CountDocumentsAsync(
+                Builders<TermsAcceptanceDocument>.Filter.Eq(
+                    document => document.AccountId,
+                    accountId.ToString("N", CultureInfo.InvariantCulture)),
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            return count > 0;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     private async Task<IMongoCollection<TermsAcceptanceDocument>> GetCollectionAsync(
         CancellationToken cancellationToken)
     {
