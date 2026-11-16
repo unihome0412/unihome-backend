@@ -26,7 +26,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
 | Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M01-002, M03-001 y M05-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
-| Docker Build + Dockle | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen | PR, push main, manual |
+| Docker Build + Dockle + Container Smoke | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen. El smoke arranca la imagen real con MongoDB efímero y configuración de Production, exige `/health/live` y `/health/ready` en 200, proceso vivo y ausencia de exit 139/errores fatales | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Verificador de proveedor PactNet 5.0.1 con API Kestrel aislada; requiere contratos JSON reales del consumidor Android en `pacts/`; sin ellos **falla** y permanece desactivado | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
@@ -269,7 +269,7 @@ pull_request -> main / push -> main / ejecución manual
             (Pact, opcional)
 
 En paralelo, con habilitación explícita:
-  SonarCloud / Mongo CI / Stryker / Docker Build -> Dockle
+  SonarCloud / Mongo CI / Stryker / Docker Build -> Dockle -> Container Smoke
   OWASP ZAP local / RESTler aislado
 
                         |

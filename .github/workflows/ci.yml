@@ -705,6 +705,214 @@ jobs:
           chmod +x dockle
           ./dockle --exit-code 1 --exit-level FATAL unihome-ci:${GITHUB_SHA::12}
 
+  container-smoke:
+    name: Container Smoke (imagen real, Linux)
+    needs: [detect-changes, docker-build]
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_DOCKER == 'true' && needs.docker-build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        # Misma imagen efímera fijada por digest que usa MongoDB CI.
+        image: mongo:8.0.34@sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142
+        env:
+          GLIBC_TUNABLES: glibc.pthread.rseq=1
+        ports:
+          - 127.0.0.1:27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 24
+          --health-start-period 10s
+    env:
+      SMOKE_CONTAINER: unihome-smoke
+      SMOKE_DATABASE: unihome_smoke
+      MongoDb__ConnectionString: 'mongodb://127.0.0.1:27017/?directConnection=true&retryWrites=false&serverSelectionTimeoutMS=5000&connectTimeoutMS=5000'
+      MongoDb__DatabaseName: unihome_smoke
+      MongoDb__ServerSelectionTimeoutSeconds: '5'
+      UNIHOME_MIGRATION_ALLOWED_DATABASES: unihome_smoke
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+      - name: Descargar imagen construida
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ci-container-image
+      - name: Cargar imagen y fijar tag local
+        run: |
+          set -euo pipefail
+          docker load --input unihome-ci.tar
+          echo "SMOKE_IMAGE=unihome-ci:${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+      - name: Inicializar MongoDB efímero con M01-001
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if docker exec "${{ job.services.mongo.id }}" \
+              mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' | grep -qx '1'; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::MongoDB efímero no disponible."
+              exit 1
+            fi
+            sleep 2
+          done
+          dotnet restore tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj --locked-mode
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-restore -- \
+            apply --database "$SMOKE_DATABASE" --confirm --version M01-001
+      - name: Reproducir el fallo sin Proxy__KnownProxies (control negativo)
+        run: |
+          set -euo pipefail
+          negative_name="${SMOKE_CONTAINER}-negative"
+          docker rm -f "$negative_name" >/dev/null 2>&1 || true
+          set +e
+          timeout 30 docker run --rm --name "$negative_name" --network host \
+            -e ASPNETCORE_ENVIRONMENT=Production \
+            -e Proxy__TrustForwardedHeaders=true \
+            -e Jwt__SigningKey=unihome-smoke-signing-key-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e VerificationCode__HmacSecret=unihome-smoke-hmac-secret-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e Auth__RateLimit__IpHashSalt=unihome-smoke-ip-salt-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e Redis__Enabled=true \
+            -e Redis__RestUrl=https://smoke.invalid \
+            -e Redis__RestToken=smoke-test-token \
+            -e MongoDb__ConnectionString="$MongoDb__ConnectionString" \
+            -e MongoDb__DatabaseName="$MongoDb__DatabaseName" \
+            -e MongoDb__ServerSelectionTimeoutSeconds=5 \
+            -e Api__EnableSwagger=false \
+            "$SMOKE_IMAGE" > smoke-negative.log 2>&1
+          negative_code=$?
+          set -e
+          docker rm -f "$negative_name" >/dev/null 2>&1 || true
+          echo "NEGATIVE_EXIT_CODE=$negative_code" >> "$GITHUB_ENV"
+          echo "Exit code real del control negativo: $negative_code"
+          if [ "$negative_code" -eq 0 ]; then
+            echo "::error::La imagen no falló sin Proxy__KnownProxies; el control negativo no es válido."
+            cat smoke-negative.log
+            exit 1
+          fi
+          grep -F "Proxy:TrustForwardedHeaders" smoke-negative.log
+          grep -F "Proxy:KnownProxies o Proxy:KnownNetworks" smoke-negative.log
+      - name: Arrancar la imagen real con configuración equivalente a Azure
+        run: |
+          set -euo pipefail
+          docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+          # La imagen ya define el binding HTTP interno en 8080; no se repite
+          # aquí para no introducir una URL clear-text en código nuevo.
+          docker run --detach --name "$SMOKE_CONTAINER" --network host \
+            -e ASPNETCORE_ENVIRONMENT=Production \
+            -e Proxy__TrustForwardedHeaders=true \
+            -e Proxy__KnownProxies__0=127.0.0.1 \
+            -e Proxy__KnownProxies__1=::1 \
+            -e Jwt__Issuer=UniHome \
+            -e Jwt__Audience=UniHome.Mobile \
+            -e Jwt__SigningKey=unihome-smoke-signing-key-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e VerificationCode__HmacSecret=unihome-smoke-hmac-secret-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e Auth__RateLimit__IpHashSalt=unihome-smoke-ip-salt-0123456789-abcdefghijklmnopqrstuvwxyz \
+            -e Redis__Enabled=true \
+            -e Redis__RestUrl=https://smoke.invalid \
+            -e Redis__RestToken=smoke-test-token \
+            -e MongoDb__ConnectionString="$MongoDb__ConnectionString" \
+            -e MongoDb__DatabaseName="$MongoDb__DatabaseName" \
+            -e MongoDb__ServerSelectionTimeoutSeconds=5 \
+            -e Cloudinary__PublicBaseUrl=https://unihome.invalid \
+            -e Api__EnableSwagger=false \
+            "$SMOKE_IMAGE"
+      - name: Verificar proceso, puerto y health checks reales
+        run: |
+          set -euo pipefail
+          live_ok=false
+          for attempt in $(seq 1 60); do
+            if ! docker inspect -f '{{.State.Running}}' "$SMOKE_CONTAINER" | grep -qx true; then
+              echo "::error::El contenedor terminó antes de responder."
+              docker inspect -f 'exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}}' "$SMOKE_CONTAINER" || true
+              docker logs "$SMOKE_CONTAINER" || true
+              exit 1
+            fi
+            if curl --fail --silent --show-error \
+              -H 'X-Forwarded-Proto: https' \
+              http://127.0.0.1:8080/health/live > live.json; then
+              live_ok=true
+              break
+            fi
+            sleep 2
+          done
+          test "$live_ok" = true
+
+          ready_ok=false
+          for attempt in $(seq 1 30); do
+            if ! docker inspect -f '{{.State.Running}}' "$SMOKE_CONTAINER" | grep -qx true; then
+              echo "::error::El contenedor terminó antes de readiness."
+              docker inspect -f 'exit_code={{.State.ExitCode}} oom_killed={{.State.OOMKilled}}' "$SMOKE_CONTAINER" || true
+              docker logs "$SMOKE_CONTAINER" || true
+              exit 1
+            fi
+            if curl --fail --silent --show-error \
+              -H 'X-Forwarded-Proto: https' \
+              http://127.0.0.1:8080/health/ready > ready.json; then
+              ready_ok=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready_ok" = true
+
+          python3 - <<'PY'
+          import json
+          for name in ("live", "ready"):
+              with open(f"{name}.json", encoding="utf-8") as stream:
+                  payload = json.load(stream)
+              if payload.get("status") != "Healthy":
+                  raise SystemExit(f"{name} no está Healthy: {payload}")
+          PY
+
+          sleep 5
+          test "$(docker inspect -f '{{.State.Running}}' "$SMOKE_CONTAINER")" = "true"
+          test "$(docker inspect -f '{{.State.ExitCode}}' "$SMOKE_CONTAINER")" = "0"
+          test "$(docker inspect -f '{{.State.OOMKilled}}' "$SMOKE_CONTAINER")" = "false"
+          test "$(docker inspect -f '{{.RestartCount}}' "$SMOKE_CONTAINER")" = "0"
+          docker logs "$SMOKE_CONTAINER" 2>&1 | grep -F "Application started. Press Ctrl+C to shut down."
+          docker logs "$SMOKE_CONTAINER" 2>&1 | grep -F "Now listening on:"
+          if docker logs "$SMOKE_CONTAINER" 2>&1 | grep -Eiq \
+            'Unhandled exception|Segmentation fault|SIGSEGV|Application is shutting down'; then
+            echo "::error::Los logs contienen un error fatal."
+            docker logs "$SMOKE_CONTAINER" || true
+            exit 1
+          fi
+          echo "Contenedor estable; /health/live y /health/ready responden Healthy."
+      - name: Guardar evidencia y limpiar
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/container-smoke
+          docker logs "$SMOKE_CONTAINER" > artifacts/container-smoke/container.log 2>&1 || true
+          docker inspect "$SMOKE_CONTAINER" > artifacts/container-smoke/container-inspect.json 2>&1 || true
+          cp -f smoke-negative.log artifacts/container-smoke/negative.log 2>/dev/null || true
+          cp -f live.json artifacts/container-smoke/live.json 2>/dev/null || true
+          cp -f ready.json artifacts/container-smoke/ready.json 2>/dev/null || true
+          {
+            echo "# Container Smoke"
+            echo ""
+            echo "- Imagen: \`${SMOKE_IMAGE:-no-cargada}\`"
+            echo "- Resultado: \`${{ job.status }}\`"
+            echo "- Exit code del control negativo: \`${NEGATIVE_EXIT_CODE:-n/d}\`"
+            echo "- Liveness/readiness: \`${live_ok:-false}\` / \`${ready_ok:-false}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+      - name: Publicar evidencia del contenedor
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-smoke-evidence
+          path: artifacts/container-smoke/**
+          if-no-files-found: warn
+          retention-days: 7
+
   dast-zap:
     name: DAST (OWASP ZAP) - baseline pasivo aislado
     needs: [detect-changes, build-test]
@@ -1657,7 +1865,7 @@ jobs:
 
   pr-quality-gate:
     name: PR Quality Gate (controles obligatorios)
-    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, dast-zap, restler-fuzzing]
+    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, container-smoke, dast-zap, restler-fuzzing]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1681,7 +1889,7 @@ jobs:
 
   hardening-report:
     name: Hardening Report (Combinado)
-    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, dast-zap, restler-fuzzing, pr-quality-gate]
+    needs: [detect-changes, semgrep-sast, build-test, contract-test, dependency-scan, secret-scan, sonarcloud-sast, mongo-db-test, mutation-test, pact-contract, docker-build, container-lint, container-smoke, dast-zap, restler-fuzzing, pr-quality-gate]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1716,8 +1924,8 @@ jobs:
     # Explícito para no heredar el success() implícito del job: los skips de
     # jobs opcionales transitivos (por ejemplo Pact) no deben omitir el deploy.
     # Los needs obligatorios se exigen uno a uno como success.
-    needs: [detect-changes, build-test, contract-test, docker-build, container-lint, pr-quality-gate, hardening-report]
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && github.event.inputs.run_mongo_only != 'true' && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
+    needs: [detect-changes, build-test, contract-test, docker-build, container-lint, container-smoke, pr-quality-gate, hardening-report]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.UNIHOME_ENABLE_AZURE_CD == 'true' && inputs.deploy_to_azure == true && github.event.inputs.run_mongo_only != 'true' && needs.detect-changes.outputs.code == 'true' && needs.build-test.result == 'success' && needs.contract-test.result == 'success' && needs.docker-build.result == 'success' && needs.container-lint.result == 'success' && needs.container-smoke.result == 'success' && needs.pr-quality-gate.result == 'success' && needs.hardening-report.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: azure-dev
@@ -1859,6 +2067,10 @@ jobs:
               --name "$AZURE_CONTAINER_APP" \
               --resource-group "$AZURE_RESOURCE_GROUP" \
               --image "$previous_image" \
+              --set-env-vars \
+                "Proxy__TrustForwardedHeaders=true" \
+                "Proxy__KnownProxies__0=127.0.0.1" \
+                "Proxy__KnownProxies__1=::1" \
               --revision-suffix "rb-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"; then
               echo "::error::Falló el rollback a la imagen anterior."
               return 1
@@ -1939,6 +2151,10 @@ jobs:
             --name "$AZURE_CONTAINER_APP" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --image "$IMAGE" \
+            --set-env-vars \
+              "Proxy__TrustForwardedHeaders=true" \
+              "Proxy__KnownProxies__0=127.0.0.1" \
+              "Proxy__KnownProxies__1=::1" \
             --revision-suffix "sha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
           new_revision="$(az containerapp show \
@@ -1946,6 +2162,24 @@ jobs:
             --query 'properties.latestRevisionName' -o tsv)"
           if [ -z "$new_revision" ] || [ "$new_revision" = "$previous_revision" ]; then
             echo "::error::Container Apps no creó una revisión nueva verificable."
+            exit 1
+          fi
+
+          revision_proxy_trust="$(az containerapp revision show \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$new_revision" \
+            --query "properties.template.containers[0].env[?name=='Proxy__TrustForwardedHeaders'].value | [0]" \
+            -o tsv 2>/dev/null || true)"
+          revision_known_proxy_count="$(az containerapp revision show \
+            --name "$AZURE_CONTAINER_APP" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$new_revision" \
+            --query "length(properties.template.containers[0].env[?starts_with(name, 'Proxy__KnownProxies') || starts_with(name, 'Proxy__KnownNetworks')])" \
+            -o tsv 2>/dev/null || true)"
+          if [ "$revision_proxy_trust" = "true" ] \
+            && [ "${revision_known_proxy_count:-0}" -eq 0 ]; then
+            echo "::error::La revisión $new_revision activa Proxy:TrustForwardedHeaders sin Proxy:KnownProxies/KnownNetworks; el proceso fallaría al arrancar."
             exit 1
           fi
 

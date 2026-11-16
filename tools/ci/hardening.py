@@ -17,6 +17,7 @@ OPTIONAL = {
     "pact-contract": ("UNIHOME_ENABLE_PACT", {"workflow_dispatch"}),
     "docker-build": ("UNIHOME_ENABLE_DOCKER", {"pull_request", "push", "workflow_dispatch"}),
     "container-lint": ("UNIHOME_ENABLE_DOCKER", {"pull_request", "push", "workflow_dispatch"}),
+    "container-smoke": ("UNIHOME_ENABLE_DOCKER", {"pull_request", "push", "workflow_dispatch"}),
     "dast-zap": ("UNIHOME_ENABLE_ZAP", {"workflow_dispatch"}),
     "restler-fuzzing": ("UNIHOME_ENABLE_RESTLER", {"workflow_dispatch"}),
 }
