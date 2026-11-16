@@ -1,5 +1,6 @@
 """Pruebas del aprovisionamiento del administrador sintético."""
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,12 +36,12 @@ class ProvisionAdminTests(unittest.TestCase):
             state_file = Path(directory) / ".ci-state" / "admin.json"
             with (
                 patch.object(provision_admin, "HttpClient", FakeHttp),
+                patch.object(provision_admin, "STATE_FILE", state_file),
                 patch.object(
                     provision_admin, "wait_for_verification_code",
                     return_value="123456"),
             ):
-                state = provision_admin.provision(
-                    "http://127.0.0.1:5088", Path(directory), state_file)
+                state = provision_admin.provision("http://127.0.0.1:5088")
 
             self.assertTrue(state_file.exists())
             saved = json.loads(state_file.read_text(encoding="utf-8"))
@@ -51,6 +52,16 @@ class ProvisionAdminTests(unittest.TestCase):
             self.assertTrue(saved["email"].startswith("admin.dast."))
             self.assertNotIn(saved["password"], json.dumps(saved["accountId"]))
 
+    def test_no_acepta_rutas_por_cli(self):
+        for flag in ("--state-file", "--mailbox"):
+            with patch.object(sys, "argv", [
+                "provision_admin.py",
+                "--target", "http://127.0.0.1:5088",
+                flag, "otra/ruta",
+            ]):
+                with self.assertRaises(SystemExit):
+                    provision_admin.parse_args()
+
     def test_registro_sin_id_falla(self):
         class NoIdHttp(FakeHttp):
             def request(self, method, path, *, body=None, expected=None,
@@ -59,12 +70,14 @@ class ProvisionAdminTests(unittest.TestCase):
                 return 201, b'{"correoConfirmacionEnviado":true}', {}
 
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(provision_admin, "HttpClient", NoIdHttp):
+            with (
+                patch.object(provision_admin, "HttpClient", NoIdHttp),
+                patch.object(
+                    provision_admin, "STATE_FILE",
+                    Path(directory) / "admin.json"),
+            ):
                 with self.assertRaises(provision_admin.ProvisionError):
-                    provision_admin.provision(
-                        "http://127.0.0.1:5088",
-                        Path(directory),
-                        Path(directory) / "admin.json")
+                    provision_admin.provision("http://127.0.0.1:5088")
 
 
 if __name__ == "__main__":

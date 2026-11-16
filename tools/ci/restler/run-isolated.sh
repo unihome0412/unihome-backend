@@ -29,7 +29,7 @@ fail_fast() {
 if ! command -v "$PYTHON" >/dev/null 2>&1; then
   fail_fast "No se encontró el intérprete Python configurado."
 fi
-if [ ! -f "$RESTLER_DLL" ]; then
+if [[ ! -f "$RESTLER_DLL" ]]; then
   fail_fast "No se encontró RESTler en $RESTLER_DLL."
 fi
 
@@ -56,7 +56,7 @@ run_restler() {
 
 move_results() {
   local name="$1"
-  if [ -d "$WORK/Test" ]; then
+  if [[ -d "$WORK/Test" ]]; then
     rm -rf "$WORK/$name"
     mv "$WORK/Test" "$WORK/$name"
   fi
@@ -64,7 +64,7 @@ move_results() {
 
 run_restler "compile" "5m" compile "$STATE/compile-config.json"
 
-if [ -f "$WORK/Compile/grammar.py" ]; then
+if [[ -f "$WORK/Compile/grammar.py" ]]; then
   rm -rf "$WORK/Test"
   run_restler "test-main" "10m" test \
     --grammar_file "$WORK/Compile/grammar.py" \

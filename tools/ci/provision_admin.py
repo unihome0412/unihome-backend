@@ -26,24 +26,28 @@ from zap_dast import (  # noqa: E402
     wait_for_verification_code,
 )
 
-DEFAULT_STATE_FILE = Path(".ci-state/admin.json")
+ROOT_DIR = Path(__file__).resolve().parents[2]
+# Rutas fijas: no se aceptan rutas de archivo por CLI para evitar que un
+# argumento manipulable llegue a operaciones de lectura/escritura/chmod.
+STATE_FILE = ROOT_DIR / ".ci-state" / "admin.json"
+MAILBOX_DIR = ROOT_DIR / ".dast-mail"
 
 
 class ProvisionError(RuntimeError):
     """Error controlado durante la provisión del administrador sintético."""
 
 
-def write_private_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+def write_private_json(value: dict[str, Any]) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(
         json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
-        os.chmod(path, 0o600)
+        os.chmod(STATE_FILE, 0o600)
     except OSError:
         pass
 
 
-def provision(target: str, mailbox: Path, state_file: Path) -> dict[str, Any]:
+def provision(target: str) -> dict[str, Any]:
     password = _generate_password()
     email = f"admin.dast.{uuid.uuid4().hex}@uni.edu"
     http = HttpClient(target, None)
@@ -60,7 +64,7 @@ def provision(target: str, mailbox: Path, state_file: Path) -> dict[str, Any]:
         raise ProvisionError(
             "El SMTP de captura no confirmó el envío del administrador.")
 
-    code = wait_for_verification_code(mailbox, email)
+    code = wait_for_verification_code(MAILBOX_DIR, email)
     http.request(
         "POST", "/api/v1/auth/confirmacion-correo",
         body={"correo": email, "codigo": code},
@@ -79,23 +83,20 @@ def provision(target: str, mailbox: Path, state_file: Path) -> dict[str, Any]:
         "password": password,
         "accountId": account_id,
     }
-    write_private_json(state_file, state)
+    write_private_json(state)
     return state
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True)
-    parser.add_argument("--mailbox", type=Path, required=True)
-    parser.add_argument(
-        "--state-file", type=Path, default=DEFAULT_STATE_FILE)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        provision(args.target, args.mailbox, args.state_file)
+        provision(args.target)
     except Exception as error:
         print(
             f"::error::No se pudo provisionar el administrador sintético: "
