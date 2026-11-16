@@ -5,6 +5,7 @@ import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from hardening import evaluate, main
@@ -263,6 +264,29 @@ class GateTests(unittest.TestCase):
     def _base_needs():
         return {x: {"result": "success"} for x in (
             "detect-changes", "dependency-scan", "secret-scan", "semgrep-sast", "build-test", "contract-test")}
+
+    def test_container_smoke_mantiene_proxies_y_evita_url_http(self):
+        workflow = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+        text = workflow.read_text(encoding="utf-8")
+        start = text.index("  container-smoke:")
+        end = text.index("\n  dast-zap:", start)
+        block = text[start:end]
+
+        # La imagen ya define el binding interno; fijar ASPNETCORE_URLS aquí
+        # vuelve a introducir la vulnerabilidad githubactions:S5332 de Sonar.
+        proxy_0 = "Proxy__KnownProxies__0"
+        proxy_1 = "Proxy__KnownProxies__1"
+        self.assertNotIn("ASPNETCORE_URLS", block)
+        self.assertIn(proxy_0, block)
+        self.assertIn(proxy_1, block)
+        self.assertIn("Reproducir el fallo sin Proxy__KnownProxies", block)
+        self.assertIn("Proxy:TrustForwardedHeaders", block)
+
+        # El CD debe seguir fijando los proxies loopback y el fail-fast.
+        deploy = text[text.index("  deploy-azure:"):]
+        self.assertIn("Proxy__TrustForwardedHeaders=true", deploy)
+        self.assertIn(proxy_0, deploy)
+        self.assertIn(proxy_1, deploy)
 
     def test_sonar_pr_interno_aprobado(self):
         needs = self._base_needs()

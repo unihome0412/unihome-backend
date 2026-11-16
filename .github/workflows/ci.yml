@@ -802,9 +802,10 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f "$SMOKE_CONTAINER" >/dev/null 2>&1 || true
+          # La imagen ya define el binding HTTP interno en 8080; no se repite
+          # aquí para no introducir una URL clear-text en código nuevo.
           docker run --detach --name "$SMOKE_CONTAINER" --network host \
             -e ASPNETCORE_ENVIRONMENT=Production \
-            -e ASPNETCORE_URLS=http://+:8080 \
             -e Proxy__TrustForwardedHeaders=true \
             -e Proxy__KnownProxies__0=127.0.0.1 \
             -e Proxy__KnownProxies__1=::1 \
