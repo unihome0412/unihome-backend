@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using SkiaSharp;
 using UniHome.Domain.Accounts;
@@ -96,11 +98,23 @@ public sealed class RealOcrVerificationEndpointTests
         using var detailJson = JsonDocument.Parse(await detail.Content.ReadAsStringAsync());
         var name = detailJson.RootElement.GetProperty("nombreOcrIne").GetString();
         Assert.NotNull(name);
-        Assert.Contains("ANA", name, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("PEREZ", name, StringComparison.OrdinalIgnoreCase);
+        var normalizedName = NormalizeForAssertion(name);
+        Assert.Contains("MARIA", normalizedName, StringComparison.Ordinal);
+        Assert.Contains("JOSE", normalizedName, StringComparison.Ordinal);
+        Assert.Contains("PENA", normalizedName, StringComparison.Ordinal);
         Assert.True(
             detailJson.RootElement.GetProperty("indicadorEdicion")
                 .GetProperty("elaDisponible").GetBoolean());
+    }
+
+    private static string NormalizeForAssertion(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        return new string(decomposed
+                .Where(character =>
+                    CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+                .ToArray())
+            .ToUpperInvariant();
     }
 
     private static byte[] CreateIneImage()
@@ -115,7 +129,7 @@ public sealed class RealOcrVerificationEndpointTests
             IsAntialias = true
         };
 
-        canvas.DrawText("NOMBRE: ANA PEREZ LOPEZ", 50, 120, SKTextAlign.Left, font, paint);
+        canvas.DrawText("NOMBRE: MARÍA JOSÉ PEÑA", 50, 120, SKTextAlign.Left, font, paint);
         canvas.DrawText("INSTITUTO NACIONAL ELECTORAL", 50, 220, SKTextAlign.Left, font, paint);
         canvas.Flush();
 

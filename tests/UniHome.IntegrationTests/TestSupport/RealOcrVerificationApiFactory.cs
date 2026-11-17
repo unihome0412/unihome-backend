@@ -30,7 +30,7 @@ public sealed class RealOcrVerificationApiFactory : UniHomeApiFactory
             configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["DocumentAnalysis:TesseractExecutablePath"] = TesseractExecutable,
-                ["DocumentAnalysis:TesseractLanguage"] = "eng",
+                ["DocumentAnalysis:TesseractLanguage"] = "spa+eng",
                 ["DocumentAnalysis:TesseractTimeoutSeconds"] = "60",
                 ["DocumentAnalysis:TesseractPageSegmentationMode"] = "6"
             });

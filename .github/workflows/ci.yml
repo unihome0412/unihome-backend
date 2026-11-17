@@ -130,6 +130,17 @@ jobs:
       - name: Verificar formato
         run: dotnet format UniHome.Backend.slnx --verify-no-changes --no-restore
 
+      - name: Instalar Tesseract para OCR real
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa fonts-dejavu-core
+          command -v tesseract
+          tesseract --version | head -2
+          tesseract --list-langs | grep -qx 'eng'
+          tesseract --list-langs | grep -qx 'spa'
+
       - name: Test unit
         run: >-
           dotnet test tests/UniHome.UnitTests/UniHome.UnitTests.csproj
@@ -147,6 +158,30 @@ jobs:
           --no-restore
           --logger "trx;LogFileName=integration.trx"
           --results-directory TestResults/integration
+
+      - name: Exigir OCR real sin pruebas omitidas
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          namespace = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          results = []
+          for path in glob.glob("TestResults/*/*.trx"):
+              root = ET.parse(path).getroot()
+              for result in root.findall(".//t:UnitTestResult", namespace):
+                  name = result.attrib.get("testName", "")
+                  if "RealOcr" in name:
+                      results.append((name, result.attrib.get("outcome", "")))
+
+          print(f"OCR real: {len(results)} pruebas; omitidas={sum(1 for _, o in results if o != 'Passed')}")
+          if len(results) < 3:
+              raise SystemExit("Se esperaban al menos 3 pruebas reales de OCR en Linux.")
+          if any(outcome != "Passed" for _, outcome in results):
+              raise SystemExit("Una prueba real de OCR fue omitida o falló.")
+          PY
 
       - name: Probar la lógica del quality gate
         run: python3 -m unittest discover -s tools/ci -p 'test_*.py' -v

@@ -31,7 +31,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Verificador de proveedor PactNet 5.0.1 con API Kestrel aislada; requiere contratos JSON reales del consumidor Android en `pacts/`; sin ellos **falla** y permanece desactivado | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
-| OCR documental M06 | No usa variable: `workflow_dispatch` es la autorización | Workflow separado `.github/workflows/ocr-documental.yml`; instala `tesseract-ocr`/`tesseract-ocr-eng` desde apt en el runner, ejecuta la prueba unitaria real y el flujo HTTP real, exige 3 pruebas ejecutadas, 0 omitidas y 0 fallidas; publica TRX | Solo manual |
+| OCR documental M06 | No usa variable: `workflow_dispatch` es la autorización | Workflow separado `.github/workflows/ocr-documental.yml`; instala `tesseract-ocr`/`tesseract-ocr-eng`/`tesseract-ocr-spa` desde apt en el runner, ejecuta la prueba unitaria real (incluido español) y el flujo HTTP real, exige 3 pruebas ejecutadas, 0 omitidas y 0 fallidas; publica TRX | Solo manual |
 
 El Container Smoke levanta un stub HTTPS local de Upstash en `127.0.0.1` para
 que `/health/ready` evalúe Redis sin usar el servicio real ni desactivar la
@@ -85,11 +85,13 @@ OpenAPI de ese momento visitadas, 26 mensajes procesados por ZAP, 0 Critical,
 `zap-report.json`, `zap-report.md`, `dast-report.md`, `route-coverage.json` y
 evidencias de arranque/limpieza.
 
-**Sprint 4:** el catálogo OpenAPI pasa a **37 operaciones**. Las 7 rutas M04/M07
-siguen usando un fixture público sembrado **solo** en `unihome_dast`; las rutas
-M06 se visitan con autenticación sintética y respuesta 401/403/404 cuando no hay
-fixture, sin generar 5xx. La ejecución real 37/37 queda **PENDIENTE_CI** y no se
-declara PASS anticipado.
+**Sprint 4:** el catálogo OpenAPI pasa a **37 operaciones**. El fixture DAST
+ahora ejecuta el flujo M06 real: carga INE y comprobante por multipart, envía la
+primera publicación, consulta bandeja/detalle administrativo y obtiene y
+consume el enlace firmado del documento. Las 7 rutas M04/M07 siguen usando un
+fixture público sembrado **solo** en `unihome_dast`. La ejecución #280 detectó
+30/37 rutas porque el fixture aún no cubría M06; la corrección está preparada y
+la nueva ejecución 37/37 queda **PENDIENTE_CI**. No se declara PASS anticipado.
 
 **Alcance pendiente y riesgos:** el análisis pasivo no demuestra lógica de
 negocio ni autorización a nivel de objeto; la cobertura se limita a las rutas
@@ -150,27 +152,30 @@ universidad, propiedad y unidad sintéticas, publica la unidad solo en la base
 efímera `unihome_restler` y añade diccionarios para `universidadId`, `unitId` y
 los filtros de exploración. Las rutas M06 se intentan con el token administrativo
 real; las cargas multipart y las rutas sin fixture pueden quedar sin 2xx y se
-reportan como WARN, nunca como PASS. La ejecución real 37/37 queda
-**PENDIENTE_CI** y no se declara PASS anticipado.
+reportan como WARN, nunca como PASS. La ejecución #280 terminó con estado PASS,
+37/37 operaciones intentadas, 28/37 con 2xx, 0 HTTP 5xx y 0 bug buckets. La
+cobertura funcional M06 con 2xx se valida en DAST y en las pruebas de integración;
+RESTler conserva la cobertura de esquema y fuzzing.
 
-### OCR real M06 (manual)
+### OCR real M06
+
+El job obligatorio `build-test` instala `tesseract-ocr`, `tesseract-ocr-eng`,
+`tesseract-ocr-spa` y `fonts-dejavu-core` en Ubuntu antes de ejecutar la suite.
+Así `RealOcrTests` y `RealOcrVerificationEndpointTests` ejecutan Tesseract real,
+incluido un documento sintético en español con acentos y eñe, en cada PR/push y
+no dependen de que el workflow separado ya exista en `main`.
 
 El workflow `.github/workflows/ocr-documental.yml` no forma parte del gate
 obligatorio y no se ejecuta en PR/push. Se activa solo con `workflow_dispatch` y
 es la evidencia de que el OCR no está simulado:
 
-- Instala `tesseract-ocr` y `tesseract-ocr-eng` desde los repositorios de la
-  imagen Ubuntu del runner; no usa servicios, API keys ni modelos remotos.
-- Ejecuta `RealOcrTests` (motor real y caso de motor ausente) y
-  `RealOcrVerificationEndpointTests` (multipart HTTP → análisis → expediente
-  administrativo) con TRX.
+- Instala `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-spa` y `fonts-dejavu-core` desde los repositorios de la imagen Ubuntu del runner; no usa servicios, API keys ni modelos remotos.
+- Ejecuta `RealOcrTests` (motor real, español con acentos y caso de motor ausente) y `RealOcrVerificationEndpointTests` (multipart HTTP → análisis → expediente administrativo) con TRX.
 - Falla si se ejecutan menos de 3 pruebas reales, si alguna se omite o si alguna
   falla. Un runner sin Tesseract no se considera aprobado para OCR.
-- La imagen de la API instala el mismo motor y el modelo inglés en el `Dockerfile`;
-  si en un entorno falta el binario, el adaptador marca `NoDisponible` y el nombre
-  queda nulo, sin inventar resultados.
+- La imagen de la API instala el mismo motor y los modelos español/inglés en el `Dockerfile`; si en un entorno falta el binario, el adaptador marca `NoDisponible` y el nombre queda nulo, sin inventar resultados.
 
-**Estado local (16 de noviembre de 2026):** `RealOcrTests` 2/2 y
+**Estado local (16 de noviembre de 2026):** `RealOcrTests` 3/3 y
 `RealOcrVerificationEndpointTests` 1/1 aprobadas con Tesseract 5.4.0 en Windows.
 La ejecución del workflow en GitHub Actions queda **PENDIENTE_CI**.
 

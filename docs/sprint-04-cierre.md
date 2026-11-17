@@ -84,16 +84,16 @@ Detalle completo en [`mongodb-m06.md`](mongodb-m06.md).
 | Restore locked | PASS | `dotnet restore UniHome.Backend.slnx --locked-mode` |
 | Build Release + warnings as errors | PASS | 0 errores, 0 advertencias |
 | Formato | PASS | `dotnet format --verify-no-changes` |
-| Unitarias | PASS | 625/625 |
-| Integración | PASS | 217/217 ejecutadas (8 pruebas opt-in de Mongo/Cloudinary omitidas de forma explícita): flujo M06, admin, aislamiento, archivos inválidos, idempotencia, visibilidad |
-| OCR real unitario | PASS | Tesseract 5.4.0 local, 2/2 |
-| OCR real end-to-end | PASS | multipart → extracción → expediente admin, 1/1 |
+| Unitarias | PASS | 700/700 |
+| Integración | PASS | 219/219 ejecutadas (8 pruebas opt-in de Mongo/Cloudinary omitidas de forma explícita): flujo M06, admin, aislamiento, archivos inválidos, idempotencia, visibilidad |
+| OCR real unitario | PASS | Tesseract 5.4.0 local, 3/3 |
+| OCR real end-to-end | PASS | documento sintético con acentos, multipart → extracción → expediente admin, 1/1 |
 | ELA real | PASS | Imagen JPEG generada, recompresión y diferencia de píxeles |
 | PDF capa de texto | PASS | PdfPig extrae nombre de un PDF real; PDF sin texto queda NoDisponible |
 | Mongo real M06 | BLOCKED | No hay `mongod` local y Docker está prohibido; prueba opt-in preparada |
 | Dependencias vulnerables | PASS | `dotnet list package --vulnerable` sin hallazgos |
 | Gitleaks local | PASS | 118 commits/2.77 MB y árbol de trabajo 13.35 MB, 0 leaks |
-| Stryker.NET | PASS (informativo) | 48.55 % de mutación; 315 evaluados, 184 killed, 131 survived, 0 timeout/errors; umbral break 0 |
+| Stryker.NET | PASS (informativo) | 50.60 % de mutación; 417 evaluados, 251 killed, 166 survived, 79 NoCoverage, 0 timeout/errors; umbral break 0 |
 | ZAP / RESTler / Sonar / CodeQL / Semgrep remotos | PENDING_CI | No se ejecutaron workflows remotos |
 | Docker build | BLOCKED | Prohibido Docker en esta sesión; Dockerfile actualizado sin ejecutarlo |
 
@@ -119,8 +119,7 @@ Detalle completo en [`mongodb-m06.md`](mongodb-m06.md).
    PDF como vista previa, no una miniatura rasterizada.
 7. **Retención/rotación:** ADR-005 y la rotación de claves siguen pendientes.
    Cambiar `DocumentSecurity:EncryptionKey` invalida documentos previos.
-8. **Imagen Docker:** instala `tesseract-ocr` y `tesseract-ocr-eng`; el build real
-   no se ejecutó localmente por la restricción de Docker.
+8. **Imagen Docker:** instala `tesseract-ocr`, `tesseract-ocr-eng` y `tesseract-ocr-spa`; el build real no se ejecutó localmente por la restricción de Docker.
 9. **Swagger:** sigue deshabilitado por defecto; el documento OpenAPI solo se
    expone cuando `Api:EnableSwagger=true`.
 

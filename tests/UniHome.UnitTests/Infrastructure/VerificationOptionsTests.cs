@@ -58,6 +58,7 @@ public sealed class VerificationOptionsTests
     public void DocumentAnalysis_ValidaRangosYBinarios()
     {
         Assert.True(new DocumentAnalysisOptions().IsValid());
+        Assert.Equal("spa+eng", new DocumentAnalysisOptions().TesseractLanguage);
 
         Assert.False(new DocumentAnalysisOptions { MaxImagePixels = 0 }.IsValid());
         Assert.False(new DocumentAnalysisOptions { MaxImagePixels = DocumentAnalysisOptions.MaxAllowedPixels + 1 }.IsValid());

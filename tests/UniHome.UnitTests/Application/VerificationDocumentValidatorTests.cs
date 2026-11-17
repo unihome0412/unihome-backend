@@ -55,6 +55,20 @@ public sealed class VerificationDocumentValidatorTests
     }
 
     [Fact]
+    public void PdfConJavaScriptFueraDelPrefijoInspeccionado_DebeRechazarse()
+    {
+        var prefix = Encoding.ASCII.GetBytes("%PDF-1.4\n");
+        var filler = Enumerable.Repeat((byte)' ', 2 * 1024 * 1024).ToArray();
+        var active = Encoding.ASCII.GetBytes("/JavaScript (app.alert(1))\n%%EOF\n");
+        var pdf = prefix.Concat(filler).Concat(active).ToArray();
+
+        Assert.Throws<VerificationDocumentValidationException>(() =>
+            VerificationDocumentValidator.Validate(
+                TipoDocumentoVerificacion.Comprobante,
+                new VerificationDocumentUpload("predial.pdf", "application/pdf", pdf)));
+    }
+
+    [Fact]
     public void PdfConJavaScript_DebeRechazarse()
     {
         var pdf = Encoding.ASCII.GetBytes(

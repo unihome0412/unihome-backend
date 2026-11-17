@@ -20,7 +20,7 @@ public sealed class TesseractCliOcrEngineTests
         var options = new DocumentAnalysisOptions
         {
             TesseractExecutablePath = executable!,
-            TesseractLanguage = "eng",
+            TesseractLanguage = "spa+eng",
             TesseractTimeoutSeconds = 30,
             TesseractPageSegmentationMode = 6
         };

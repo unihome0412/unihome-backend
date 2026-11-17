@@ -22,7 +22,7 @@ public sealed class DocumentAnalysisOptions
 
     public string TesseractExecutablePath { get; set; } = "tesseract";
 
-    public string TesseractLanguage { get; set; } = "eng";
+    public string TesseractLanguage { get; set; } = "spa+eng";
 
     public int TesseractTimeoutSeconds { get; set; } = 30;
 

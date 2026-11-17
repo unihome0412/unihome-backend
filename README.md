@@ -11,7 +11,9 @@ cuenta (HU-096).
 - Clean Architecture: `Domain` no depende de otros proyectos; `Application` depende de
   `Domain`; `Infrastructure` depende de `Application` y `Domain`; `Api` compone ambas.
 - MongoDB mediante `MongoDB.Driver`, aislado detrás de puertos de `Application`.
-- Sin SQL Server, EF Core, Docker, Testcontainers, Scalar ni Swagger UI.
+- Sin SQL Server, EF Core, Testcontainers, Scalar ni Swagger UI. Docker se usa
+  únicamente para construir/validar la imagen de Azure Container Apps y los jobs
+  de CI autorizados; no se usa Docker para el desarrollo local.
 
 ## Ejecutar localmente
 
@@ -234,10 +236,11 @@ Detalle en [`docs/sprint-04-cierre.md`](docs/sprint-04-cierre.md) y
   `Host`. En Development, si falta la clave de cifrado, se genera una efímera por
   proceso y los documentos dejan de abrirse al reiniciar.
 - `DocumentAnalysis__TesseractExecutablePath` apunta al binario Tesseract
-  (`tesseract` por defecto). `TesseractLanguage=eng`, timeout 30 s y PSM 6. La
-  imagen Docker instala `tesseract-ocr` y `tesseract-ocr-eng`; si en un entorno
-  falta el binario, el OCR queda `NoDisponible` y no se inventa el nombre. ELA y
-  metadatos se ejecutan en proceso con SkiaSharp/PdfPig y no requieren servicios.
+  (`tesseract` por defecto). `TesseractLanguage=spa+eng`, timeout 30 s y PSM 6.
+  La imagen Docker instala `tesseract-ocr`, `tesseract-ocr-eng` y
+  `tesseract-ocr-spa`; si falta el binario, el OCR queda `NoDisponible` y no se
+  inventa el nombre. ELA y metadatos se ejecutan en proceso con SkiaSharp/PdfPig
+  y no requieren servicios.
 
 - Límite "por cuenta" de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
@@ -480,6 +483,12 @@ OpenAPI visitadas, 26 mensajes procesados, 0 Critical/High/Medium/Low y 2
 informativas. El artefacto `dast-zap-results` contiene HTML/JSON/Markdown y la
 limpieza confirmó API/SMTP detenidos, contenedor ZAP eliminado y base efímera
 borrada. `PR Quality Gate` y `Hardening Report` terminaron en verde.
+
+**Sprint 4:** el catálogo OpenAPI tiene **37 operaciones**. La ejecución manual
+#280 visitó 30/37 porque el fixture DAST no ejercía todavía las rutas M06; el
+fixture se amplió para cargar INE/comprobante, enviar la primera publicación y
+consultar bandeja/detalle/enlace firmado administrativo. La nueva ejecución
+37/37 queda **PENDIENTE_CI** y no se declara PASS anticipado.
 
 El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
 cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que

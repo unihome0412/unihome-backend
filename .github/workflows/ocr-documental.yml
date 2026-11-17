@@ -40,9 +40,11 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa fonts-dejavu-core
           command -v tesseract
           tesseract --version | head -2
+          tesseract --list-langs | grep -qx 'eng'
+          tesseract --list-langs | grep -qx 'spa'
       - name: Restore y build
         run: |
           dotnet restore UniHome.Backend.slnx --locked-mode

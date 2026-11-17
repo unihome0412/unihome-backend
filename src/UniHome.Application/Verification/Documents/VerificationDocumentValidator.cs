@@ -124,10 +124,7 @@ public static partial class VerificationDocumentValidator
 
         // No se ejecuta ni renderiza el PDF en el servidor, pero se rechaza
         // contenido activo que un visor podría interpretar.
-        var probe = System.Text.Encoding.Latin1.GetString(
-            content,
-            0,
-            Math.Min(content.Length, 2 * 1024 * 1024));
+        var probe = System.Text.Encoding.Latin1.GetString(content);
 
         if (ActivePdfContentRegex().IsMatch(probe))
         {
