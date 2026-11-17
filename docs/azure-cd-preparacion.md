@@ -253,7 +253,8 @@ ventana autorizada:
 4. Verificar respaldo/restauración de Atlas y ejecutar la migración `M07-001`
    con el procedimiento de `docs/mongodb-m07.md`.
 5. Configurar `Api__EnableSwagger=true` solo si el equipo autorizado lo aprueba;
-   `Admin__AccountIds` debe contener una cuenta administrativa legítima y
+   `Admin__AccountIds` debe contener una cuenta administrativa legítima,
+   `DocumentationAccess__AccountIds` los lectores de solo lectura y
    `SwaggerAccess__CookieLifetimeMinutes` puede mantenerse en 15.
 6. Configurar `PasswordRecovery__ResetLinkBaseUrl` (HTTPS) y, solo si se usa
    deep link, `PasswordRecovery__AndroidAppScheme`.

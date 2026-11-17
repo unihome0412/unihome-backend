@@ -23,35 +23,39 @@ protecciones, rollback y FinOps. No se tocó `main` en esta auditoría.
 URL pública: `https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io`
 Swagger UI (protegida, ver sección dedicada): `https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io/swagger`
 
-## Swagger UI (demostración)
+## Swagger UI (protegida)
 
 Swagger UI renderiza el documento OpenAPI **nativo** de .NET 10
 (`Microsoft.AspNetCore.OpenApi`, vía `MapOpenApi()`); no se usa el generador de
 Swashbuckle, solo su paquete `Swashbuckle.AspNetCore.SwaggerUI` para la interfaz.
 Controlado por `Api__EnableSwagger`, **desactivado por defecto**:
 
-- `Api__EnableSwagger=false` (o ausente): `/swagger` y `/openapi/v1.json`
-  responden `404`; `/` no tiene ninguna ruta mapeada.
-- `Api__EnableSwagger=true`: `/swagger`, sus assets y `/openapi/v1.json`
-  responden `401` sin sesión y `200` solo con la policy administrativa
-  (`Admin__AccountIds`). `/` redirige (`302`) a `/swagger` solo para un
-  administrador.
-- Para el navegador, el administrador canjea su Bearer por la cookie
-  `__Host-unihome-swagger` con `POST /api/v1/auth/swagger-session`. La cookie es
-  HttpOnly, Secure, SameSite=Strict y dura 15 minutos por defecto
-  (`SwaggerAccess__CookieLifetimeMinutes`, 1–60). No se acepta en `/api/*`.
+- `Api__EnableSwagger=false` (o ausente): `/swagger`, `/swagger/login` y
+  `/openapi/v1.json` responden `404`; `/` no tiene ninguna ruta mapeada.
+- `Api__EnableSwagger=true`: `/swagger/login` es público; `/swagger` redirige al
+  login si no hay sesión; `/openapi/v1.json` responde `401` sin sesión y `200`
+  solo con permiso documental. Los assets de Swagger también exigen sesión.
+- El permiso documental se configura con `DocumentationAccess__AccountIds` y no
+  concede acceso a `/api/v1/admin/*`. Los administradores de
+  `Admin__AccountIds` conservan acceso documental.
+- El formulario de login usa las credenciales existentes, CSRF y el rate limit
+  de login. Emite la cookie `__Host-unihome-swagger` HttpOnly, Secure,
+  SameSite=Strict, 15 minutos por defecto (`SwaggerAccess__CookieLifetimeMinutes`,
+  1–60), y nunca devuelve un JWT al navegador.
+- El logout se realiza desde `/swagger/logout` con CSRF y elimina la cookie. La
+  cookie no se acepta en `/api/*`.
 - No se permite acceso anónimo ni se oculta la URL como sustituto de
   autorización. La activación en Azure requiere autorización productiva.
 
-El documento declara el esquema Bearer. El botón "Authorize" de Swagger UI
-permite adjuntar un JWT administrativo a las solicitudes "Try it out"; si se
-omite, la petición sigue las reglas normales de autorización y no eleva
-privilegios. El entorno debe servirse siempre por HTTPS.
+El documento declara el esquema Bearer. Un administrador puede adjuntar su JWT
+en "Authorize" para ejecutar "Try it out"; un lector documental puede consultar
+los esquemas pero la cookie de documentación no autentica `/api/*`. El entorno
+debe servirse siempre por HTTPS.
 
 Activar/desactivar en el entorno ya desplegado:
 
 ```powershell
-# Activar (demo)
+# Activar solo después de configurar DocumentationAccess__AccountIds
 az containerapp update --name unihome-api --resource-group rg-unihome-dev `
   --set-env-vars "Api__EnableSwagger=true"
 
@@ -81,6 +85,7 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Redis__RestToken` | S? | `RedisOptions` (`Redis`) | Requerido con `Redis__RestUrl` |
 | `Redis__CommandTimeoutMs` | No | `RedisOptions` (`Redis`) | Opcional; predeterminado 2000 ms por intento |
 | `Admin__AccountIds` | No | `AdminAccessOptions` (`Admin`) | Solo para cuentas administrativas autorizadas; lista vac?a deniega todo |
+| `DocumentationAccess__AccountIds` | No | `DocumentationAccessOptions` (`DocumentationAccess`) | Lectores de documentación de solo lectura; no concede rutas `/admin/*` |
 | `Cloudinary__CloudName` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
 | `Cloudinary__ApiKey` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
 | `Cloudinary__ApiSecret` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
@@ -111,7 +116,7 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Proxy__TrustForwardedHeaders` | No | `ProxyOptions` (`Proxy`) | Sí, en `true`, solo si el contenedor corre detrás del ingress de Container Apps |
 | `Proxy__KnownProxies__0` | No | `ProxyOptions` (`Proxy`) | `127.0.0.1`; obligatorio si `TrustForwardedHeaders=true` (el ingress llega por loopback) |
 | `Proxy__KnownProxies__1` | No | `ProxyOptions` (`Proxy`) | `::1`; obligatorio si `TrustForwardedHeaders=true` (loopback IPv6) |
-| `Api__EnableSwagger` | No | `ApiOptions` (`Api`) | No; `false` por defecto. Si se activa, exige administrador y cookie de documentación; requiere autorización productiva |
+| `Api__EnableSwagger` | No | `ApiOptions` (`Api`) | No; `false` por defecto. Si se activa, exige sesión documental (administrador o lector) y autorización productiva |
 
 Si no existe ninguna clave bajo `Smtp`, el registro funciona sin enviar correo
 real (`correoConfirmacionEnviado: false`); si existe alguna, todas las

@@ -195,7 +195,9 @@ class FakeHttpClient:
             return 200, json.dumps(SPEC).encode("utf-8")
         if base == "/swagger/index.html":
             if not token:
-                return 401, b"{}"
+                return 302, b""
+            return 200, b"<html></html>"
+        if base == "/swagger/login":
             return 200, b"<html></html>"
         if base == "/":
             if not token:

@@ -217,30 +217,31 @@ matriz de las 56 HU de Sprints 1–5.
 La documentación interna se habilita explícitamente con
 `Api__EnableSwagger=true`; el valor por defecto es `false`. Cuando está activa:
 
-- `/openapi/v1.json`, `/swagger`, sus assets y `/` exigen la policy
-  administrativa existente (`Admin__AccountIds`). No hay acceso anónimo.
-- Un JWT administrativo puede consultar el contrato con
-  `Authorization: Bearer` y descargarlo para Android o Postman.
-- Para abrir Swagger UI en el navegador, el administrador canjea una vez su
-  Bearer por una cookie `__Host-unihome-swagger` HttpOnly, Secure,
-  SameSite=Strict y de 15 minutos por defecto:
-
-  ```powershell
-  curl.exe -i -X POST "$env:UNIHOME_BASE_URL/api/v1/auth/swagger-session" `
-    -H "Authorization: Bearer $env:UNIHOME_ADMIN_JWT" `
-    -c cookies.txt
-  ```
-
-  La cookie solo autentica `/swagger` y `/openapi`; no se acepta en `/api/*`.
-  `DELETE /api/v1/auth/swagger-session` la elimina. En local debe usarse HTTPS
-  (la cookie `__Host-` exige `Secure`); el contrato también se puede descargar
-  directamente con `Authorization: Bearer` sin canjear la cookie.
+- `/swagger/login` es el único recurso público: formulario mínimo con CSRF,
+  sin UI ni documento OpenAPI.
+- Abrir `/swagger` sin sesión redirige a `/swagger/login`; OpenAPI y los assets
+  responden `401`/redirección de autenticación y nunca se sirven antes del login.
+- El login usa las mismas credenciales y reglas de estado que `/api/v1/auth/login`
+  (`LoginService.AuthenticateAsync`), con el rate limit de login existente.
+  Nunca crea una sesión de refresh ni devuelve un JWT al navegador.
+- La autorización documental es `Admin__AccountIds` **o**
+  `DocumentationAccess__AccountIds__0`, `__1`, ...: administradores y lectores
+  autorizados acceden; una sesión válida sin permiso recibe `403`; sin sesión,
+  `401`. El formulario devuelve un error genérico para credenciales no
+  autorizadas. Un lector documental no obtiene acceso a `/api/v1/admin/*`.
+- La sesión se guarda en la cookie `__Host-unihome-swagger` (HttpOnly, Secure,
+  SameSite=Strict, 15 minutos por defecto). No se usa localStorage/sessionStorage.
+  El formulario de logout exige CSRF y elimina la cookie; la cookie no autentica
+  `/api/*`.
+- Para clientes Bearer (Android/Postman) sigue disponible
+  `POST /api/v1/auth/swagger-session` y `DELETE /api/v1/auth/swagger-session`.
 - `SwaggerAccess__CookieLifetimeMinutes` se valida entre 1 y 60. No se guardan
   usuarios, contraseñas ni tokens en configuración.
 - La interfaz y el JSON envían `Cache-Control: no-store` y
   `X-Robots-Tag: noindex, nofollow`. La CSP de Swagger permite estilos inline
-  necesarios para su renderizado, pero mantiene `script-src 'self'` y
-  `frame-ancestors 'none'`; el resto de la API conserva `default-src 'none'`.
+  necesarios para su renderizado y formularios same-origin, pero mantiene
+  `script-src 'self'`, `form-action 'self'` y `frame-ancestors 'none'`; el resto
+  de la API conserva `default-src 'none'`.
 - La activación en Azure requiere autorización productiva. El valor
   `Api__EnableSwagger=false` sigue siendo el recomendado fuera de una ventana
   autorizada.
@@ -284,7 +285,11 @@ La documentación interna se habilita explícitamente con
 - `Admin__AccountIds__0`, `Admin__AccountIds__1`, ... contiene los identificadores
   internos con privilegio administrativo. La policy revalida el claim `sub` contra
   esa lista en cada petición; no se acepta rol del cliente y una lista vacía deniega
-  todas las rutas `/admin/*`. La provisión definitiva de administradores pertenece a
+  todas las rutas `/admin/*`.
+- `DocumentationAccess__AccountIds__0`, `DocumentationAccess__AccountIds__1`, ...
+  contiene lectores de documentación sin privilegios administrativos. Se valida
+  por GUID; una lista vacía no concede acceso. Los administradores conservan el
+  acceso documental sin necesidad de duplicarlos aquí. La provisión definitiva de administradores pertenece a
   M13 y queda pendiente de aprobación.
 - `Auth__RateLimit__LoginPermitLimit` / `LoginWindowSeconds` valen 10 intentos por 60
   segundos por IP; `RefreshPermitLimit` / `RefreshWindowSeconds` valen 20 por 60
@@ -527,7 +532,7 @@ y no se declaran aprobadas. El workflow manual
 [`.github/workflows/ocr-documental.yml`](.github/workflows/ocr-documental.yml)
 prepara la ejecución autorizada en CI con ambos motores reales.
 
-Estado local del cierre: **788 unitarias** y **240 integraciones ejecutadas**
+Estado local del cierre: **790 unitarias** y **251 integraciones ejecutadas**
 (9 opt-in de Mongo/Cloudinary omitidas de forma explícita). La matriz de las
 56 HU de Sprints 1–5 está en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md).
 La matriz de aceptación HTTPS de las 41 operaciones y la colección

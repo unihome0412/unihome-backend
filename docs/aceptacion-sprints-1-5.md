@@ -87,12 +87,15 @@ ejecuta el contrato; `HTTPS` queda pendiente hasta la ventana autorizada.
 
 | Control | Condición esperada | Evidencia |
 |---|---|---|
-| Swagger/OpenAPI deshabilitado | `/swagger`, `/openapi/v1.json` y `/` responden 404 | `SwaggerUiTests`, `SwaggerAccessTests` |
-| Swagger/OpenAPI habilitado sin sesión | 401 en interfaz, JSON, assets y raíz | `SwaggerAccessTests` |
-| Usuario autenticado no administrador | 403 en Swagger/OpenAPI | `SwaggerAccessTests` |
+| Swagger/OpenAPI deshabilitado | `/swagger`, `/swagger/login`, `/openapi/v1.json` y `/` responden 404 | `SwaggerUiTests`, `SwaggerAccessTests` |
+| Swagger/OpenAPI habilitado sin sesión | `/swagger` redirige a `/swagger/login`; OpenAPI y assets no se sirven sin sesión | `SwaggerAccessTests`, `SwaggerBrowserLoginTests` |
+| Login documental en navegador | Formulario público, CSRF, credenciales existentes y cookie HttpOnly; sin JWT en HTML/JS | `SwaggerBrowserLoginTests` |
+| Usuario normal | 403 en Swagger/OpenAPI; login documental rechazado con error genérico | `SwaggerAccessTests`, `SwaggerBrowserLoginTests` |
+| Lector documental | 200 en Swagger/OpenAPI; 403 en `/api/v1/admin/*` | `SwaggerAccessTests`, `SwaggerBrowserLoginTests` |
 | Administrador con Bearer | 200 en JSON/UI y `Set-Cookie` `__Host-...` con `Secure`, `HttpOnly`, `SameSite=Strict` | `SwaggerAccessTests` |
-| Cookie de documentación | 200 en Swagger/OpenAPI; 401 en `/api/*` | `SwaggerAccessTests` |
-| Cookie manipulada o cuenta suspendida | 401 | `SwaggerAccessTests` |
+| Cookie de documentación | 200 en Swagger/OpenAPI; 401 en `/api/*` | `SwaggerAccessTests`, `SwaggerBrowserLoginTests` |
+| Logout y CSRF | `POST /swagger/logout` con token; sin token 400; cookie revocada | `SwaggerBrowserLoginTests` |
+| Cookie manipulada, expirada o cuenta suspendida | 401 | `SwaggerAccessTests`, `SwaggerBrowserLoginTests` |
 | Cache de documentación | `Cache-Control: no-store`, `X-Robots-Tag: noindex` | `SwaggerAccessTests` |
 | HSTS | `max-age=31536000; includeSubDomains`, sin preload, con HTTPS real o `X-Forwarded-Proto: https` | `ForwardedHeadersTests` |
 | Cabeceras de seguridad | `nosniff`, `DENY`, `no-referrer`, `Permissions-Policy`, CSP | `ProblemDetailsTests`, `ForwardedHeadersTests` |
@@ -160,3 +163,23 @@ No se ejecutaron login, registro, recuperación, cargas ni decisiones
 administrativas contra producción. Esas pruebas requieren una cuenta sintética
 autorizada y una ventana aprobada; la colección de esta carpeta queda preparada
 para ese momento.
+
+## 8. Aceptación en navegador (Brave/Chrome)
+
+Con `Api__EnableSwagger=true` y al menos una cuenta en `Admin__AccountIds` o
+`DocumentationAccess__AccountIds`:
+
+1. Abrir `https://<fqdn>/swagger`. Sin cookie, el navegador debe redirigir a
+   `/swagger/login`.
+2. Confirmar que `/openapi/v1.json` no se sirve antes del login (`401`) y que
+   `/swagger/index.html` redirige al formulario.
+3. Introducir correo y contraseña de una cuenta autorizada. El formulario usa
+   CSRF y el limitador de login; no devuelve JWT ni lo guarda en el navegador.
+4. Tras el login, comprobar que Swagger UI carga y que `/openapi/v1.json`
+   responde `200`. La cookie `__Host-unihome-swagger` debe ser HttpOnly, Secure,
+   SameSite=Strict y no debe servir en `/api/*`.
+5. Un usuario normal debe recibir un error genérico de login; un lector
+   documental no debe poder abrir `/api/v1/admin/*`.
+6. Abrir el enlace "Cerrar sesión" de Swagger, confirmar el formulario y
+   comprobar que `/swagger` vuelve a redirigir al login.
+7. Repetir con ventana privada para verificar que no hay sesión residual.

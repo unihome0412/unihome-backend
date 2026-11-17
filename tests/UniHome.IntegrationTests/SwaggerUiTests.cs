@@ -28,6 +28,9 @@ public sealed class SwaggerUiTests :
         using var swagger = await client.GetAsync("/swagger");
         Assert.Equal(HttpStatusCode.NotFound, swagger.StatusCode);
 
+        using var login = await client.GetAsync("/swagger/login");
+        Assert.Equal(HttpStatusCode.NotFound, login.StatusCode);
+
         using var openApi = await client.GetAsync("/openapi/v1.json");
         Assert.Equal(HttpStatusCode.NotFound, openApi.StatusCode);
     }

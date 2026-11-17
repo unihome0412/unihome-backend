@@ -138,6 +138,18 @@ builder.Services
             new JsonStringEnumConverter(allowIntegerValues: false));
     });
 
+builder.Services.AddAntiforgery(options =>
+{
+    // El formulario de login y el de logout son same-site y solo publican a
+    // /swagger. La cookie antiforgery no autentica ni se acepta en /api/*.
+    options.Cookie.Name = "__Host-unihome-antiforgery";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
+    options.Cookie.Path = "/";
+    options.Cookie.IsEssential = true;
+});
+
 builder.Services.AddScoped<RegisterAccountService>();
 builder.Services.AddScoped<LoginService>();
 builder.Services.AddScoped<RefreshSessionService>();
@@ -283,7 +295,18 @@ builder.Services
         $"{SwaggerAccessOptions.MinLifetimeMinutes} y {SwaggerAccessOptions.MaxLifetimeMinutes}.")
     .ValidateOnStart();
 
+builder.Services
+    .AddOptions<DocumentationAccessOptions>()
+    .Bind(builder.Configuration.GetSection(DocumentationAccessOptions.SectionName))
+    .Validate(
+        options => DocumentationAccessOptions.AreValidAccountIds(options.AccountIds),
+        $"{DocumentationAccessOptions.SectionName}:AccountIds contiene identificadores inválidos.")
+    .ValidateOnStart();
+
 builder.Services.AddSingleton<SwaggerAccessTicketService>();
+builder.Services.AddSingleton<SwaggerAccessCookie>();
+builder.Services.AddSingleton<DocumentationAccessEvaluator>();
+builder.Services.AddSingleton<IAuthorizationHandler, DocumentationAccessHandler>();
 
 builder.Services
     .AddAuthorizationBuilder()
@@ -294,10 +317,10 @@ builder.Services
     })
     .AddPolicy(SwaggerAccessOptions.PolicyName, policy =>
     {
-        // La documentación usa exactamente el mismo privilegio administrativo
-        // que las rutas /admin, no una lista de usuarios paralela.
+        // Administrador o lector documental. Un lector no recibe acceso a
+        // /api/v1/admin ni a ninguna operación de escritura de la API.
         policy.RequireAuthenticatedUser();
-        policy.AddRequirements(new AdminAccessRequirement());
+        policy.AddRequirements(new DocumentationAccessRequirement());
     });
 
 builder.Services.Configure<AuthRateLimitOptions>(
@@ -723,7 +746,7 @@ app.Use(async (context, next) =>
         var path = context.Request.Path;
         var isSwaggerUi = path.StartsWithSegments("/swagger") || path == "/";
         headers["Content-Security-Policy"] = isSwaggerUi
-            ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'none'"
+            ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
             : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
         if (isSwaggerUi || path.StartsWithSegments("/openapi"))
@@ -822,10 +845,10 @@ if (apiOptions.EnableSwagger)
     // AddOpenApi arriba), así que el botón "Authorize" de Swagger UI los toma
     // de ahí sin configuración adicional.
     //
-    // Ni el JSON ni la interfaz son anónimos. La policy es la misma allowlist
-    // administrativa existente; un JWT administrativo puede canjearse por la
-    // cookie de corta vida en POST /api/v1/auth/swagger-session para que el
-    // navegador cargue los recursos de Swagger UI.
+    // Ni el JSON ni la interfaz son anónimos. La policy documental admite al
+    // administrador configurado o a un lector de DocumentationAccess. El
+    // navegador inicia sesión en /swagger/login; un cliente Bearer también
+    // puede canjearlo por la cookie de corta vida para cargar Swagger UI.
     app.MapOpenApi()
         .RequireAuthorization(SwaggerAccessOptions.PolicyName);
     app.UseMiddleware<SwaggerAccessMiddleware>();
@@ -833,6 +856,8 @@ if (apiOptions.EnableSwagger)
     {
         options.SwaggerEndpoint("/openapi/v1.json", "UniHome API v1");
         options.RoutePrefix = "swagger";
+        options.IndexStream = () => new MemoryStream(
+            Encoding.UTF8.GetBytes(SwaggerUiIndexHtml.Content));
     });
     app.MapGet("/", () => Results.Redirect("/swagger"))
         .RequireAuthorization(SwaggerAccessOptions.PolicyName)

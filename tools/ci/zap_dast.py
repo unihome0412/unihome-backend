@@ -1061,8 +1061,11 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", "/openapi/v1.json", expected={401}, openapi=False,
         note="OpenAPI sin sesión")
     http.request(
-        "GET", "/swagger/index.html", expected={401}, openapi=False,
-        note="Swagger UI sin sesión")
+        "GET", "/swagger/index.html", expected={302}, openapi=False,
+        note="Swagger UI sin sesión redirige a login")
+    http.request(
+        "GET", "/swagger/login", expected={200}, openapi=False,
+        note="Login documental público")
 
     _, spec_payload, _ = http.request(
         "GET", "/openapi/v1.json", expected={200}, token=access_admin,

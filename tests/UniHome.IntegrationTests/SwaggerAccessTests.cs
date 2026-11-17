@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using UniHome.Domain.Accounts;
 using UniHome.IntegrationTests.TestSupport;
@@ -7,10 +8,9 @@ using UniHome.IntegrationTests.TestSupport;
 namespace UniHome.IntegrationTests;
 
 /// <summary>
-/// La documentación interna exige el mismo privilegio administrativo que
-/// /admin. El Bearer se usa para descargar el contrato y puede canjearse por una
-/// cookie HttpOnly para que el navegador cargue Swagger UI; la cookie no sirve
-/// para operar la API.
+/// La documentación interna exige una sesión Bearer/cookie con permiso
+/// documental (administrador o lector autorizado). El Bearer puede canjearse
+/// por una cookie HttpOnly; la cookie no sirve para operar /api/*.
 /// </summary>
 public sealed class SwaggerAccessTests : IClassFixture<SwaggerEnabledApiFactory>
 {
@@ -22,15 +22,37 @@ public sealed class SwaggerAccessTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
-    public async Task SinAutenticacion_SwaggerYContratoResponden401()
+    public async Task SinAutenticacion_SwaggerRedirigeALoginYOpenApiResponde401()
     {
-        using var client = _factory.CreateClient();
+        using var client = _factory.CreateClient(CreateHttpsClientOptions());
 
-        foreach (var path in new[] { "/", "/swagger", "/swagger/index.html", "/swagger/swagger-ui.css", "/openapi/v1.json" })
+        foreach (var path in new[] { "/swagger", "/swagger/index.html", "/swagger/swagger-ui.css" })
         {
             using var response = await client.GetAsync(path);
-            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+            Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+            Assert.Equal("/swagger/login", response.Headers.Location!.OriginalString);
         }
+
+        using var root = await client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.Unauthorized, root.StatusCode);
+
+        using var openApi = await client.GetAsync("/openapi/v1.json");
+        Assert.Equal(HttpStatusCode.Unauthorized, openApi.StatusCode);
+    }
+
+    [Fact]
+    public async Task LoginDocumental_EsPublicoYNoExponeLaUi()
+    {
+        using var client = _factory.CreateClient(CreateHttpsClientOptions());
+
+        using var response = await client.GetAsync("/swagger/login");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType!.MediaType);
+        var html = await response.Content.ReadAsStringAsync();
+        Assert.Contains("Documentación UniHome", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("swagger-ui", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("accessToken", html, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -45,6 +67,48 @@ public sealed class SwaggerAccessTests : IClassFixture<SwaggerEnabledApiFactory>
             using var response = await client.GetAsync(path);
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
+    }
+
+    [Fact]
+    public async Task LectorDocumental_AccedeSinPrivilegiosAdministrativos()
+    {
+        using var client = CreateHttpsClient();
+        client.DefaultRequestHeaders.Authorization = Bearer(
+            _factory.DocumentationReaderAccount.Id);
+
+        using var ui = await client.GetAsync("/swagger/index.html");
+        Assert.Equal(HttpStatusCode.OK, ui.StatusCode);
+
+        using var openApi = await client.GetAsync("/openapi/v1.json");
+        Assert.Equal(HttpStatusCode.OK, openApi.StatusCode);
+
+        using var admin = await client.GetAsync("/api/v1/admin/universidades");
+        Assert.Equal(HttpStatusCode.Forbidden, admin.StatusCode);
+
+        using var adminWrite = await client.PostAsJsonAsync(
+            "/api/v1/admin/universidades",
+            new { nombreYCampus = "No permitida" });
+        Assert.Equal(HttpStatusCode.Forbidden, adminWrite.StatusCode);
+    }
+
+    [Fact]
+    public async Task LectorDocumental_CanjeaBearerPorCookieSinAccesoAdministrativo()
+    {
+        using var client = CreateHttpsClient();
+        client.DefaultRequestHeaders.Authorization = Bearer(
+            _factory.DocumentationReaderAccount.Id);
+
+        using var created = await client.PostAsync(
+            "/api/v1/auth/swagger-session",
+            content: null);
+        Assert.Equal(HttpStatusCode.NoContent, created.StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = null;
+        using var docs = await client.GetAsync("/openapi/v1.json");
+        Assert.Equal(HttpStatusCode.OK, docs.StatusCode);
+
+        using var admin = await client.GetAsync("/api/v1/admin/universidades");
+        Assert.Equal(HttpStatusCode.Unauthorized, admin.StatusCode);
     }
 
     [Fact]
@@ -76,6 +140,7 @@ public sealed class SwaggerAccessTests : IClassFixture<SwaggerEnabledApiFactory>
         var csp = response.Headers.GetValues("Content-Security-Policy").Single();
         Assert.Contains("style-src 'self' 'unsafe-inline'", csp, StringComparison.Ordinal);
         Assert.Contains("script-src 'self'", csp, StringComparison.Ordinal);
+        Assert.Contains("form-action 'self'", csp, StringComparison.Ordinal);
         Assert.Equal("noindex, nofollow", response.Headers.GetValues("X-Robots-Tag").Single());
     }
 
@@ -87,8 +152,6 @@ public sealed class SwaggerAccessTests : IClassFixture<SwaggerEnabledApiFactory>
         using var created = await client.PostAsync("/api/v1/auth/swagger-session", content: null);
         Assert.Equal(HttpStatusCode.NoContent, created.StatusCode);
 
-        // A partir de aquí solo queda la cookie; el Bearer se retira para
-        // demostrar que la API no acepta la sesión de documentación.
         client.DefaultRequestHeaders.Authorization = null;
 
         using var ui = await client.GetAsync("/swagger/index.html");
@@ -102,7 +165,7 @@ public sealed class SwaggerAccessTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
-    public async Task SesionSwagger_SinBearerEs401YConUsuarioNoAdminEs403()
+    public async Task SesionSwagger_SinBearerEs401YConUsuarioNoAutorizadoEs403()
     {
         using var anonymous = CreateHttpsClient();
         using var anonymousResponse = await anonymous.PostAsync(
@@ -146,7 +209,7 @@ public sealed class SwaggerAccessTests : IClassFixture<SwaggerEnabledApiFactory>
 
         try
         {
-            using var response = await client.GetAsync("/swagger/index.html");
+            using var response = await client.GetAsync("/openapi/v1.json");
             Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
         finally
@@ -169,7 +232,8 @@ public sealed class SwaggerAccessTests : IClassFixture<SwaggerEnabledApiFactory>
         client.DefaultRequestHeaders.Authorization = null;
 
         using var response = await client.GetAsync("/swagger/index.html");
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("/swagger/login", response.Headers.Location!.OriginalString);
     }
 
     [Fact]

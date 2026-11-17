@@ -55,6 +55,48 @@ public sealed class LoginServiceTests
     }
 
     [Fact]
+    public async Task Authenticate_ConCredencialesValidas_NoCreaSesionNiEmiteTokens()
+    {
+        var repository = new InMemoryAccountRepository();
+        var account = AccountTestData.Create("ana@uni.edu");
+        await repository.AddAsync(account);
+        var sessions = new FakeRefreshSessionRepository();
+        var issuer = new FakeAccessTokenIssuer();
+        var service = CreateService(
+            repository,
+            new RecordingPasswordHasher(),
+            sessions,
+            issuer: issuer);
+
+        var result = await service.AuthenticateAsync(
+            new LoginCommand("ana@uni.edu", AccountTestData.Password));
+
+        Assert.Equal(LoginStatus.Success, result.Status);
+        Assert.Equal(account.Id, result.AccountId);
+        Assert.Equal(0, sessions.Count);
+        Assert.Empty(issuer.Calls);
+    }
+
+    [Fact]
+    public async Task Authenticate_ConContrasenaIncorrecta_NoCreaSesion()
+    {
+        var repository = new InMemoryAccountRepository();
+        await repository.AddAsync(AccountTestData.Create("ana@uni.edu"));
+        var sessions = new FakeRefreshSessionRepository();
+        var service = CreateService(
+            repository,
+            new RecordingPasswordHasher(),
+            sessions);
+
+        var result = await service.AuthenticateAsync(
+            new LoginCommand("ana@uni.edu", "OtraClave1"));
+
+        Assert.Equal(LoginStatus.InvalidCredentials, result.Status);
+        Assert.Null(result.AccountId);
+        Assert.Equal(0, sessions.Count);
+    }
+
+    [Fact]
     public async Task Login_ConContrasenaIncorrecta_DevuelveCredencialesInvalidasSinSesion()
     {
         var repository = new InMemoryAccountRepository();

@@ -17,6 +17,8 @@ public sealed class SwaggerEnabledApiFactory : UniHomeApiFactory
 {
     public Account AdminAccount { get; private set; } = null!;
 
+    public Account DocumentationReaderAccount { get; private set; } = null!;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -25,21 +27,31 @@ public sealed class SwaggerEnabledApiFactory : UniHomeApiFactory
         {
             configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Api:EnableSwagger"] = "true"
+                ["Api:EnableSwagger"] = "true",
+                ["DocumentationAccess:AccountIds:0"] = TestDocumentationReaderAccountId.ToString("N")
             });
         });
 
-        AdminAccount = Accounts
-            .FindByIdAsync(TestAdminAccountId)
-            .GetAwaiter()
-            .GetResult() ?? TestAccountFactory.Create(
-                "swagger.admin@unihome.test",
-                id: TestAdminAccountId);
+        AdminAccount = EnsureAccount(
+            TestAdminAccountId,
+            "swagger.admin@unihome.test");
+        DocumentationReaderAccount = EnsureAccount(
+            TestDocumentationReaderAccountId,
+            "swagger.reader@unihome.test");
+    }
 
-        if (Accounts.FindByIdAsync(TestAdminAccountId).GetAwaiter().GetResult() is null)
+    private Account EnsureAccount(Guid id, string email)
+    {
+        var existing = Accounts.FindByIdAsync(id).GetAwaiter().GetResult();
+
+        if (existing is not null)
         {
-            Accounts.AddAsync(AdminAccount).GetAwaiter().GetResult();
+            return existing;
         }
+
+        var account = TestAccountFactory.Create(email, id: id);
+        Accounts.AddAsync(account).GetAwaiter().GetResult();
+        return account;
     }
 
     /// <summary>
