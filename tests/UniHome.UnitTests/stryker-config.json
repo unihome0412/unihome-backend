@@ -4,7 +4,9 @@
     "mutate": [
       "**/Identity/Login/LoginService.cs",
       "**/Verification/**/*.cs",
-      "**/Publications/SubmitFirstPublication/*.cs"
+      "**/Publications/SubmitFirstPublication/*.cs",
+      "**/Publications/MyPublicationMap/*.cs",
+      "**/Profiles/GetProfile/GetProfileService.cs"
     ],
     "configuration": "Release",
     "reporters": [

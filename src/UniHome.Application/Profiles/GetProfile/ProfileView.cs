@@ -1,4 +1,5 @@
 using UniHome.Domain.Accounts;
+using UniHome.Domain.Properties;
 
 namespace UniHome.Application.Profiles.GetProfile;
 
@@ -17,4 +18,5 @@ public sealed record ProfileView(
     Account Account,
     AccountLabel Label,
     bool IsLinkedToUnit,
-    bool CanPublish);
+    bool CanPublish,
+    PublicationState? FirstPublicationState);

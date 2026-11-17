@@ -13,6 +13,23 @@ public interface IUnitRepository
         Guid ownerAccountId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Todas las unidades del titular, ordenadas por fecha de creación.</summary>
+    Task<IReadOnlyList<Unit>> ListByOwnerAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Transición administrativa de publicación con CAS sobre el estado esperado.
+    /// Solo se usa desde revisión a aprobada/rechazada; devuelve false si el estado
+    /// o el titular no coinciden.
+    /// </summary>
+    Task<bool> TryTransitionPublicationStateAsync(
+        Guid id,
+        Guid ownerAccountId,
+        Domain.Properties.PublicationState expected,
+        Domain.Properties.PublicationState next,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Lleva una unidad a En revisión si pertenece al titular y no está aprobada.
     /// Es idempotente si ya estaba En revisión. Devuelve false si no cumple.

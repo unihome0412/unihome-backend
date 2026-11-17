@@ -31,7 +31,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Verificador de proveedor PactNet 5.0.1 con API Kestrel aislada; requiere contratos JSON reales del consumidor Android en `pacts/`; sin ellos **falla** y permanece desactivado | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
-| OCR documental M06 | No usa variable: `workflow_dispatch` es la autorización | Workflow separado `.github/workflows/ocr-documental.yml`; instala `tesseract-ocr`/`tesseract-ocr-eng`/`tesseract-ocr-spa` desde apt en el runner, ejecuta la prueba unitaria real (incluido español) y el flujo HTTP real, exige 3 pruebas ejecutadas, 0 omitidas y 0 fallidas; publica TRX | Solo manual |
+| OCR documental M06 | No usa variable: `workflow_dispatch` es la autorización | Workflow separado `.github/workflows/ocr-documental.yml`; instala `tesseract-ocr`/`tesseract-ocr-eng`/`tesseract-ocr-spa`/`poppler-utils` desde apt en el runner, ejecuta las pruebas reales de imagen y PDF escaneado y el flujo HTTP real, exige al menos 5 pruebas ejecutadas, 0 omitidas y 0 fallidas; publica TRX | Solo manual |
 
 El Container Smoke levanta un stub HTTPS local de Upstash en `127.0.0.1` para
 que `/health/ready` evalúe Redis sin usar el servicio real ni desactivar la
@@ -85,13 +85,24 @@ OpenAPI de ese momento visitadas, 26 mensajes procesados por ZAP, 0 Critical,
 `zap-report.json`, `zap-report.md`, `dast-report.md`, `route-coverage.json` y
 evidencias de arranque/limpieza.
 
-**Sprint 4:** el catálogo OpenAPI pasa a **37 operaciones**. El fixture DAST
-ahora ejecuta el flujo M06 real: carga INE y comprobante por multipart, envía la
+**Sprint 4:** el catálogo OpenAPI pasó a **37 operaciones**. El fixture DAST
+ejecuta el flujo M06 real: carga INE y comprobante por multipart, envía la
 primera publicación, consulta bandeja/detalle administrativo y obtiene y
 consume el enlace firmado del documento. Las 7 rutas M04/M07 siguen usando un
 fixture público sembrado **solo** en `unihome_dast`. La ejecución #280 detectó
-30/37 rutas porque el fixture aún no cubría M06; la corrección está preparada y
-la nueva ejecución 37/37 queda **PENDIENTE_CI**. No se declara PASS anticipado.
+30/37 rutas porque el fixture aún no cubría M06; la corrección quedó preparada y
+la ejecución 37/37 permanece **PENDIENTE_CI**. No se declara PASS anticipado.
+
+**Sprint 5:** el catálogo OpenAPI pasa a **41 operaciones**. El fixture DAST
+ejecuta el flujo M06 completo: una cuenta carga INE y comprobante, envía la
+publicación, consulta su estado propio y su pin privado, y el administrador
+aprueba con el endpoint real (HU-024). Una segunda cuenta repite el flujo y el
+administrador la rechaza con motivo (HU-025); el solicitante consulta el estado
+y el motivo (HU-026), y su pin privado se visita antes de la decisión (HU-028).
+La exploración M04 se valida después de la aprobación real, sin escribir
+directamente en MongoDB. Las 7 rutas M04/M07 conservan su fixture público en
+`unihome_dast`. La ejecución real 41/41 queda **PENDIENTE_CI** y no se declara
+PASS anticipado.
 
 **Alcance pendiente y riesgos:** el análisis pasivo no demuestra lógica de
 negocio ni autorización a nivel de objeto; la cobertura se limita a las rutas
@@ -147,7 +158,7 @@ Compile/Test/Fuzz-lean exit `0`, 7/7 operaciones OpenAPI de ese momento
 intentadas y con al menos una respuesta 2xx, 2.054 solicitudes y 16 secuencias
 observadas, 0 HTTP 5xx y 0 bug buckets.
 
-**Sprint 4:** el catálogo ahora tiene **37 operaciones**. La preparación crea una
+**Sprint 5:** el catálogo ahora tiene **41 operaciones**. La preparación crea una
 universidad, propiedad y unidad sintéticas, publica la unidad solo en la base
 efímera `unihome_restler` y añade diccionarios para `universidadId`, `unitId` y
 los filtros de exploración. Las rutas M06 se intentan con el token administrativo
@@ -155,29 +166,39 @@ real; las cargas multipart y las rutas sin fixture pueden quedar sin 2xx y se
 reportan como WARN, nunca como PASS. La ejecución #280 terminó con estado PASS,
 37/37 operaciones intentadas, 28/37 con 2xx, 0 HTTP 5xx y 0 bug buckets. La
 cobertura funcional M06 con 2xx se valida en DAST y en las pruebas de integración;
-RESTler conserva la cobertura de esquema y fuzzing.
+RESTler conserva la cobertura de esquema y fuzzing. **Sprint 5** añade cuatro
+operaciones hasta llegar a 41; la ejecución real 41/41 queda **PENDIENTE_CI** y
+no se declara PASS anticipado.
 
 ### OCR real M06
 
 El job obligatorio `build-test` instala `tesseract-ocr`, `tesseract-ocr-eng`,
-`tesseract-ocr-spa` y `fonts-dejavu-core` en Ubuntu antes de ejecutar la suite.
-Así `RealOcrTests` y `RealOcrVerificationEndpointTests` ejecutan Tesseract real,
-incluido un documento sintético en español con acentos y eñe, en cada PR/push y
-no dependen de que el workflow separado ya exista en `main`.
+`tesseract-ocr-spa`, `poppler-utils` y `fonts-dejavu-core` en Ubuntu antes de
+ejecutar la suite. Así `RealOcrTests`, `RealScannedPdfTests` y
+`RealOcrVerificationEndpointTests` ejecutan Tesseract/Poppler reales, incluidos
+un documento sintético en español con acentos y eñe y un PDF escaneado sin capa
+de texto, en cada PR/push; no dependen de que el workflow separado ya exista en
+`main`. El job exige al menos 5 pruebas OCR/PDF ejecutadas y ninguna omitida.
 
 El workflow `.github/workflows/ocr-documental.yml` no forma parte del gate
 obligatorio y no se ejecuta en PR/push. Se activa solo con `workflow_dispatch` y
 es la evidencia de que el OCR no está simulado:
 
-- Instala `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-spa` y `fonts-dejavu-core` desde los repositorios de la imagen Ubuntu del runner; no usa servicios, API keys ni modelos remotos.
-- Ejecuta `RealOcrTests` (motor real, español con acentos y caso de motor ausente) y `RealOcrVerificationEndpointTests` (multipart HTTP → análisis → expediente administrativo) con TRX.
-- Falla si se ejecutan menos de 3 pruebas reales, si alguna se omite o si alguna
+- Instala `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-spa`, `poppler-utils`
+  y `fonts-dejavu-core` desde los repositorios de la imagen Ubuntu del runner; no
+  usa servicios, API keys ni modelos remotos.
+- Ejecuta `RealOcrTests` y `RealScannedPdfTests` (motor real, PDF escaneado con
+  Poppler y caso de motor ausente) y `RealOcrVerificationEndpointTests` (multipart
+  HTTP → análisis → expediente administrativo) con TRX. La prueba de imagen cubre
+  español con acentos y el caso de motor ausente.
+- Falla si se ejecutan menos de 5 pruebas reales, si alguna se omite o si alguna
   falla. Un runner sin Tesseract no se considera aprobado para OCR.
 - La imagen de la API instala el mismo motor y los modelos español/inglés en el `Dockerfile`; si en un entorno falta el binario, el adaptador marca `NoDisponible` y el nombre queda nulo, sin inventar resultados.
 
-**Estado local (16 de noviembre de 2026):** `RealOcrTests` 3/3 y
-`RealOcrVerificationEndpointTests` 1/1 aprobadas con Tesseract 5.4.0 en Windows.
-La ejecución del workflow en GitHub Actions queda **PENDIENTE_CI**.
+**Estado local (17 de noviembre de 2026):** `RealOcrTests` 3/3,
+`RealScannedPdfTests` 2/2 y `RealOcrVerificationEndpointTests` 1/1 aprobadas con
+Tesseract 5.4.0/Poppler en Windows, 0 omitidas. La ejecución del workflow en
+GitHub Actions queda **PENDIENTE_CI**.
 
 ### Contrato OpenAPI de Gender
 
@@ -224,7 +245,7 @@ Actions.
 - **Push a `main` y `workflow_dispatch` desde `main`**: se ejecuta análisis de la rama principal.
 - **`workflow_dispatch` desde una rama feature**: Sonar no se ejecuta y el gate no lo exige, porque el plan Free no admite análisis de ramas no principales. Stryker puede seguir ejecutándose en su evento manual.
 - **PR desde fork**: el job no se ejecuta porque GitHub no expone `SONAR_TOKEN` a esos PR; el gate falla cerrado si Sonar está habilitado y el job quedó `skipped`. No se usa `pull_request_target`.
-- **Cobertura para el Quality Gate**: el job de Sonar ejecuta las pruebas unitarias y de integración .NET con `XPlat Code Coverage` (Cobertura), además de las pruebas Python de `tools/ci` con `coverage.py`. Los reportes se pasan al scanner; no se desactiva la condición de cobertura nueva.
+- **Cobertura para el Quality Gate**: el job de Sonar instala Tesseract `spa+eng` y Poppler antes de ejecutar las pruebas, para que las pruebas OCR/PDF reales no se omitan y su cobertura cuente. Ejecuta las pruebas unitarias y de integración .NET con `XPlat Code Coverage` (Cobertura), además de las pruebas Python de `tools/ci` con `coverage.py`. Los reportes se pasan al scanner; no se desactiva la condición de cobertura nueva.
 - Se mantiene `sonar.qualitygate.wait=true`: si el Quality Gate real falla, el job de Sonar falla y bloquea el PR.
 
 ## Mutation testing (Stryker.NET)
@@ -242,12 +263,14 @@ dotnet stryker --config-file stryker-config.json
 - Reportes: `tests/UniHome.UnitTests/StrykerOutput/<timestamp>/reports/mutation-report.html` y `mutation-report.json`. No se versionan.
 - El job manual `mutation-test` restaura la herramienta desde el manifiesto, ejecuta pruebas unitarias, corre Stryker y publica ambos reportes. Falla si no hay mutaciones evaluadas, si hay errores de ejecución o si faltan los reportes.
 - Línea base histórica de Login: 57 mutantes en el archivo objetivo, 46 evaluados, 44 detectados, 2 sobrevivientes en `ConfigureAwait(false)` y mutation score de 95.65 %.
-- **Sprint 4:** el alcance de mutación se amplía a `Verification/**` y
-  `SubmitFirstPublication`. Ejecución local del 16 de noviembre de 2026: 315
-  mutantes evaluados, 184 killed, 131 survived, 0 timeout, 0 errores y mutation
-  score **48.55 %**. El umbral `break` sigue en 0 porque el job es informativo;
-  el resultado se reporta sin ocultar los sobrevivientes. Los servicios nuevos
-  se cubren además con pruebas de integración, que Stryker no usa en esta
+- **Sprint 5:** el alcance de mutación se amplía a `Verification/**`,
+  `SubmitFirstPublication`, `MyPublicationMap` y `GetProfileService`. Ejecución
+  local del 17 de noviembre de 2026: 493 mutantes evaluados, 294 killed, 158
+  survived, 41 NoCoverage, 28 CompileError (safe mode), 0 timeout, 0 errores de
+  ejecución y mutation score **59.63 %**. El reporte JSON contiene 594 mutantes.
+  El umbral `break` sigue en 0 porque el job es informativo; el resultado se
+  reporta sin ocultar sobrevivientes ni errores de compilación. Los servicios
+  nuevos se cubren además con pruebas de integración, que Stryker no usa en esta
   configuración.
 
 ## MongoDB CI efímero
@@ -270,7 +293,7 @@ dotnet stryker --config-file stryker-config.json
   `MongoPromotionLockPersistenceTests` se ejecutan contra MongoDB real; el correo
   se sustituye por un doble en memoria y las fotos usan el doble de DEC-04. No se
   envían correos ni se escribe almacenamiento externo real.
-- Un script valida el TRX: exige las seis pruebas, rechaza `NotExecuted`, falla
+- Un script valida el TRX: exige las ocho pruebas (incluidas las dos de M06), rechaza `NotExecuted`, falla
   si hay cero resultados, si la inicialización no terminó o si el paso de pruebas
   no fue exitoso. El resumen incluye versión, base, conteos, duración,
   inicialización y resultado final.
@@ -281,10 +304,11 @@ dotnet stryker --config-file stryker-config.json
   [ejecución manual 43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
   commit de código `f51ac10`, job `mongo-db-test` en verde, TRX con 4 pruebas
   ejecutadas y aprobadas, 0 fallidas, 0 omitidas y limpieza confirmada.
-- **Sprint 4:** el job aplica también M01-002, M06-001 y M07-001 y exige la prueba
-  `MongoExplorationPersistenceTests`. La siguiente ejecución real debe mostrar
-  **6/6 pruebas** (identidad, promoción, recuperación, universidades,
-  publicaciones y exploración/favoritos); queda **PENDIENTE_CI**.
+- **Sprint 4/5:** el job aplica también M01-002, M06-001 y M07-001 y exige las
+  pruebas M06 de documentos cifrados y decisión administrativa. La siguiente
+  ejecución real debe mostrar **8/8 pruebas** (identidad, promoción,
+  recuperación, universidades, publicaciones, verificación documental, decisión
+  y exploración/favoritos); queda **PENDIENTE_CI**.
 
 ## CD Azure preparado (sin despliegue)
 

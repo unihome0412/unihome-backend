@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using UniHome.Domain.Verification;
 using UniHome.Infrastructure.Configuration;
@@ -187,6 +187,98 @@ public sealed class DocumentCryptographyTests
             TipoDocumentoVerificacion.Ine,
             1,
             hash));
+    }
+
+    [Fact]
+    public void AesGcm_RotaClavesConservandoLecturaDeLaVersionAnterior()
+    {
+        var oldKey = Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
+        var newKey = Enumerable.Range(32, 32).Select(value => (byte)value).ToArray();
+        var oldCipher = new AesGcmDocumentCipher(oldKey);
+        var plaintext = Encoding.UTF8.GetBytes("contenido rotado");
+        var hash = Convert.ToHexString(SHA256.HashData(plaintext));
+        var encrypted = oldCipher.Encrypt(
+            plaintext,
+            ExpedienteId,
+            TipoDocumentoVerificacion.Ine,
+            1,
+            hash);
+
+        var rotated = new AesGcmDocumentCipher(
+            newKey,
+            currentVersion: 2,
+            previousKeys: new Dictionary<int, byte[]> { [1] = oldKey });
+        var decrypted = rotated.Decrypt(
+            encrypted.Ciphertext,
+            encrypted.Nonce,
+            encrypted.Tag,
+            ExpedienteId,
+            TipoDocumentoVerificacion.Ine,
+            1,
+            hash,
+            keyVersion: 1);
+
+        Assert.Equal(plaintext, decrypted);
+        Assert.Equal(1, encrypted.KeyVersion);
+        Assert.Equal(2, rotated.CurrentVersion);
+        Assert.Throws<CryptographicException>(() => rotated.Decrypt(
+            encrypted.Ciphertext,
+            encrypted.Nonce,
+            encrypted.Tag,
+            ExpedienteId,
+            TipoDocumentoVerificacion.Ine,
+            1,
+            hash,
+            keyVersion: 2));
+    }
+
+    [Fact]
+    public void DocumentSecurityOptions_ValidaRotacionYClavesAnteriores()
+    {
+        var oldKey = Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
+        var newKey = Enumerable.Range(32, 32).Select(value => (byte)value).ToArray();
+        var valid = new DocumentSecurityOptions
+        {
+            EncryptionKey = Convert.ToBase64String(newKey),
+            CurrentKeyVersion = 2,
+            PreviousEncryptionKeys = [Convert.ToBase64String(oldKey)],
+            UrlSigningKey = "unihome-unit-test-url-signing-key-0123456789"
+        };
+        var invalid = new DocumentSecurityOptions
+        {
+            EncryptionKey = Convert.ToBase64String(newKey),
+            CurrentKeyVersion = 2,
+            PreviousEncryptionKeys = []
+        };
+
+        Assert.True(valid.IsValid());
+        Assert.Equal(oldKey, valid.GetEncryptionKeyBytes(1));
+        Assert.Equal(newKey, valid.GetEncryptionKeyBytes(2));
+        Assert.False(invalid.IsValid());
+        Assert.Throws<InvalidOperationException>(() => valid.GetEncryptionKeyBytes(3));
+    }
+
+    [Fact]
+    public void DocumentSecurityOptions_RechazaClavesAnterioresInvalidas()
+    {
+        var newKey = Enumerable.Range(32, 32).Select(value => (byte)value).ToArray();
+        var invalidBase64 = new DocumentSecurityOptions
+        {
+            EncryptionKey = Convert.ToBase64String(newKey),
+            CurrentKeyVersion = 2,
+            PreviousEncryptionKeys = ["no-base64"]
+        };
+        var wrongLength = new DocumentSecurityOptions
+        {
+            EncryptionKey = Convert.ToBase64String(newKey),
+            CurrentKeyVersion = 2,
+            PreviousEncryptionKeys = [Convert.ToBase64String(new byte[16])]
+        };
+
+        Assert.False(invalidBase64.IsValid());
+        Assert.False(wrongLength.IsValid());
+        Assert.Throws<InvalidOperationException>(() => invalidBase64.GetEncryptionKeyBytes(1));
+        Assert.Throws<InvalidOperationException>(() => wrongLength.GetEncryptionKeyBytes(1));
     }
 
     [Fact]

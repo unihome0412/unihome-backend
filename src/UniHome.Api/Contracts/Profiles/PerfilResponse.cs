@@ -1,6 +1,7 @@
 using UniHome.Api.Contracts.Universities;
 using UniHome.Application.Profiles.GetProfile;
 using UniHome.Domain.Accounts;
+using UniHome.Domain.Properties;
 
 namespace UniHome.Api.Contracts.Profiles;
 
@@ -16,4 +17,5 @@ public sealed record PerfilResponse(
     UniversidadResumenResponse? UniversidadActual,
     AccountLabel EtiquetaCuenta,
     bool VinculadoAUnidad,
-    bool PuedePublicar);
+    bool PuedePublicar,
+    PublicationState? EstadoPrimeraPublicacion);

@@ -4,6 +4,7 @@ using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
+using UniHome.Application.Verification.Abstractions;
 
 namespace UniHome.Application.Favorites;
 
@@ -21,19 +22,22 @@ public sealed class ListFavoritesService
     private readonly IPropertyRepository _properties;
     private readonly IUniversityRepository _universities;
     private readonly UnitPhotoUrlResolver _photos;
+    private readonly IVerificationRepository _verification;
 
     public ListFavoritesService(
         IUnitFavoriteRepository favorites,
         IUnitRepository units,
         IPropertyRepository properties,
         IUniversityRepository universities,
-        UnitPhotoUrlResolver photos)
+        UnitPhotoUrlResolver photos,
+        IVerificationRepository verification)
     {
         _favorites = favorites;
         _units = units;
         _properties = properties;
         _universities = universities;
         _photos = photos;
+        _verification = verification;
     }
 
     public async Task<OperationResult<ExplorationPage<FavoriteView>>> ListAsync(
@@ -84,6 +88,11 @@ public sealed class ListFavoritesService
                 cancellationToken)
             .ConfigureAwait(false);
         var propertyById = properties.ToDictionary(property => property.Id);
+        var verifiedOwners = await _verification
+            .ListApprovedOwnerIdsAsync(
+                units.Select(unit => unit.OwnerAccountId).Distinct().ToArray(),
+                cancellationToken)
+            .ConfigureAwait(false);
         var locationByUniversity = new Dictionary<Guid, GeoCoordinate?>();
 
         foreach (var universityId in units.Select(unit => unit.UniversityId).Distinct())
@@ -118,7 +127,7 @@ public sealed class ListFavoritesService
                     distance,
                     ExplorationProjection.TravelMode(distance),
                     unit.ForWhom,
-                    ArrendadorVerificado: false,
+                    ArrendadorVerificado: verifiedOwners.Contains(unit.OwnerAccountId),
                     EsFavorito: true,
                     ExplorationProjection.CurrentState(unit))));
         }

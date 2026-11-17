@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using UniHome.Api.Contracts.Publications;
 using UniHome.Application.Common;
 using UniHome.Application.Publications.AcceptTerms;
+using UniHome.Application.Publications.MyPublicationMap;
 using UniHome.Application.Publications.SubmitFirstPublication;
 
 namespace UniHome.Api.Controllers;
@@ -15,13 +16,16 @@ public sealed class PublicationsController : AuthenticatedControllerBase
 
     private readonly AcceptTermsService _acceptTerms;
     private readonly SubmitFirstPublicationService _submitFirstPublication;
+    private readonly GetMyPublicationMapService _myPublicationMap;
 
     public PublicationsController(
         AcceptTermsService acceptTerms,
-        SubmitFirstPublicationService submitFirstPublication)
+        SubmitFirstPublicationService submitFirstPublication,
+        GetMyPublicationMapService myPublicationMap)
     {
         _acceptTerms = acceptTerms;
         _submitFirstPublication = submitFirstPublication;
+        _myPublicationMap = myPublicationMap;
     }
 
     /// <summary>
@@ -125,5 +129,38 @@ public sealed class PublicationsController : AuthenticatedControllerBase
             conflictDetail: "La publicación no puede enviarse a revisión en su estado actual.",
             unprocessableDetail:
                 "Completa los términos, al menos una foto y ambos documentos de verificación.");
+    }
+
+    /// <summary>
+    /// EP-M05-10 (HU-028): pin privado de la primera publicación En revisión.
+    /// Otros estudiantes y visitantes no pueden obtenerlo; M04 sigue oculto.
+    /// </summary>
+    [HttpGet("/api/v1/mi-publicacion/estado-mapa")]
+    [Authorize]
+    [ProducesResponseType(typeof(MiPublicacionMapaResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetMyPublicationMap(CancellationToken cancellationToken)
+    {
+        if (!TryGetAccountId(out var accountId))
+        {
+            return CreateProblemResult(
+                StatusCodes.Status401Unauthorized,
+                "La sesión no es válida.");
+        }
+
+        var result = await _myPublicationMap
+            .GetAsync(accountId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ToActionResult(
+            result,
+            value => Ok(MiPublicacionMapaResponse.FromView(value)),
+            notFoundDetail: "No tienes una primera publicación En revisión.",
+            forbiddenDetail: "La cuenta no está autorizada para esta operación.",
+            conflictDetail: "No se pudo consultar la publicación.",
+            unprocessableDetail: "La publicación no tiene una ubicación registrada.");
     }
 }

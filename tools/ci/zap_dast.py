@@ -977,10 +977,11 @@ def _response_id(payload: bytes, operation: str) -> str:
 def _publish_unit_for_exploration(unit_id: str) -> None:
     """Publica el fixture M04/M07 directamente en la base efímera.
 
-    M06 no forma parte del Sprint 3 y no existe un endpoint para aprobar una
-    publicación. El job DAST usa una base exclusiva y desechable, por lo que el
-    fixture se marca Aprobada/Disponible solo para poder ejercer los endpoints
-    públicos y autenticados con respuestas 2xx. No se ejecuta en producción.
+    Lo usa RESTler para que las rutas públicas tengan datos; el job DAST ya no
+    lo necesita porque aprueba el expediente con el endpoint real de Sprint 5.
+    La base es exclusiva y desechable, y el fixture solo se marca
+    Aprobada/Disponible para poder ejercer los endpoints públicos y autenticados
+    con respuestas 2xx. No se ejecuta en producción.
     """
     container = os.environ.get("MONGO_CONTAINER_ID", "").strip()
     database = os.environ.get("MONGO_DAST_DATABASE", "").strip()
@@ -1205,7 +1206,7 @@ def run_scan(args: argparse.Namespace) -> int:
         body={"versionTerminos": TERMS_VERSION},
         token=access_a, expected={200}, auth=True, note="aceptación términos")
 
-    # M06: documentos reales, envío a revisión y lectura administrativa.
+    # M06: documentos reales, estado propio, mapa privado y lectura administrativa.
     _, ine_payload, _ = http.request_multipart(
         "POST", "/api/v1/expedientes/mi-expediente/ine",
         files=[("Archivo", "ine.png", "image/png", DAST_PHOTO_PNG)],
@@ -1219,6 +1220,21 @@ def run_scan(args: argparse.Namespace) -> int:
         "POST", "/api/v1/publicaciones/primera/enviar",
         token=access_a, expected={200}, auth=True,
         note="envío primera publicación")
+
+    _, own_payload, _ = http.request(
+        "GET", "/api/v1/expedientes/mi-expediente",
+        token=access_a, expected={200}, auth=True, note="estado propio A")
+    own = _json_body(own_payload)
+    if own.get("estado") != "EnRevision":
+        raise DastError("El expediente A no está EnRevision tras el envío.")
+    _, map_payload, _ = http.request(
+        "GET", "/api/v1/mi-publicacion/estado-mapa",
+        token=access_a, expected={200}, auth=True, note="mapa privado A")
+    map_data = _json_body(map_payload)
+    if not str(map_data.get("id") or ""):
+        raise DastError("El mapa privado A no devolvió una unidad.")
+    if map_data.get("etiqueta") != "Tu espacio · En revisión":
+        raise DastError("El mapa privado A no devolvió la etiqueta esperada.")
 
     http.request(
         "GET", "/api/v1/admin/expedientes",
@@ -1241,10 +1257,99 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", document_path, token=access_admin, expected={200}, auth=True,
         note="lectura documento admin")
 
-    # M04/M07: el flujo M06 del Sprint 4 no expone aprobación; se marca la
-    # unidad como pública en la base efímera para visitar las operaciones
-    # públicas reales de exploración y favoritos.
-    _publish_unit_for_exploration(unit_id)
+    # HU-024: aprobación humana real. La unidad debe aparecer en M04 después.
+    http.request(
+        "POST", f"/api/v1/admin/expedientes/{expediente_id}/aprobar",
+        token=access_admin, expected={200}, auth=True,
+        note="aprobación expediente admin")
+
+    # HU-025: rechazo humano real con motivo obligatorio en una segunda cuenta.
+    account_b = _register_account(http, mailbox, password, "b")
+    access_b, _ = _login(http, account_b, password, "login B")
+    http.request(
+        "GET", "/api/v1/perfil/mi-perfil", token=access_b,
+        expected={200}, auth=True, note="perfil B")
+    _, property_b_payload, _ = http.request(
+        "POST", "/api/v1/propiedades",
+        body={
+            "nombre": f"DAST Propiedad B {uuid.uuid4().hex}",
+            "direccion": "Calle DAST 456",
+            "colonia": "Centro",
+            "tipoPropiedad": "Casa",
+            "universidadId": university_id,
+            "latitud": 19.4327,
+            "longitud": -99.1333,
+        },
+        token=access_b, expected={201}, auth=True, note="alta propiedad B")
+    property_b_id = _response_id(property_b_payload, "alta propiedad B")
+    _, unit_b_payload, _ = http.request(
+        "POST", f"/api/v1/propiedades/{property_b_id}/unidades",
+        body={
+            "tipoUnidad": "Habitacion",
+            "ocupacion": "Individual",
+            "lugares": 1,
+            "precioMensualPorLugarMxn": 3600,
+            "tamanoM2": 16,
+            "paraQuien": "Mixto",
+            "bano": "Privado",
+            "mobiliario": "Amueblado",
+            "muebles": ["Cama", "Escritorio"],
+            "plantillaBase": "HabitacionIndividual",
+        },
+        token=access_b, expected={201}, auth=True, note="alta unidad B")
+    unit_b_id = _response_id(unit_b_payload, "alta unidad B")
+    http.request_multipart(
+        "POST", f"/api/v1/unidades/{unit_b_id}/fotos",
+        files=[("Fotos", "foto-b.png", "image/png", DAST_PHOTO_PNG)],
+        token=access_b, expected={200}, note="carga foto unidad B")
+    http.request(
+        "POST", "/api/v1/publicaciones/primera/terminos",
+        body={"versionTerminos": TERMS_VERSION},
+        token=access_b, expected={200}, auth=True, note="aceptación términos B")
+    _, ine_b_payload, _ = http.request_multipart(
+        "POST", "/api/v1/expedientes/mi-expediente/ine",
+        files=[("Archivo", "ine-b.png", "image/png", DAST_PHOTO_PNG)],
+        token=access_b, expected={200}, note="carga INE B")
+    expediente_b_id = _response_id(ine_b_payload, "carga INE B")
+    http.request_multipart(
+        "POST", "/api/v1/expedientes/mi-expediente/comprobante",
+        files=[("Archivo", "predial-b.png", "image/png", DAST_PHOTO_PNG)],
+        token=access_b, expected={200}, note="carga comprobante B")
+    http.request(
+        "POST", "/api/v1/publicaciones/primera/enviar",
+        token=access_b, expected={200}, auth=True,
+        note="envío primera publicación B")
+    _, own_b_payload, _ = http.request(
+        "GET", "/api/v1/expedientes/mi-expediente",
+        token=access_b, expected={200}, auth=True, note="estado propio B")
+    own_b = _json_body(own_b_payload)
+    if own_b.get("estado") != "EnRevision":
+        raise DastError("El expediente B no está EnRevision tras el envío.")
+    _, map_b_payload, _ = http.request(
+        "GET", "/api/v1/mi-publicacion/estado-mapa",
+        token=access_b, expected={200}, auth=True, note="mapa privado B")
+    map_b = _json_body(map_b_payload)
+    if not str(map_b.get("id") or ""):
+        raise DastError("El mapa privado B no devolvió una unidad.")
+    rejection_reason = "Documento ilegible en la revisión DAST"
+    http.request(
+        "POST", f"/api/v1/admin/expedientes/{expediente_b_id}/rechazar",
+        body={"motivo": rejection_reason},
+        token=access_admin, expected={200}, auth=True,
+        note="rechazo expediente admin")
+    _, rejected_payload, _ = http.request(
+        "GET", "/api/v1/expedientes/mi-expediente",
+        token=access_b, expected={200}, auth=True,
+        note="estado propio B tras rechazo")
+    rejected = _json_body(rejected_payload)
+    if rejected.get("estado") != "Rechazado":
+        raise DastError("El expediente B no quedó Rechazado tras la decisión.")
+    decision = rejected.get("decision") or {}
+    if decision.get("motivo") != rejection_reason:
+        raise DastError("El motivo de rechazo no se expone al solicitante B.")
+
+    # M04/M07: la aprobación real de A publica la unidad; se visitan las rutas
+    # públicas y autenticadas de exploración y favoritos con datos reales.
     http.request(
         "GET", f"/api/v1/exploracion/mapa?universidadId={university_id}",
         expected={200}, note="exploración mapa")

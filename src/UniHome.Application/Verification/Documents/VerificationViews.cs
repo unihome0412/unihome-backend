@@ -5,10 +5,14 @@ namespace UniHome.Application.Verification.Documents;
 
 public sealed record DocumentosRecibidosView(bool Ine, bool Comprobante);
 
+public sealed record ExpedienteDecisionView(
+    EstadoExpediente Estado,
+    DateTimeOffset Fecha,
+    string? Motivo);
+
 /// <summary>
 /// Respuesta del solicitante. No incluye "Sospechoso", OCR, ELA ni señales:
-/// esos campos son exclusivos de la vista administrativa (HU-026 se ampliará en
-/// Sprint 5; Sprint 4 solo confirma recepción y estado).
+/// esos campos son exclusivos de la vista administrativa (HU-026).
 /// </summary>
 public sealed record MiExpedienteView(
     Guid Id,
@@ -17,7 +21,8 @@ public sealed record MiExpedienteView(
     DocumentosRecibidosView DocumentosRecibidos,
     bool RevisionAutomaticaCompletada,
     bool DecisionPendiente,
-    DateTimeOffset FechaSolicitud)
+    DateTimeOffset FechaSolicitud,
+    ExpedienteDecisionView? Decision)
 {
     public static MiExpedienteView FromDomain(Expediente expediente) =>
         new(
@@ -29,7 +34,13 @@ public sealed record MiExpedienteView(
                 expediente.FindDocument(TipoDocumentoVerificacion.Comprobante) is not null),
             expediente.AutomaticReviewCompleted,
             expediente.DecisionPending,
-            expediente.CreatedAt);
+            expediente.CreatedAt,
+            expediente.Decision is null
+                ? null
+                : new ExpedienteDecisionView(
+                    expediente.Decision.Estado,
+                    expediente.Decision.DecidedAt,
+                    expediente.Decision.Motivo));
 }
 
 public sealed record DocumentUploadView(

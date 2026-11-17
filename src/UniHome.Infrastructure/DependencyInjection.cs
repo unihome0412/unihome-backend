@@ -201,6 +201,7 @@ public static class DependencyInjection
         services.AddSingleton<IVerificationAuditRepository, MongoVerificationAuditRepository>();
         services.AddSingleton<IVerificationDocumentStore, MongoVerificationDocumentStore>();
         services.AddSingleton<TesseractCliOcrEngine>();
+        services.AddSingleton<PdfRasterizer>();
         services.AddSingleton<IDocumentAnalyzer, LocalDocumentAnalyzer>();
         services.AddSingleton<IDocumentPreviewGenerator, SkiaDocumentPreviewGenerator>();
         services.AddSingleton<IDocumentUrlSigner, HmacDocumentUrlSigner>();

@@ -3,6 +3,8 @@ using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
+using UniHome.Application.Verification.Abstractions;
+using UniHome.Domain.Verification;
 
 namespace UniHome.Application.Exploration;
 
@@ -17,19 +19,22 @@ public sealed class GetUnitCardService
     private readonly IUniversityRepository _universities;
     private readonly IUnitFavoriteRepository _favorites;
     private readonly UnitPhotoUrlResolver _photos;
+    private readonly IVerificationRepository _verification;
 
     public GetUnitCardService(
         IUnitRepository units,
         IPropertyRepository properties,
         IUniversityRepository universities,
         IUnitFavoriteRepository favorites,
-        UnitPhotoUrlResolver photos)
+        UnitPhotoUrlResolver photos,
+        IVerificationRepository verification)
     {
         _units = units;
         _properties = properties;
         _universities = universities;
         _favorites = favorites;
         _photos = photos;
+        _verification = verification;
     }
 
     public async Task<OperationResult<UnitCardView>> GetAsync(
@@ -60,12 +65,17 @@ public sealed class GetUnitCardService
                        await _favorites
                            .ExistsAsync(accountId.Value, unitId, cancellationToken)
                            .ConfigureAwait(false);
+        var verification = await _verification
+            .FindByOwnerAsync(unit.OwnerAccountId, cancellationToken)
+            .ConfigureAwait(false);
+        var verified = verification?.State == EstadoExpediente.Aprobado;
 
         return OperationResult<UnitCardView>.Success(
             ExplorationProjection.BuildCard(
                 unit,
                 ExplorationProjection.Distance(property, location),
                 accountId is null ? null : favorite,
-                _photos));
+                _photos,
+                verified: verified));
     }
 }

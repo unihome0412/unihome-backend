@@ -19,7 +19,11 @@ public sealed class PdfInspectionTests
             TesseractExecutablePath = Path.Combine(
                 Path.GetTempPath(),
                 $"sin-tesseract-{Guid.NewGuid():N}",
-                "tesseract.exe")
+                "tesseract.exe"),
+            PdftoppmExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-pdftoppm-{Guid.NewGuid():N}",
+                "pdftoppm.exe")
         };
         var engine = new TesseractCliOcrEngine(
             Options.Create(options),
@@ -27,6 +31,7 @@ public sealed class PdfInspectionTests
         var analyzer = new LocalDocumentAnalyzer(
             Options.Create(options),
             engine,
+            new PdfRasterizer(Options.Create(options), NullLogger<PdfRasterizer>.Instance),
             NullLogger<LocalDocumentAnalyzer>.Instance);
 
         var result = await analyzer.AnalyzeAsync(
@@ -50,7 +55,11 @@ public sealed class PdfInspectionTests
             TesseractExecutablePath = Path.Combine(
                 Path.GetTempPath(),
                 $"sin-tesseract-{Guid.NewGuid():N}",
-                "tesseract.exe")
+                "tesseract.exe"),
+            PdftoppmExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-pdftoppm-{Guid.NewGuid():N}",
+                "pdftoppm.exe")
         };
         var engine = new TesseractCliOcrEngine(
             Options.Create(options),
@@ -58,6 +67,7 @@ public sealed class PdfInspectionTests
         var analyzer = new LocalDocumentAnalyzer(
             Options.Create(options),
             engine,
+            new PdfRasterizer(Options.Create(options), NullLogger<PdfRasterizer>.Instance),
             NullLogger<LocalDocumentAnalyzer>.Instance);
 
         var result = await analyzer.AnalyzeAsync(
@@ -67,6 +77,79 @@ public sealed class PdfInspectionTests
 
         Assert.Equal(EstadoAnalisisDocumento.NoDisponible, result.OcrStatus);
         Assert.Null(result.DetectedName);
+    }
+
+    [Fact]
+    public async Task DocumentoVacio_DebeMarcarNoDisponible()
+    {
+        var analyzer = CreateAnalyzer();
+
+        var result = await analyzer.AnalyzeAsync(
+            Array.Empty<byte>(),
+            "image/png",
+            TipoDocumentoVerificacion.Ine);
+
+        Assert.Equal(EstadoAnalisisDocumento.NoDisponible, result.OcrStatus);
+        Assert.Contains("vacío", result.UnavailableDetail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TipoNoSoportado_DebeMarcarNoDisponible()
+    {
+        var analyzer = CreateAnalyzer();
+
+        var result = await analyzer.AnalyzeAsync(
+            new byte[] { 1, 2, 3, 4 },
+            "text/plain",
+            TipoDocumentoVerificacion.Ine);
+
+        Assert.Equal(EstadoAnalisisDocumento.NoDisponible, result.OcrStatus);
+        Assert.Contains(
+            "no tiene un analizador",
+            result.UnavailableDetail,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PdfInvalido_DebeMarcarNoDisponibleSinLanzar()
+    {
+        var analyzer = CreateAnalyzer();
+
+        var result = await analyzer.AnalyzeAsync(
+            "%PDF-1.4 contenido truncado"u8.ToArray(),
+            "application/pdf",
+            TipoDocumentoVerificacion.Comprobante);
+
+        Assert.Equal(EstadoAnalisisDocumento.NoDisponible, result.OcrStatus);
+        Assert.Null(result.DetectedName);
+        Assert.Contains(
+            "no pudo inspeccionarse",
+            result.UnavailableDetail,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static LocalDocumentAnalyzer CreateAnalyzer()
+    {
+        var options = new DocumentAnalysisOptions
+        {
+            TesseractExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-tesseract-{Guid.NewGuid():N}",
+                "tesseract.exe"),
+            PdftoppmExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-pdftoppm-{Guid.NewGuid():N}",
+                "pdftoppm.exe")
+        };
+        var engine = new TesseractCliOcrEngine(
+            Options.Create(options),
+            NullLogger<TesseractCliOcrEngine>.Instance);
+
+        return new LocalDocumentAnalyzer(
+            Options.Create(options),
+            engine,
+            new PdfRasterizer(Options.Create(options), NullLogger<PdfRasterizer>.Instance),
+            NullLogger<LocalDocumentAnalyzer>.Instance);
     }
 
     private static byte[] CreatePdf(string text)

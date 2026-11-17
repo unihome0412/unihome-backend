@@ -88,6 +88,17 @@ public sealed class GetExpedienteDetailService
         var editionDetected = expediente.Documents.Any(document => document.EdicionDetectada);
         var elaAvailable = expediente.Documents.Any(document => document.ElaDisponible);
         var metadataAvailable = expediente.Documents.Any(document => document.MetadatosDisponibles);
+        var nameComparison = expediente.EffectiveNameComparison;
+        var riskSignals = expediente.RiskIndicator.Signals.ToList();
+        var nameDifference = nameComparison == ResultadoComparacionNombres.DiferenciaDetectada;
+
+        if (nameDifference &&
+            !riskSignals.Any(signal =>
+                signal.Contains("comparación orientativa", StringComparison.OrdinalIgnoreCase)))
+        {
+            riskSignals.Add("La comparación orientativa de nombres detectó una diferencia.");
+        }
+
         var analysisDetail = expediente.Documents
             .Select(document => document.DetalleAnalisis)
             .Where(detail => !string.IsNullOrWhiteSpace(detail)).Select(detail => detail!)
@@ -106,7 +117,7 @@ public sealed class GetExpedienteDetailService
                 comprobanteUrl,
                 ine?.NombreOcr,
                 comprobante?.NombreOcr,
-                expediente.NameComparison,
+                nameComparison,
                 new IndicadorEdicionView(
                     editionDetected,
                     editionAvailable,
@@ -114,8 +125,8 @@ public sealed class GetExpedienteDetailService
                     elaAvailable,
                     metadataAvailable,
                     analysisDetail),
-                expediente.IsSuspicious,
-                expediente.RiskIndicator.Signals,
+                expediente.IsSuspicious || nameDifference,
+                riskSignals,
                 expediente.AutomaticReviewCompleted,
                 expediente.RejectionReason));
     }

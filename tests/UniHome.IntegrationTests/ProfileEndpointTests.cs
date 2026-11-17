@@ -37,6 +37,9 @@ public sealed class ProfileEndpointTests : IClassFixture<UniHomeApiFactory>
         Assert.Equal("UsuarioUniHome", root.GetProperty("etiquetaCuenta").GetString());
         Assert.False(root.GetProperty("vinculadoAUnidad").GetBoolean());
         Assert.True(root.GetProperty("puedePublicar").GetBoolean());
+        Assert.Equal(
+            JsonValueKind.Null,
+            root.GetProperty("estadoPrimeraPublicacion").ValueKind);
         Assert.True(root.TryGetProperty("universidadActual", out var university));
         Assert.Equal(JsonValueKind.Null, university.ValueKind);
 

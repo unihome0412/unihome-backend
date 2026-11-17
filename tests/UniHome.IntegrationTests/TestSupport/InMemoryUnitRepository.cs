@@ -86,6 +86,40 @@ public sealed class InMemoryUnitRepository : IUnitRepository
         }
     }
 
+    public Task<IReadOnlyList<Unit>> ListByOwnerAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<Unit> items = _units.Values
+                .Where(unit => unit.OwnerAccountId == ownerAccountId)
+                .OrderBy(unit => unit.CreatedAt)
+                .ThenBy(unit => unit.Id)
+                .ToArray();
+            return Task.FromResult(items);
+        }
+    }
+
+    public Task<bool> TryTransitionPublicationStateAsync(
+        Guid id,
+        Guid ownerAccountId,
+        PublicationState expected,
+        PublicationState next,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (!_units.TryGetValue(id, out var unit) ||
+                unit.OwnerAccountId != ownerAccountId)
+            {
+                return Task.FromResult(false);
+            }
+
+            return Task.FromResult(unit.TryApplyPublicationTransition(expected, next));
+        }
+    }
+
     public Task<IReadOnlyList<Unit>> FindByIdsAsync(
         IReadOnlyCollection<Guid> ids,
         CancellationToken cancellationToken = default)

@@ -3,7 +3,9 @@ using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
+using UniHome.Application.Verification.Abstractions;
 using UniHome.Domain.Units;
+using UniHome.Domain.Verification;
 
 namespace UniHome.Application.Exploration;
 
@@ -18,19 +20,22 @@ public sealed class GetUnitDetailService
     private readonly IUniversityRepository _universities;
     private readonly IUnitFavoriteRepository _favorites;
     private readonly UnitPhotoUrlResolver _photos;
+    private readonly IVerificationRepository _verification;
 
     public GetUnitDetailService(
         IUnitRepository units,
         IPropertyRepository properties,
         IUniversityRepository universities,
         IUnitFavoriteRepository favorites,
-        UnitPhotoUrlResolver photos)
+        UnitPhotoUrlResolver photos,
+        IVerificationRepository verification)
     {
         _units = units;
         _properties = properties;
         _universities = universities;
         _favorites = favorites;
         _photos = photos;
+        _verification = verification;
     }
 
     public async Task<OperationResult<UnitDetailView>> GetAsync(
@@ -60,6 +65,10 @@ public sealed class GetUnitDetailService
         var favorite = await _favorites
             .ExistsAsync(accountId, unitId, cancellationToken)
             .ConfigureAwait(false);
+        var verification = await _verification
+            .FindByOwnerAsync(unit.OwnerAccountId, cancellationToken)
+            .ConfigureAwait(false);
+        var verified = verification?.State == EstadoExpediente.Aprobado;
         var distance = ExplorationProjection.Distance(property, location);
 
         var included = unit.Services
@@ -82,7 +91,7 @@ public sealed class GetUnitDetailService
             distance,
             ExplorationProjection.TravelMode(distance),
             unit.ForWhom,
-            ArrendadorVerificado: false,
+            ArrendadorVerificado: verified,
             favorite,
             unit.Occupancy,
             unit.Places,

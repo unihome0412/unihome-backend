@@ -91,6 +91,71 @@ internal sealed class MongoUnitRepository : IUnitRepository
         }
     }
 
+    public async Task<IReadOnlyList<Unit>> ListByOwnerAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var documents = await collection
+                .Find(Builders<UnitDocument>.Filter.Eq(
+                    unit => unit.OwnerAccountId,
+                    ownerAccountId.ToString("N", CultureInfo.InvariantCulture)))
+                .Sort(Builders<UnitDocument>.Sort
+                    .Ascending(unit => unit.CreatedAt)
+                    .Ascending(unit => unit.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents.Select(ToDomain).ToArray();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<bool> TryTransitionPublicationStateAsync(
+        Guid id,
+        Guid ownerAccountId,
+        PublicationState expected,
+        PublicationState next,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Enum.IsDefined(expected) || !Enum.IsDefined(next))
+        {
+            throw new ArgumentException("El estado de publicación no es válido.");
+        }
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UnitDocument>.Filter.And(
+                ByIdFilter(id),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.OwnerAccountId,
+                    ownerAccountId.ToString("N", CultureInfo.InvariantCulture)),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.PublicationState,
+                    expected.ToString()));
+            var update = Builders<UnitDocument>.Update.Set(
+                document => document.PublicationState,
+                next.ToString());
+
+            var result = await collection
+                .UpdateOneAsync(filter, update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return result.MatchedCount == 1;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<bool> TrySubmitForReviewAsync(
         Guid id,
         Guid ownerAccountId,

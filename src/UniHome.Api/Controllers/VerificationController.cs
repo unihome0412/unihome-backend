@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using UniHome.Api.Configuration;
@@ -14,10 +14,45 @@ namespace UniHome.Api.Controllers;
 public sealed class VerificationController : AuthenticatedControllerBase
 {
     private readonly UploadVerificationDocumentService _upload;
+    private readonly GetMyExpedienteService _getMyExpediente;
 
-    public VerificationController(UploadVerificationDocumentService upload)
+    public VerificationController(
+        UploadVerificationDocumentService upload,
+        GetMyExpedienteService getMyExpediente)
     {
         _upload = upload;
+        _getMyExpediente = getMyExpediente;
+    }
+
+    /// <summary>
+    /// EP-M06-03 (HU-026): estado de la verificación propia. No expone riesgo,
+    /// OCR, ELA ni identificadores internos.
+    /// </summary>
+    [HttpGet("mi-expediente")]
+    [Authorize]
+    [ProducesResponseType(typeof(MiExpedienteResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetMyExpediente(CancellationToken cancellationToken)
+    {
+        if (!TryGetAccountId(out var accountId))
+        {
+            return CreateProblemResult(
+                StatusCodes.Status401Unauthorized,
+                "La sesión no es válida.");
+        }
+
+        var result = await _getMyExpediente
+            .GetAsync(accountId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ToActionResult(
+            result,
+            value => Ok(MiExpedienteResponse.FromView(value)),
+            notFoundDetail: "Todavía no tienes un expediente de verificación.",
+            forbiddenDetail: "La cuenta no está autorizada para esta operación.",
+            conflictDetail: "No se pudo consultar el expediente.");
     }
 
     /// <summary>

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using SkiaSharp;
 using UniHome.Application.Verification.Abstractions;
 using UniHome.Domain.Verification;
@@ -56,7 +58,15 @@ public sealed class ImageForensicsTests
     public async Task Miniatura_DeImagen_DebeSerJpegYNoSerPdf()
     {
         var jpeg = CreateJpeg(800, 600, edited: false);
-        var generator = new SkiaDocumentPreviewGenerator();
+        var generator = new SkiaDocumentPreviewGenerator(new PdfRasterizer(
+            Options.Create(new DocumentAnalysisOptions
+            {
+                PdftoppmExecutablePath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"sin-pdftoppm-{Guid.NewGuid():N}",
+                    "pdftoppm.exe")
+            }),
+            NullLogger<PdfRasterizer>.Instance));
         var document = new VerificationDocumentContent(
             jpeg,
             "image/jpeg",
@@ -77,7 +87,15 @@ public sealed class ImageForensicsTests
     public async Task Miniatura_DePdf_DebeDevolverOriginalSinDeclararlaMiniatura()
     {
         var pdf = "%PDF-1.4\n%%EOF"u8.ToArray();
-        var generator = new SkiaDocumentPreviewGenerator();
+        var generator = new SkiaDocumentPreviewGenerator(new PdfRasterizer(
+            Options.Create(new DocumentAnalysisOptions
+            {
+                PdftoppmExecutablePath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"sin-pdftoppm-{Guid.NewGuid():N}",
+                    "pdftoppm.exe")
+            }),
+            NullLogger<PdfRasterizer>.Instance));
         var document = new VerificationDocumentContent(
             pdf,
             "application/pdf",
@@ -89,6 +107,58 @@ public sealed class ImageForensicsTests
         Assert.False(preview.IsThumbnail);
         Assert.Equal("application/pdf", preview.ContentType);
         Assert.Equal(pdf, preview.Content);
+    }
+
+    [Fact]
+    public async Task Miniatura_DeTipoNoSoportado_DebeDevolverOriginal()
+    {
+        var generator = new SkiaDocumentPreviewGenerator(new PdfRasterizer(
+            Options.Create(new DocumentAnalysisOptions
+            {
+                PdftoppmExecutablePath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"sin-pdftoppm-{Guid.NewGuid():N}",
+                    "pdftoppm.exe")
+            }),
+            NullLogger<PdfRasterizer>.Instance));
+        var content = new byte[] { 1, 2, 3, 4 };
+        var document = new VerificationDocumentContent(
+            content,
+            "image/gif",
+            content.LongLength,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
+
+        var preview = await generator.CreateAsync(document, thumbnail: true);
+
+        Assert.False(preview.IsThumbnail);
+        Assert.Equal("image/gif", preview.ContentType);
+        Assert.Equal(content, preview.Content);
+    }
+
+    [Fact]
+    public async Task Miniatura_DePngCorrupto_DebeDevolverOriginalSinLanzar()
+    {
+        var generator = new SkiaDocumentPreviewGenerator(new PdfRasterizer(
+            Options.Create(new DocumentAnalysisOptions
+            {
+                PdftoppmExecutablePath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"sin-pdftoppm-{Guid.NewGuid():N}",
+                    "pdftoppm.exe")
+            }),
+            NullLogger<PdfRasterizer>.Instance));
+        var content = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x00 };
+        var document = new VerificationDocumentContent(
+            content,
+            "image/png",
+            content.LongLength,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
+
+        var preview = await generator.CreateAsync(document, thumbnail: true);
+
+        Assert.False(preview.IsThumbnail);
+        Assert.Equal("image/png", preview.ContentType);
+        Assert.Equal(content, preview.Content);
     }
 
     [Fact]

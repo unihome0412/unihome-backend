@@ -6,6 +6,11 @@ namespace UniHome.Api.Contracts.Verification;
 
 public sealed record DocumentosRecibidosResponse(bool Ine, bool Comprobante);
 
+public sealed record ExpedienteDecisionResponse(
+    EstadoExpediente Estado,
+    DateTimeOffset Fecha,
+    string? Motivo);
+
 public sealed record MiExpedienteResponse(
     Guid Id,
     string Folio,
@@ -14,7 +19,8 @@ public sealed record MiExpedienteResponse(
     bool RevisionAutomaticaCompletada,
     bool DecisionPendiente,
     DateTimeOffset FechaSolicitud,
-    string AvisoAlmacenamiento)
+    string AvisoAlmacenamiento,
+    ExpedienteDecisionResponse? Decision)
 {
     public const string StorageNotice =
         "Almacenamiento cifrado y acceso restringido.";
@@ -30,7 +36,13 @@ public sealed record MiExpedienteResponse(
             view.RevisionAutomaticaCompletada,
             view.DecisionPendiente,
             view.FechaSolicitud,
-            StorageNotice);
+            StorageNotice,
+            view.Decision is null
+                ? null
+                : new ExpedienteDecisionResponse(
+                    view.Decision.Estado,
+                    view.Decision.Fecha,
+                    view.Decision.Motivo));
 }
 
 public sealed record ExpedienteResumenResponse(

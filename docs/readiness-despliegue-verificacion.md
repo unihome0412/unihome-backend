@@ -14,6 +14,13 @@ El registro versionado queda ordenado así:
 2. `M01-002`: `restablecimientos_contrasena`.
 3. `M03-001`: `universidades`.
 4. `M05-001`: `propiedades`, `unidades` y `aceptaciones_terminos`.
+5. `M06-001`: verificación documental (Sprint 4/5).
+6. `M07-001`: favoritos (Sprint 3).
+
+> El orden vigente para una promoción que incluya Sprint 5 es
+> `M01-001`, `M01-002`, `M03-001`, `M05-001`, `M06-001`, `M07-001`.
+> Sprint 5 no añade una migración nueva; ver
+> [`sprint-05-cierre.md`](sprint-05-cierre.md), sección 13.
 
 `M01-002` crea la colección de recuperación con:
 
@@ -192,11 +199,13 @@ opt-in no sustituye esta comprobación.
 
 ## 7. Requisitos de arranque
 
-> **Actualización Sprint 4 (16-nov-2026):** además de lo listado, fuera de
-> Development es obligatoria `DocumentSecurity__EncryptionKey` (32 bytes Base64)
-> y debe aplicarse `M06-001` antes de usar los endpoints de verificación.
-> `Api__EnableSwagger` debe permanecer en `false` hasta nueva autorización. Esta
-> tabla conserva el estado histórico de la auditoría; no se modificó Azure.
+> **Actualización Sprint 5 (16-nov-2026):** además de lo listado, fuera de
+> Development son obligatorias `DocumentSecurity__EncryptionKey` (32 bytes Base64)
+> y la migración `M06-001` antes de usar la verificación. Para rotar claves se
+> usan `DocumentSecurity__CurrentKeyVersion` y
+> `DocumentSecurity__PreviousEncryptionKeys`. `Api__EnableSwagger` debe permanecer
+> en `false` hasta nueva autorización. Esta tabla conserva el estado histórico de
+> la auditoría; no se modificó Azure.
 
 | Requisito | Estado actual |
 |---|---|

@@ -27,6 +27,28 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
+    public async Task OpenApi_DebeExponerLas41OperacionesDelCatalogoVigente()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+        var methods = new[] { "get", "post", "put", "patch", "delete", "head", "options" };
+        var operations = paths
+            .EnumerateObject()
+            .Where(path => path.Name.StartsWith("/api/v1/", StringComparison.Ordinal))
+            .SelectMany(path => methods
+                .Where(method => path.Value.TryGetProperty(method, out _))
+                .Select(method => $"{method.ToUpperInvariant()} {path.Name}"))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(41, operations.Length);
+    }
+
+    [Fact]
     public async Task OpenApi_DebeIncluirElRegistroDeM01()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");
@@ -322,6 +344,33 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
         Assert.Contains(
             signedGet.GetProperty("security").EnumerateArray(),
             requirement => requirement.TryGetProperty("Bearer", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/expedientes/mi-expediente",
+            out var myExpediente));
+        Assert.True(myExpediente.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/admin/expedientes/{id}/aprobar",
+            out var approve));
+        Assert.True(approve.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/admin/expedientes/{id}/rechazar",
+            out var reject));
+        Assert.True(reject.TryGetProperty("post", out var rejectPost));
+        Assert.True(rejectPost.TryGetProperty("requestBody", out var rejectBody));
+        var rejectSchema = rejectBody.GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
+        Assert.Equal(
+            "#/components/schemas/RechazarExpedienteRequest",
+            rejectSchema.GetProperty("$ref").GetString());
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/mi-publicacion/estado-mapa",
+            out var myMap));
+        Assert.True(myMap.TryGetProperty("get", out _));
 
         var schemas = root.GetProperty("components").GetProperty("schemas");
 

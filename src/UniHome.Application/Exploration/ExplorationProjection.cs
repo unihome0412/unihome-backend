@@ -49,7 +49,8 @@ public static class ExplorationProjection
         decimal? distanceKm,
         bool? isFavorite,
         UnitPhotoUrlResolver photos,
-        bool allowPhoto = true) =>
+        bool allowPhoto = true,
+        bool verified = false) =>
         new(
             unit.Id,
             photos.Primary(unit, allowPhoto),
@@ -58,7 +59,7 @@ public static class ExplorationProjection
             distanceKm,
             TravelMode(distanceKm),
             unit.ForWhom,
-            ArrendadorVerificado: false,
+            ArrendadorVerificado: verified,
             isFavorite);
 
     public static async Task<Dictionary<Guid, Property>> LoadPropertiesAsync(

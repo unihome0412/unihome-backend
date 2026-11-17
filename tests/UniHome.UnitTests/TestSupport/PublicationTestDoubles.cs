@@ -47,6 +47,10 @@ internal sealed class FakeUnitRepository : IUnitRepository
 
     public bool SubmitResult { get; set; } = true;
 
+    public bool TransitionResult { get; set; } = true;
+
+    public Action<Guid, PublicationState>? BeforeTransition { get; set; }
+
     public Task AddAsync(Unit unit, CancellationToken cancellationToken = default)
     {
         Items.Add(unit);
@@ -91,6 +95,37 @@ internal sealed class FakeUnitRepository : IUnitRepository
 
         unit.SubmitForReview();
         return Task.FromResult(true);
+    }
+
+    public Task<IReadOnlyList<Unit>> ListByOwnerAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Unit>>(Items
+            .Where(unit => unit.OwnerAccountId == ownerAccountId)
+            .OrderBy(unit => unit.CreatedAt)
+            .ThenBy(unit => unit.Id)
+            .ToArray());
+
+    public Task<bool> TryTransitionPublicationStateAsync(
+        Guid id,
+        Guid ownerAccountId,
+        PublicationState expected,
+        PublicationState next,
+        CancellationToken cancellationToken = default)
+    {
+        BeforeTransition?.Invoke(id, next);
+
+        if (!TransitionResult)
+        {
+            return Task.FromResult(false);
+        }
+
+        var unit = Items.SingleOrDefault(item =>
+            item.Id == id &&
+            item.OwnerAccountId == ownerAccountId);
+
+        return Task.FromResult(
+            unit is not null && unit.TryApplyPublicationTransition(expected, next));
     }
 
     public Task<IReadOnlyList<Unit>> FindByIdsAsync(

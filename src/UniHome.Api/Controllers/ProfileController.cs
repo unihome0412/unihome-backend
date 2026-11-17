@@ -60,7 +60,8 @@ public sealed class ProfileController : ControllerBase
             UniversidadActual: null,
             profile.Label,
             profile.IsLinkedToUnit,
-            profile.CanPublish));
+            profile.CanPublish,
+            profile.FirstPublicationState));
     }
 
     private ObjectResult CreateProblemResult(int statusCode, string detail) =>

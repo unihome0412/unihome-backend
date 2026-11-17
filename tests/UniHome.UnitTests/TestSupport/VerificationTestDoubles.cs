@@ -38,6 +38,16 @@ internal sealed class FakeVerificationRepository : IVerificationRepository
         return Task.FromResult(item is null ? null : Clone(item));
     }
 
+    public Task<IReadOnlySet<Guid>> ListApprovedOwnerIdsAsync(
+        IReadOnlyCollection<Guid> ownerAccountIds,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlySet<Guid>>(_items.Values
+            .Where(item =>
+                item.State == EstadoExpediente.Aprobado &&
+                ownerAccountIds.Contains(item.OwnerAccountId))
+            .Select(item => item.OwnerAccountId)
+            .ToHashSet());
+
     public Task<bool> TryReplaceAsync(
         Expediente expediente,
         DateTimeOffset expectedUpdatedAt,
@@ -122,7 +132,8 @@ internal sealed class FakeVerificationRepository : IVerificationRepository
             source.RiskIndicator.Signals,
             source.NameComparison,
             source.RejectionReason,
-            source.Decision);
+            source.Decision,
+            source.NameComparisonUpdatedAt);
 }
 
 internal sealed class FakeVerificationDocumentStore : IVerificationDocumentStore

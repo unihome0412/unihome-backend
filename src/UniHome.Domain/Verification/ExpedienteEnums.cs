@@ -19,8 +19,8 @@ public enum TipoDocumentoVerificacion
 }
 
 /// <summary>
-/// Comparación orientativa de nombres. Se mantiene en el contrato para el
-/// Sprint 5 (HU-019); en Sprint 4 permanece en <see cref="NoDisponible"/>.
+/// Comparación orientativa de nombres (HU-019). <see cref="NoDisponible"/> se
+/// conserva para OCR ausente o texto insuficiente; nunca decide por sí sola.
 /// </summary>
 public enum ResultadoComparacionNombres
 {

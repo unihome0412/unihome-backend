@@ -39,7 +39,7 @@ public sealed class GetUnitPreviewServiceTests
             units,
             properties,
             universities,
-            new FakeUnitPhotoStorage());
+            new FakeUnitPhotoStorage(), new FakeVerificationRepository());
 
         var result = await service.GetAsync(account.Id, unit.Id);
 
@@ -67,7 +67,7 @@ public sealed class GetUnitPreviewServiceTests
             units,
             properties,
             new FakeUniversityRepository(),
-            new FakeUnitPhotoStorage());
+            new FakeUnitPhotoStorage(), new FakeVerificationRepository());
 
         var result = await service.GetAsync(Guid.NewGuid(), unit.Id);
 

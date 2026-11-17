@@ -28,6 +28,18 @@ public sealed class DocumentAnalysisOptions
 
     public int TesseractPageSegmentationMode { get; set; } = 6;
 
+    /// <summary>
+    /// Poppler `pdftoppm` para rasterizar PDF escaneados y miniaturas. Es local y
+    /// gratuito; si falta, el PDF sin capa de texto queda NoDisponible.
+    /// </summary>
+    public string PdftoppmExecutablePath { get; set; } = "pdftoppm";
+
+    public int PdfRasterTimeoutSeconds { get; set; } = 30;
+
+    public int PdfRasterDpi { get; set; } = 200;
+
+    public int PdfRasterMaxPages { get; set; } = 3;
+
     public bool IsValid() =>
         MaxImagePixels is > 0 and <= MaxAllowedPixels &&
         ElaJpegQuality is >= 50 and <= 100 &&
@@ -37,5 +49,9 @@ public sealed class DocumentAnalysisOptions
         TesseractTimeoutSeconds is >= 5 and <= 120 &&
         TesseractPageSegmentationMode is >= 0 and <= 13 &&
         !string.IsNullOrWhiteSpace(TesseractExecutablePath) &&
-        !string.IsNullOrWhiteSpace(TesseractLanguage);
+        !string.IsNullOrWhiteSpace(TesseractLanguage) &&
+        PdfRasterTimeoutSeconds is >= 5 and <= 120 &&
+        PdfRasterDpi is >= 72 and <= 300 &&
+        PdfRasterMaxPages is >= 1 and <= 5 &&
+        !string.IsNullOrWhiteSpace(PdftoppmExecutablePath);
 }

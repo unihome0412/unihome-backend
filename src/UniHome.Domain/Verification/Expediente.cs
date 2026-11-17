@@ -9,8 +9,8 @@ public sealed record ExpedienteDecision(
 /// <summary>
 /// Expediente de primera publicación (M06). Nace Pendiente, pasa a En revisión
 /// solo cuando ambos documentos fueron recibidos y conserva el indicador de
-/// riesgo separado del estado. Las decisiones humanas existen en el dominio para
-/// el Sprint 5 (HU-024/HU-025), pero no se exponen como endpoints en Sprint 4.
+/// riesgo separado del estado. Las decisiones humanas de Sprint 5 (HU-024/
+/// HU-025) se exponen mediante los endpoints administrativos correspondientes.
 /// </summary>
 public sealed class Expediente
 {
@@ -33,6 +33,7 @@ public sealed class Expediente
         IEnumerable<DocumentoVerificacion> documents,
         IndicadorRiesgo riskIndicator,
         ResultadoComparacionNombres nameComparison,
+        DateTimeOffset? nameComparisonUpdatedAt,
         string? rejectionReason,
         ExpedienteDecision? decision)
     {
@@ -48,6 +49,7 @@ public sealed class Expediente
         _documents = documents.ToDictionary(document => document.Tipo);
         _riskIndicator = riskIndicator;
         NameComparison = nameComparison;
+        NameComparisonUpdatedAt = nameComparisonUpdatedAt;
         RejectionReason = rejectionReason;
         Decision = decision;
     }
@@ -72,6 +74,8 @@ public sealed class Expediente
 
     public ResultadoComparacionNombres NameComparison { get; private set; }
 
+    public DateTimeOffset? NameComparisonUpdatedAt { get; private set; }
+
     public string? RejectionReason { get; private set; }
 
     public ExpedienteDecision? Decision { get; private set; }
@@ -91,6 +95,17 @@ public sealed class Expediente
         _documents.Values.All(document => document.RevisionAutomaticaCompletada);
 
     public bool DecisionPending => State is EstadoExpediente.Pendiente or EstadoExpediente.EnRevision;
+
+    /// <summary>
+    /// Resultado persistido o, para expedientes anteriores a Sprint 5, cálculo
+    /// orientativo con los nombres ya almacenados. No modifica el estado.
+    /// </summary>
+    public ResultadoComparacionNombres EffectiveNameComparison =>
+        NameComparison == ResultadoComparacionNombres.NoDisponible
+            ? PersonNameComparison.Compare(
+                FindDocument(TipoDocumentoVerificacion.Ine)?.NombreOcr,
+                FindDocument(TipoDocumentoVerificacion.Comprobante)?.NombreOcr)
+            : NameComparison;
 
     public static Expediente Create(
         Guid id,
@@ -123,6 +138,7 @@ public sealed class Expediente
             documents: [],
             IndicadorRiesgo.Empty,
             ResultadoComparacionNombres.NoDisponible,
+            nameComparisonUpdatedAt: null,
             rejectionReason: null,
             decision: null);
     }
@@ -141,7 +157,8 @@ public sealed class Expediente
         IEnumerable<string>? riskSignals,
         ResultadoComparacionNombres nameComparison,
         string? rejectionReason,
-        ExpedienteDecision? decision) =>
+        ExpedienteDecision? decision,
+        DateTimeOffset? nameComparisonUpdatedAt = null) =>
         new(
             id,
             NormalizeFolio(folio),
@@ -155,6 +172,7 @@ public sealed class Expediente
             documents ?? [],
             IndicadorRiesgo.Create(riskSignals),
             nameComparison,
+            nameComparisonUpdatedAt,
             rejectionReason,
             decision);
 
@@ -211,6 +229,7 @@ public sealed class Expediente
         }
 
         _documents[document.Tipo] = document;
+        RecomputeNameComparison(now);
         RecomputeRiskIndicator();
 
         if (DocumentsReceived)
@@ -260,6 +279,7 @@ public sealed class Expediente
             editionSignals,
             analysisDetail);
 
+        RecomputeNameComparison(now);
         RecomputeRiskIndicator();
         UpdatedAt = now;
         return true;
@@ -314,6 +334,25 @@ public sealed class Expediente
         UpdatedAt = now;
     }
 
+    /// <summary>
+    /// Compensación interna si la sincronización de la publicación o la auditoría
+    /// falla después de registrar una decisión. No es una transición expuesta al
+    /// cliente ni un "reabrir" administrativo; devuelve el expediente a En revisión
+    /// para no dejar una decisión sin efecto consistente.
+    /// </summary>
+    public void RevertDecisionForCompensation(DateTimeOffset now)
+    {
+        if (State is not (EstadoExpediente.Aprobado or EstadoExpediente.Rechazado))
+        {
+            throw new InvalidOperationException("No hay una decisión que revertir.");
+        }
+
+        State = EstadoExpediente.EnRevision;
+        Decision = null;
+        RejectionReason = null;
+        UpdatedAt = now;
+    }
+
     private void EnsurePendingHumanDecision()
     {
         if (State == EstadoExpediente.Aprobado || State == EstadoExpediente.Rechazado)
@@ -340,7 +379,25 @@ public sealed class Expediente
             signals.Add("El análisis de edición reportó señales sin detalle disponible.");
         }
 
+        if (NameComparison == ResultadoComparacionNombres.DiferenciaDetectada)
+        {
+            signals.Add("La comparación orientativa de nombres detectó una diferencia.");
+        }
+
         _riskIndicator = IndicadorRiesgo.Create(signals);
+    }
+
+    private void RecomputeNameComparison(DateTimeOffset now)
+    {
+        if (!DocumentsReceived)
+        {
+            return;
+        }
+
+        NameComparison = PersonNameComparison.Compare(
+            FindDocument(TipoDocumentoVerificacion.Ine)?.NombreOcr,
+            FindDocument(TipoDocumentoVerificacion.Comprobante)?.NombreOcr);
+        NameComparisonUpdatedAt = now;
     }
 
     private static string NormalizeFolio(string? folio)

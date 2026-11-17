@@ -53,7 +53,11 @@ OPERATIONS = [
     ("GET", "/api/v1/admin/expedientes", True),
     ("GET", "/api/v1/admin/expedientes/{id}", True),
     ("GET", "/api/v1/admin/expedientes/{id}/documentos/{tipo}", True),
+    ("POST", "/api/v1/admin/expedientes/{id}/aprobar", True),
+    ("POST", "/api/v1/admin/expedientes/{id}/rechazar", True),
+    ("GET", "/api/v1/expedientes/mi-expediente", True),
     ("GET", "/api/v1/expedientes/documentos/{token}", True),
+    ("GET", "/api/v1/mi-publicacion/estado-mapa", True),
     ("POST", "/api/v1/unidades/{unitId}/fotos", True),
     ("PUT", "/api/v1/unidades/{unitId}/servicios", True),
     ("GET", "/api/v1/unidades/{unitId}/vista-previa", True),
@@ -260,6 +264,28 @@ class FakeHttpClient:
             return 200, b'{"aceptada":true}'
         if base == "/api/v1/publicaciones/primera/enviar":
             return 200, b'{"estado":"EnRevision"}'
+        if base == "/api/v1/expedientes/mi-expediente":
+            if note == "estado propio B tras rechazo":
+                return 200, json.dumps({
+                    "id": str(uuid.uuid4()),
+                    "estado": "Rechazado",
+                    "decision": {
+                        "estado": "Rechazado",
+                        "motivo": "Documento ilegible en la revisión DAST",
+                    },
+                }).encode("utf-8")
+            return 200, json.dumps({
+                "id": str(uuid.uuid4()),
+                "estado": "EnRevision",
+            }).encode("utf-8")
+        if base == "/api/v1/mi-publicacion/estado-mapa":
+            return 200, json.dumps({
+                "id": str(uuid.uuid4()),
+                "latitud": 19.4326,
+                "longitud": -99.1332,
+                "etiqueta": "Tu espacio · En revisión",
+                "estadoPublicacion": "EnRevision",
+            }).encode("utf-8")
         if base in (
             "/api/v1/expedientes/mi-expediente/ine",
             "/api/v1/expedientes/mi-expediente/comprobante",
@@ -273,6 +299,16 @@ class FakeHttpClient:
         if base.startswith("/api/v1/admin/expedientes/") and "/documentos/" in base:
             return 200, json.dumps({
                 "url": "/api/v1/expedientes/documentos/token-dast",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/admin/expedientes/") and base.endswith("/aprobar"):
+            return 200, json.dumps({
+                "id": str(uuid.uuid4()),
+                "estado": "Aprobado",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/admin/expedientes/") and base.endswith("/rechazar"):
+            return 200, json.dumps({
+                "id": str(uuid.uuid4()),
+                "estado": "Rechazado",
             }).encode("utf-8")
         if base.startswith("/api/v1/admin/expedientes/"):
             return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
@@ -328,9 +364,9 @@ class ZapDastTests(unittest.TestCase):
         self.assertIn("estadoPublicacion", command[-1])
         self.assertIn("estadoOcupacion", command[-1])
 
-    def test_openapi_operations_incluyen_37_operaciones_y_auth(self):
+    def test_openapi_operations_incluyen_41_operaciones_y_auth(self):
         operations = parse_openapi_operations(SPEC)
-        self.assertEqual(37, len(operations))
+        self.assertEqual(41, len(operations))
         auth = {(item["method"], item["path"]) for item in operations if item["auth"]}
         self.assertIn(("POST", "/api/v1/auth/logout"), auth)
         self.assertIn(("DELETE", "/api/v1/cuentas/mi-cuenta"), auth)
@@ -355,7 +391,7 @@ class ZapDastTests(unittest.TestCase):
         ]
         coverage = build_coverage(operations, records)
         self.assertEqual(3, coverage["openapi_visited"])
-        self.assertEqual(34, len(coverage["missing"]))
+        self.assertEqual(38, len(coverage["missing"]))
         self.assertEqual(0, len(coverage["support_routes"]))
 
     def test_cobertura_detecta_ruta_no_visitada(self):
@@ -664,13 +700,13 @@ class ZapDastTests(unittest.TestCase):
             result = zap_dast.run_scan(args)
         return result, output
 
-    def test_run_scan_genera_evidencia_y_cobertura_37_de_37(self):
+    def test_run_scan_genera_evidencia_y_cobertura_41_de_41(self):
         result, output = self._run_scan()
         self.assertEqual(0, result)
         summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
         self.assertEqual("PASS", summary["status"])
-        self.assertEqual(37, summary["coverage"]["openapi_operations"])
-        self.assertEqual(37, summary["coverage"]["openapi_visited"])
+        self.assertEqual(41, summary["coverage"]["openapi_operations"])
+        self.assertEqual(41, summary["coverage"]["openapi_visited"])
         self.assertEqual([], summary["coverage"]["missing"])
         self.assertTrue((output / "dast-report.md").exists())
         self.assertTrue((output / "zap-report.html").exists())
