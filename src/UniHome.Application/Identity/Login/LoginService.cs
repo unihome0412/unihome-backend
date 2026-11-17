@@ -42,18 +42,22 @@ public sealed class LoginService
         _tokenSettings = tokenSettings;
     }
 
-    public async Task<LoginResult> LoginAsync(
+    /// <summary>
+    /// Valida correo, contraseña y estado sin emitir tokens ni crear una sesión
+    /// de refresh. El login del navegador reutiliza este método y nunca recibe
+    /// el JWT.
+    /// </summary>
+    public async Task<LoginAuthenticationResult> AuthenticateAsync(
         LoginCommand command,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        var now = _clock.UtcNow;
         var (email, errors) = Validate(command);
 
         if (email is null || errors.Count > 0)
         {
-            return LoginResult.ValidationFailed(errors);
+            return LoginAuthenticationResult.ValidationFailed(errors);
         }
 
         var account = await _accounts
@@ -65,36 +69,61 @@ public sealed class LoginService
             // Mismo costo de verificación que una cuenta existente. No se registra
             // el correo ni el resultado.
             _passwordHasher.VerifyPassword(_dummyPasswordHash.Hash, command.Password!);
-            return LoginResult.InvalidCredentials();
+            return LoginAuthenticationResult.InvalidCredentials();
         }
 
         if (!_passwordHasher.VerifyPassword(account.PasswordHash, command.Password!))
         {
-            return LoginResult.InvalidCredentials();
+            return LoginAuthenticationResult.InvalidCredentials();
         }
 
         if (account.Status == AccountStatus.Deleted)
         {
-            return LoginResult.Deleted();
+            return LoginAuthenticationResult.Deleted();
         }
 
         if (account.Status == AccountStatus.Suspended)
         {
-            return LoginResult.Suspended();
+            return LoginAuthenticationResult.Suspended();
         }
 
         if (!account.IsEmailConfirmed)
         {
-            return LoginResult.EmailNotConfirmed();
+            return LoginAuthenticationResult.EmailNotConfirmed();
         }
 
+        return LoginAuthenticationResult.Success(account.Id);
+    }
+
+    public async Task<LoginResult> LoginAsync(
+        LoginCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        var authentication = await AuthenticateAsync(command, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!authentication.Succeeded)
+        {
+            return authentication.Status switch
+            {
+                LoginStatus.ValidationFailed =>
+                    LoginResult.ValidationFailed(authentication.ValidationErrors),
+                LoginStatus.EmailNotConfirmed => LoginResult.EmailNotConfirmed(),
+                LoginStatus.Suspended => LoginResult.Suspended(),
+                LoginStatus.Deleted => LoginResult.Deleted(),
+                _ => LoginResult.InvalidCredentials()
+            };
+        }
+
+        var now = _clock.UtcNow;
+        var accountId = authentication.AccountId!.Value;
         var sessionId = Guid.NewGuid();
         var refreshToken = _refreshTokens.Generate(sessionId);
         var refreshExpiresAt = now.Add(_tokenSettings.RefreshTokenLifetime);
 
         var session = new RefreshSession(
             sessionId,
-            account.Id,
+            accountId,
             refreshToken.Hash,
             now,
             refreshExpiresAt,
@@ -108,7 +137,7 @@ public sealed class LoginService
             .CreateAsync(session, cancellationToken)
             .ConfigureAwait(false);
 
-        var accessToken = _accessTokens.Issue(account.Id, sessionId, now);
+        var accessToken = _accessTokens.Issue(accountId, sessionId, now);
 
         return LoginResult.Success(
             accessToken.Value,

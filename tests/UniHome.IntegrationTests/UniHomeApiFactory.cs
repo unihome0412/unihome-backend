@@ -48,6 +48,10 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     public static readonly Guid TestAdminAccountId =
         Guid.Parse("d3b07384-d9a0-4f5a-8a8d-1a2b3c4d5e6f");
 
+    /// <summary>Cuenta de solo lectura documental usada en pruebas de Swagger.</summary>
+    public static readonly Guid TestDocumentationReaderAccountId =
+        Guid.Parse("7a1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d");
+
     public InMemoryAccountRepository Accounts { get; } = new();
 
     public InMemoryRefreshSessionRepository Sessions { get; } = new();

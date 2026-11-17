@@ -224,13 +224,14 @@ opt-in no sustituye esta comprobación.
 | `Cloudinary__PublicBaseUrl` | **Faltante** |
 | `PasswordRecovery__ResetLinkBaseUrl` | Faltante; necesario para recuperación |
 | `Admin__AccountIds` | Faltante; M06 ya existe, provisión formal pendiente de M13 |
+| `DocumentationAccess__AccountIds` | Opcional; lectores de documentación sin privilegios administrativos |
 
 **Actualización 17-nov-2026:** la lectura de solo lectura de `unihome-api`
 mostró `Api__EnableSwagger=false`, `Redis__Enabled=true` con referencias a
 secretos, `Cloudinary__*`, `Admin__AccountIds` y `Proxy__TrustForwardedHeaders=true`
-con proxies loopback. No se modificó Azure. Si se habilita Swagger en una ventana
-autorizada, el código actual exige administrador y cookie de documentación; ya no
-es público. La migración `M07-001` sigue siendo un Gate independiente: no se
+con proxies loopback. No se modificó Azure. Si se habilita Swagger en una ventana autorizada, el código actual exige login de
+navegador y permiso documental (administrador o lector configurado); ya no es
+público. La migración `M07-001` sigue siendo un Gate independiente: no se
 aplicó en Atlas y los favoritos fallan cerrados con `503` hasta su promoción.
 
 `Api__EnableSwagger=false` sigue siendo el valor recomendado fuera de una ventana

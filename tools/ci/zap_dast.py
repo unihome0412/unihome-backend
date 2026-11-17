@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import base64
 import email
+import ipaddress
 import json
 import os
 import re
@@ -115,12 +116,33 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _is_loopback_url(url: str) -> bool:
+    """Indica si la URL apunta a loopback, nunca a un host productivo."""
+    host = urllib.parse.urlsplit(url).hostname
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 class HttpClient:
     """Cliente HTTP que puede enviar todo su tráfico por el proxy de ZAP."""
 
     def __init__(self, target: str, proxy: str | None) -> None:
         self.target = target.rstrip("/")
         self.records: list[ResponseRecord] = []
+        # El runner DAST usa loopback y un proxy ZAP local. Simula el ingress
+        # TLS de Azure solo dentro de loopback; nunca añade este encabezado a
+        # un objetivo remoto ni a un proxy no local.
+        self._forwarded_proto = (
+            "https"
+            if proxy and _is_loopback_url(self.target) and _is_loopback_url(proxy)
+            else None
+        )
         for key in ("NO_PROXY", "no_proxy"):
             os.environ.pop(key, None)
 
@@ -147,6 +169,8 @@ class HttpClient:
             "Accept": "application/json, text/html;q=0.9, */*;q=0.1",
             "User-Agent": "UniHome-DAST/1.0",
         }
+        if self._forwarded_proto:
+            headers["X-Forwarded-Proto"] = self._forwarded_proto
         data = None
         if body is not None:
             data = json.dumps(body).encode("utf-8")
@@ -229,6 +253,8 @@ class HttpClient:
             "User-Agent": "UniHome-DAST/1.0",
             "Content-Type": f"multipart/form-data; boundary={boundary}",
         }
+        if self._forwarded_proto:
+            headers["X-Forwarded-Proto"] = self._forwarded_proto
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
@@ -879,8 +905,11 @@ def render_markdown(
         "captura local; no se usaron Atlas, Brevo, Azure ni secretos reales.",
         "- Las cuentas se crearon y confirmaron mediante los endpoints reales de "
         "la API. Los tokens no se guardaron en los artefactos.",
-        "- El HTTP local es intencional para el runner aislado; no hay puertos "
-        "públicos ni despliegue. HSTS/HTTPS no aplica a este loopback.",
+        "- El runner usa HTTP de loopback, pero el cliente DAST añade "
+        "`X-Forwarded-Proto: https` solo si objetivo y proxy son loopback; la "
+        "API confía en esa cabecera únicamente desde Proxy__KnownProxies. "
+        "Así se simula el ingress TLS sin abrir puertos ni confiar en clientes "
+        "remotos; un HTTP directo no obtiene sesión documental.",
         "- Fuera de alcance: Active Scan, Full Scan, pruebas de carga, datos "
         "reales, Atlas, Brevo y Azure.",
         "- Reportes: `zap-report.html`, `zap-report.json`, "
@@ -1061,8 +1090,11 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", "/openapi/v1.json", expected={401}, openapi=False,
         note="OpenAPI sin sesión")
     http.request(
-        "GET", "/swagger/index.html", expected={401}, openapi=False,
-        note="Swagger UI sin sesión")
+        "GET", "/swagger/index.html", expected={302}, openapi=False,
+        note="Swagger UI sin sesión redirige a login")
+    http.request(
+        "GET", "/swagger/login", expected={200}, openapi=False,
+        note="Login documental público")
 
     _, spec_payload, _ = http.request(
         "GET", "/openapi/v1.json", expected={200}, token=access_admin,

@@ -11,7 +11,7 @@ Referencia de diseño: grafo de trabajos GitHub Actions compartido el 6 de novie
 | Build & Test | Restore locked, build Release, formato, unit/integration local y test del gate | Código y CI modificados |
 | Dependency scan | NuGet High/Critical, preserva configuración existente | Siempre |
 | Secret scan | Gitleaks, preserva el análisis del historial existente | Siempre |
-| Contract Test (OpenAPI) | Tests existentes de OpenAPI y Swagger | Código y CI; después de build |
+| Contract Test (OpenAPI) | Tests de OpenAPI, Swagger, login documental, CSRF y autorización | Código y CI; después de build |
 | PR Quality Gate | Analiza realmente los resultados; **skipped no es passed** | Todos los runs, aunque fallen anteriores |
 | Hardening Report | Tabla Markdown y artefacto con resultados reales | Todos los runs salvo cancelación |
 
@@ -60,8 +60,9 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
   eliminación de cuenta. Las claves JWT/HMAC y la contraseña SMTP son valores
   sintéticos del runner; los tokens no se publican en artefactos.
 - Inicia sesión con el administrador sintético y descarga `/openapi/v1.json` con
-  Bearer. Antes comprueba que `/openapi/v1.json` y `/swagger/index.html`
-  responden `401` sin sesión; después visita Swagger UI y `/` con la sesión
+  Bearer. Antes comprueba que `/openapi/v1.json` responde `401` sin sesión,
+  `/swagger/index.html` redirige a `/swagger/login` y que `/swagger/login` es el
+  formulario público mínimo. Después visita Swagger UI y `/` con la sesión
   administrativa. La tabla `route-coverage.json` registra método, ruta,
   autenticación requerida, códigos de respuesta y ruta visitada. Una operación
   nueva en OpenAPI que no tenga tráfico hace fallar el job.
@@ -107,8 +108,12 @@ PASS anticipado.
 
 **Alcance pendiente y riesgos:** el análisis pasivo no demuestra lógica de
 negocio ni autorización a nivel de objeto; la cobertura se limita a las rutas
-documentadas y las rutas de soporte enumeradas. El HTTP de loopback es
-intencional y no representa el despliegue; HSTS/HTTPS no aplica a este runner.
+documentadas y las rutas de soporte enumeradas. El runner usa HTTP de
+loopback, pero el cliente DAST añade `X-Forwarded-Proto: https` solo cuando
+el objetivo y el proxy ZAP son loopback; la API confía en esa cabecera
+únicamente desde `Proxy__KnownProxies=127.0.0.1/::1`. Esto simula el ingress
+TLS de Azure y conserva cookies Secure/HttpOnly/SameSite=Strict. Un HTTP
+directo sin el proxy confiable redirige a HTTPS y no emite cookies.
 Las alertas que aparezcan en futuras ejecuciones deben revisarse y aceptarse o
 corregirse por separado. RESTler / Pact siguen requiriendo contratos y datos de
 prueba; no se activan para aparentar cobertura.
@@ -278,11 +283,11 @@ dotnet stryker --config-file stryker-config.json
 - **Sprint 5 + saneamiento:** el alcance de mutación cubre login, recuperación,
   refresh, borrado de cuenta, favoritos, fotos, servicios, zona/reglas,
   propiedades, términos, publicación, mapa privado, perfil y `Verification/**`.
-  Ejecución local del 17 de noviembre de 2026: 507 killed, 236 survived, 84
-  NoCoverage, 165 CompileError (safe mode), 124 ignorados, 0 timeout, 0
-  errores de ejecución y mutation score **61.31 %**. El umbral pasa a
+  Ejecución local del 17 de noviembre de 2026: 509 killed, 237 survived, 84
+  NoCoverage, 165 CompileError (safe mode), 125 ignorados, 0 timeout, 0
+  errores de ejecución y mutation score **61.33 %**. El umbral pasa a
   `break=60` (high 80, low 60 se conservan) y `stryker_summary.py
-  --minimum-score 60` falla si el score baja. Los 236 sobrevivientes se reportan
+  --minimum-score 60` falla si el score baja. Los 237 sobrevivientes se reportan
   sin ocultarlos; los `ConfigureAwait` y mutaciones equivalentes no se eliminan
   del reporte para no inflar la métrica. Los servicios nuevos se cubren además
   con pruebas de integración, que Stryker no usa en esta configuración.

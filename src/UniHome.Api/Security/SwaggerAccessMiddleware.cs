@@ -1,39 +1,46 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.Extensions.Options;
 using UniHome.Api.Configuration;
 
 namespace UniHome.Api.Security;
 
 /// <summary>
 /// Protege los recursos estáticos de Swagger UI, que no pasan por endpoint
-/// routing, y emite la cookie de documentación cuando la petición ya se
-/// autenticó con un Bearer administrativo. El documento OpenAPI conserva su
-/// propia metadata de autorización mediante <c>RequireAuthorization</c>.
+/// routing, redirige al formulario de acceso cuando no hay sesión y emite la
+/// cookie documental cuando la petición ya se autenticó con Bearer. El
+/// documento OpenAPI conserva su propia metadata de autorización.
 /// </summary>
 public sealed class SwaggerAccessMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly IAuthorizationService _authorization;
+    private readonly SwaggerAccessCookie _cookie;
 
     public SwaggerAccessMiddleware(
         RequestDelegate next,
-        IAuthorizationService authorization)
+        IAuthorizationService authorization,
+        SwaggerAccessCookie cookie)
     {
         _next = next;
         _authorization = authorization;
+        _cookie = cookie;
     }
 
-    public async Task InvokeAsync(
-        HttpContext context,
-        SwaggerAccessTicketService tickets,
-        IOptions<SwaggerAccessOptions> accessOptions)
+    public async Task InvokeAsync(HttpContext context)
     {
-        var lifetime = accessOptions.Value.Lifetime;
-        var isSwaggerUi = context.Request.Path.StartsWithSegments(
+        var path = context.Request.Path;
+
+        // El formulario de acceso es el único recurso público bajo /swagger.
+        if (SwaggerAccessOptions.IsLoginPath(path))
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
+
+        var isSwaggerUi = path.StartsWithSegments(
             "/swagger",
             StringComparison.OrdinalIgnoreCase);
-        var isOpenApi = context.Request.Path.StartsWithSegments(
+        var isOpenApi = path.StartsWithSegments(
             "/openapi",
             StringComparison.OrdinalIgnoreCase);
 
@@ -57,6 +64,11 @@ public sealed class SwaggerAccessMiddleware
                 {
                     context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 }
+                else if (HttpMethods.IsGet(context.Request.Method) ||
+                         HttpMethods.IsHead(context.Request.Method))
+                {
+                    context.Response.Redirect(SwaggerAccessOptions.LoginPath);
+                }
                 else
                 {
                     await context.ChallengeAsync().ConfigureAwait(false);
@@ -66,9 +78,9 @@ public sealed class SwaggerAccessMiddleware
             }
         }
 
-        // Un administrador que llega con Bearer puede canjearlo una sola vez por
-        // la cookie HttpOnly; así el navegador puede cargar los recursos sin
-        // exponer el JWT en la URL ni en el HTML.
+        // Un administrador o un lector documental que llega con Bearer puede
+        // canjearlo una sola vez por la cookie HttpOnly; así el navegador puede
+        // cargar los recursos sin exponer el JWT en la URL ni en el HTML.
         if (context.Request.Headers.Authorization.ToString().StartsWith(
                 "Bearer ",
                 StringComparison.OrdinalIgnoreCase) &&
@@ -78,19 +90,7 @@ public sealed class SwaggerAccessMiddleware
                 "N",
                 out var accountId))
         {
-            context.Response.Cookies.Append(
-                SwaggerAccessOptions.CookieName,
-                tickets.Issue(accountId),
-                new CookieOptions
-                {
-                    HttpOnly = true,
-                    Secure = true,
-                    SameSite = SameSiteMode.Strict,
-                    Path = "/",
-                    IsEssential = true,
-                    MaxAge = lifetime,
-                    Expires = DateTimeOffset.UtcNow.Add(lifetime)
-                });
+            _cookie.Append(context.Response, accountId);
         }
 
         await _next(context).ConfigureAwait(false);
