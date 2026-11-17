@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using SkiaSharp;
 using UniHome.Application.Verification.Abstractions;
 using UniHome.Domain.Verification;
@@ -56,7 +58,15 @@ public sealed class ImageForensicsTests
     public async Task Miniatura_DeImagen_DebeSerJpegYNoSerPdf()
     {
         var jpeg = CreateJpeg(800, 600, edited: false);
-        var generator = new SkiaDocumentPreviewGenerator();
+        var generator = new SkiaDocumentPreviewGenerator(new PdfRasterizer(
+            Options.Create(new DocumentAnalysisOptions
+            {
+                PdftoppmExecutablePath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"sin-pdftoppm-{Guid.NewGuid():N}",
+                    "pdftoppm.exe")
+            }),
+            NullLogger<PdfRasterizer>.Instance));
         var document = new VerificationDocumentContent(
             jpeg,
             "image/jpeg",
@@ -77,7 +87,15 @@ public sealed class ImageForensicsTests
     public async Task Miniatura_DePdf_DebeDevolverOriginalSinDeclararlaMiniatura()
     {
         var pdf = "%PDF-1.4\n%%EOF"u8.ToArray();
-        var generator = new SkiaDocumentPreviewGenerator();
+        var generator = new SkiaDocumentPreviewGenerator(new PdfRasterizer(
+            Options.Create(new DocumentAnalysisOptions
+            {
+                PdftoppmExecutablePath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"sin-pdftoppm-{Guid.NewGuid():N}",
+                    "pdftoppm.exe")
+            }),
+            NullLogger<PdfRasterizer>.Instance));
         var document = new VerificationDocumentContent(
             pdf,
             "application/pdf",

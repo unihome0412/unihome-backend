@@ -93,6 +93,30 @@ internal sealed class FakeUnitRepository : IUnitRepository
         return Task.FromResult(true);
     }
 
+    public Task<IReadOnlyList<Unit>> ListByOwnerAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Unit>>(Items
+            .Where(unit => unit.OwnerAccountId == ownerAccountId)
+            .OrderBy(unit => unit.CreatedAt)
+            .ThenBy(unit => unit.Id)
+            .ToArray());
+
+    public Task<bool> TryTransitionPublicationStateAsync(
+        Guid id,
+        Guid ownerAccountId,
+        PublicationState expected,
+        PublicationState next,
+        CancellationToken cancellationToken = default)
+    {
+        var unit = Items.SingleOrDefault(item =>
+            item.Id == id &&
+            item.OwnerAccountId == ownerAccountId);
+
+        return Task.FromResult(
+            unit is not null && unit.TryApplyPublicationTransition(expected, next));
+    }
+
     public Task<IReadOnlyList<Unit>> FindByIdsAsync(
         IReadOnlyCollection<Guid> ids,
         CancellationToken cancellationToken = default) =>

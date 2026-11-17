@@ -158,8 +158,8 @@ expediente nace `Pendiente`; pasa a `EnRevision` solo cuando existen ambos
 documentos. La unidad también pasa a `EnRevision` si los términos están aceptados
 y tiene al menos una foto, por lo que M04 no la muestra. La decisión
 `Aprobado`/`Rechazado`, el motivo de rechazo y el cambio de etiqueta de cuenta
-pertenecen a Sprint 5 (HU-024/HU-025); el dominio ya valida esas transiciones,
-pero no se exponen endpoints en Sprint 4.
+se implementan en Sprint 5; el dominio valida esas transiciones y los endpoints
+quedan documentados en la sección siguiente.
 
 Los documentos se guardan **cifrados con AES-256-GCM** en
 `documentos_verificacion`; el binario en claro no se persiste. El detalle
@@ -171,6 +171,44 @@ es orientativo y no determina la decisión». Si falta el motor OCR o el documen
 no es legible, el nombre queda `null` y se marca revisión manual; no se inventa.
 Detalle en [`docs/sprint-04-cierre.md`](docs/sprint-04-cierre.md) y
 [`docs/mongodb-m06.md`](docs/mongodb-m06.md).
+
+## Sprint 5 / M02-M06: dictamen y navegación
+
+El Sprint 5 completa el dictamen humano y los indicadores de navegación:
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/expedientes/mi-expediente` | Estado propio: documentos recibidos, revisión automática, decisión y motivo. |
+| `POST` | `/api/v1/admin/expedientes/{id}/aprobar` | Aprobación administrativa; el expediente y la unidad pasan a `Aprobado`/`Aprobada`. |
+| `POST` | `/api/v1/admin/expedientes/{id}/rechazar` | Rechazo con motivo obligatorio; la unidad no se publica. |
+| `GET` | `/api/v1/mi-publicacion/estado-mapa` | Pin privado de la primera publicación `EnRevision`, con la etiqueta «Tu espacio · En revisión». |
+
+Reglas principales:
+
+- Solo un administrador puede decidir. La decisión se registra con actor, fecha,
+  auditoría y CAS de concurrencia; una segunda decisión responde `409`.
+- La aprobación y la unidad se sincronizan con compensación si falla la unidad o
+  la auditoría; una publicación nunca se hace visible por accidente.
+- La aprobación cambia la etiqueta derivada del perfil a
+  `ConEspaciosPublicados` y el anuncio aparece en M04. El rechazo deja la unidad
+  oculta y expone el motivo al solicitante.
+- `PerfilResponse` añade `estadoPrimeraPublicacion` para que Android decida entre
+  Resumen, «Tu espacio está en revisión» y el estado rechazado; la barra inferior
+  y el menú Rentas siguen siendo UI.
+- `resultadoComparacionNombres` compara OCR normalizado (acentos, orden, nombres
+  compuestos). Una diferencia marca `esSospechoso` y **nunca** aprueba/rechaza
+  automáticamente. Si falta texto fiable queda `NoDisponible`.
+- `arrendadorVerificado` pasa a `true` en tarjeta, ficha, miniaturas y favoritos
+  cuando el expediente del propietario está aprobado.
+- PDF escaneados se rasterizan con `pdftoppm` (Poppler) y se leen con Tesseract;
+  las miniaturas PDF también se generan localmente. Si falta el binario, el
+  resultado se marca `NoDisponible` y la vista previa vuelve al PDF original.
+- `DocumentSecurity:CurrentKeyVersion` y `PreviousEncryptionKeys` permiten rotar
+  AES-256-GCM sin perder documentos anteriores. Los enlaces firmados siguen
+  expirando en 300 s.
+
+Detalle en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md), incluida la
+matriz de las 56 HU de Sprints 1–5.
 
 ## Seguridad de sesión
 
@@ -229,18 +267,22 @@ Detalle en [`docs/sprint-04-cierre.md`](docs/sprint-04-cierre.md) y
   transitorios se reintentan de forma acotada; FailClosed conserva el 503 y los
   errores de autenticación/contrato no se reintentan.
 - `DocumentSecurity__EncryptionKey` debe ser Base64 de 32 bytes fuera de
-  Development y se usa para AES-256-GCM. `DocumentSecurity__UrlSigningKey` es
-  opcional (se deriva de la clave de cifrado) y `UrlLifetimeSeconds` vale 300 por
-  defecto, máximo 900. `DocumentSecurity__PublicBaseUrl` permite enlaces
-  absolutos HTTPS; si falta, el enlace es relativo y nunca se usa la cabecera
-  `Host`. En Development, si falta la clave de cifrado, se genera una efímera por
-  proceso y los documentos dejan de abrirse al reiniciar.
+  Development y se usa para AES-256-GCM. `DocumentSecurity__CurrentKeyVersion` y
+  `DocumentSecurity__PreviousEncryptionKeys` permiten rotar conservando lectura;
+  `DocumentSecurity__UrlSigningKey` es opcional (se deriva de la clave de cifrado)
+  y `UrlLifetimeSeconds` vale 300 por defecto, máximo 900.
+  `DocumentSecurity__PublicBaseUrl` permite enlaces absolutos HTTPS; si falta, el
+  enlace es relativo y nunca se usa la cabecera `Host`. En Development, si falta
+  la clave de cifrado, se genera una efímera por proceso y los documentos dejan de
+  abrirse al reiniciar.
 - `DocumentAnalysis__TesseractExecutablePath` apunta al binario Tesseract
   (`tesseract` por defecto). `TesseractLanguage=spa+eng`, timeout 30 s y PSM 6.
-  La imagen Docker instala `tesseract-ocr`, `tesseract-ocr-eng` y
-  `tesseract-ocr-spa`; si falta el binario, el OCR queda `NoDisponible` y no se
-  inventa el nombre. ELA y metadatos se ejecutan en proceso con SkiaSharp/PdfPig
-  y no requieren servicios.
+  `DocumentAnalysis__PdftoppmExecutablePath` apunta a Poppler (`pdftoppm`);
+  `PdfRasterMaxPages=3` y `PdfRasterDpi=200` limitan el rasterizado. La imagen
+  Docker instala `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-spa` y
+  `poppler-utils`; si falta un binario, el OCR/rasterizado queda `NoDisponible`
+  y no se inventa el nombre. ELA y metadatos se ejecutan en proceso con
+  SkiaSharp/PdfPig y no requieren servicios.
 
 - Límite "por cuenta" de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
@@ -420,21 +462,27 @@ dotnet test UniHome.Backend.slnx --configuration Release
 dotnet format UniHome.Backend.slnx --verify-no-changes
 ```
 
-La suite local cubre M06 con validación de archivos, cifrado AES-GCM, firma y
-expiración de enlaces, transiciones del expediente, aislamiento administrativo,
-idempotencia, reenvío conflictivo y visibilidad pública. La prueba OCR real se
-habilita con Tesseract local:
+La suite local cubre M06 con validación de archivos, cifrado AES-GCM, rotación de
+claves, firma y expiración de enlaces, transiciones y decisiones del expediente,
+aislamiento administrativo, idempotencia, reenvío conflictivo, comparación de
+nombres y visibilidad pública. La prueba OCR real se habilita con Tesseract y
+Poppler locales:
 
 ```powershell
 $env:UNIHOME_TESSERACT_PATH = "$env:LOCALAPPDATA\Programs\Tesseract-OCR\tesseract.exe"
-dotnet test tests/UniHome.UnitTests --configuration Release --filter "FullyQualifiedName~RealOcrTests"
+$env:UNIHOME_PDFTOPPM_PATH = "<ruta-a-pdftoppm.exe>"
+dotnet test tests/UniHome.UnitTests --configuration Release --filter "FullyQualifiedName~RealOcrTests|FullyQualifiedName~RealScannedPdfTests"
 dotnet test tests/UniHome.IntegrationTests --configuration Release --filter "FullyQualifiedName~RealOcrVerificationEndpointTests"
 ```
 
-Si Tesseract no está instalado, esas pruebas se omiten explícitamente y no se
-declaran aprobadas. El workflow manual
+Si Tesseract o Poppler no están instalados, esas pruebas se omiten explícitamente
+y no se declaran aprobadas. El workflow manual
 [`.github/workflows/ocr-documental.yml`](.github/workflows/ocr-documental.yml)
-prepara la ejecución autorizada en CI con el motor real.
+prepara la ejecución autorizada en CI con ambos motores reales.
+
+Estado local del cierre: **654 unitarias** y **224 integraciones ejecutadas**
+(9 opt-in de Mongo/Cloudinary omitidas de forma explícita). La matriz de las
+56 HU de Sprints 1–5 está en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md).
 
 Las pruebas de integración habituales usan `WebApplicationFactory` y dobles en memoria;
 no requieren un clúster real. La CI de GitHub Actions (`.github/workflows/ci.yml`)
@@ -456,7 +504,9 @@ o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results
 La ejecución manual de verificación
 ([43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
 commit de código `f51ac10`) dejó 4/4 pruebas reales aprobadas, 0 omitidas,
-`M01-001` y `M03-001` válidas y la limpieza temporal confirmada.
+`M01-001` y `M03-001` válidas y la limpieza temporal confirmada. **Sprint 4/5**
+añade `M06-001` y las dos pruebas de verificación documental; la siguiente
+ejecución autorizada debe mostrar **8/8** y permanece **PENDIENTE_CI**.
 
 El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
@@ -484,11 +534,18 @@ informativas. El artefacto `dast-zap-results` contiene HTML/JSON/Markdown y la
 limpieza confirmó API/SMTP detenidos, contenedor ZAP eliminado y base efímera
 borrada. `PR Quality Gate` y `Hardening Report` terminaron en verde.
 
-**Sprint 4:** el catálogo OpenAPI tiene **37 operaciones**. La ejecución manual
+**Sprint 4:** el catálogo OpenAPI pasó a **37 operaciones**. La ejecución manual
 #280 visitó 30/37 porque el fixture DAST no ejercía todavía las rutas M06; el
 fixture se amplió para cargar INE/comprobante, enviar la primera publicación y
 consultar bandeja/detalle/enlace firmado administrativo. La nueva ejecución
-37/37 queda **PENDIENTE_CI** y no se declara PASS anticipado.
+37/37 quedó **PENDIENTE_CI** y no se declara PASS anticipado.
+
+**Sprint 5:** el catálogo OpenAPI pasa a **41 operaciones**. El fixture DAST
+ejecuta el flujo completo con dos cuentas: la primera consulta su estado y su pin
+privado, y el administrador la aprueba; la segunda repite el flujo y el
+administrador la rechaza con motivo, que el solicitante consulta después. La
+exploración M04 se valida tras la aprobación real. La ejecución real 41/41 queda
+**PENDIENTE_CI** y no se declara PASS anticipado.
 
 El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
 cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que
@@ -610,23 +667,24 @@ declara listo para el primer despliegue hasta completar esos pasos.
   almacenamiento falla cerrado con `503`. La prueba real opt-in est? **PENDIENTE**
   de credenciales seguras. Detalle en
   [`docs/dec-04-cloudinary.md`](docs/dec-04-cloudinary.md).
-- **Sprint 4 implementado, no productivo:** M06 recibe INE/comprobante, crea el
-  expediente, ejecuta OCR/ELA/metadatos, lo pasa a `EnRevision` y expone la
-  bandeja administrativa. La publicación no aparece en M04 hasta una decisión
-  favorable. HU-024/HU-025 (aprobar/rechazar), la etiqueta «Con espacios
-  publicados» y la notificación al solicitante pertenecen a Sprint 5.
-- `arrendadorVerificado` y `etiquetaCuenta` permanecen en sus valores actuales
-  hasta que exista la aprobación administrativa de Sprint 5; no se inventan.
+- **Sprints 4–5 implementados, no productivos:** M06 recibe INE/comprobante,
+  ejecuta OCR/ELA/metadatos, aplica comparación orientativa de nombres, registra
+  decisiones administrativas con auditoría y sincroniza la unidad. La publicación
+  solo aparece en M04 después de aprobación; el rechazo expone el motivo al
+  solicitante. Notificaciones push/mensajería M12 pertenecen a Sprint 6.
+- `arrendadorVerificado` se calcula desde un expediente aprobado en tarjeta,
+  ficha, miniaturas y favoritos; `etiquetaCuenta` y
+  `estadoPrimeraPublicacion` permiten la navegación de arrendador.
 - `M06-001` no se aplicó ni promovió a Atlas. La prueba real
   `MongoVerificationPersistenceTests` está preparada y **BLOCKED** en el entorno
   local sin `mongod`; debe ejecutarse en `mongo-db-test` con autorización.
-- OCR: Tesseract real validado localmente para imágenes. Un PDF sin capa de texto
-  no se rasteriza (falta `pdftoppm` u otro rasterizador) y se marca
-  `NoDisponible`. La miniatura administrativa de PDF se sirve como vista previa
-  del PDF, no como imagen rasterizada.
-- Cifrado documental: AES-256-GCM con clave externa. No hay rotación de clave ni
-  política de retención/purga de versiones (ADR-005). Cambiar la clave invalida
-  los documentos previos.
+- OCR: Tesseract y Poppler están integrados localmente; un PDF escaneado se
+  rasteriza y se lee con OCR real. Si falta un binario, se marca `NoDisponible`
+  y no se inventa el nombre. La miniatura PDF se genera con Poppler; si falla,
+  se devuelve el PDF original.
+- Cifrado documental: AES-256-GCM con rotación de claves mediante
+  `CurrentKeyVersion`/`PreviousEncryptionKeys`. La política de retención/purga de
+  versiones sigue pendiente (ADR-005).
 - El panel de HU-011 cubre Universidades en Sprint 1; la bandeja administrativa de
   expedientes ya existe en backend. Usuarios pertenece a M13 y no se crearon
   endpoints de relleno.

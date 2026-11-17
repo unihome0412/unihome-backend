@@ -81,6 +81,7 @@ public sealed class MongoVerificationBsonMappingTests
             OriginalFileName = "ine.png",
             SizeBytes = 4,
             Sha256 = new string('A', 64),
+            KeyVersion = 2,
             Nonce = [1, 2, 3],
             Tag = [4, 5, 6],
             Ciphertext = [7, 8, 9],
@@ -93,7 +94,9 @@ public sealed class MongoVerificationBsonMappingTests
         var bson = document.ToBsonDocument();
         Assert.True(bson.Contains("expedienteId"));
         Assert.True(bson.Contains("ciphertext"));
+        Assert.True(bson.Contains("keyVersion"));
         Assert.False(bson.Contains("ExpedienteId"));
+        Assert.Equal(2, restored.KeyVersion);
         Assert.Equal(new byte[] { 1, 2, 3 }, restored.Nonce);
         Assert.Equal(new byte[] { 4, 5, 6 }, restored.Tag);
         Assert.Equal(new byte[] { 7, 8, 9 }, restored.Ciphertext);

@@ -165,9 +165,10 @@ def _create_unit(http: HttpClient, token: str, property_id: str) -> str:
 def _publish_unit_for_exploration(unit_id: str) -> None:
     """Publica el fixture M04/M07 en la base efímera de RESTler.
 
-    M06 no existe en Sprint 3; el job usa una base exclusiva y desechable. Si
-    no se recibe el contenedor (por ejemplo, en pruebas locales) no se hace
-    nada. En CI se exige el fixture para que las rutas públicas tengan datos.
+    RESTler conserva este fixture para que las rutas públicas tengan datos; el
+    job DAST usa la aprobación real de Sprint 5. La base es exclusiva y
+    desechable. Si no se recibe el contenedor (por ejemplo, en pruebas locales)
+    no se hace nada; en CI se exige el fixture para las rutas públicas.
     """
     container = os.environ.get("MONGO_CONTAINER_ID", "").strip()
     database = os.environ.get("MONGO_RESTLER_DATABASE", "").strip()

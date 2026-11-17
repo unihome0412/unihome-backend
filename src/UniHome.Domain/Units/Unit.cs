@@ -241,6 +241,39 @@ public sealed class Unit
         return true;
     }
 
+    /// <summary>
+    /// Transición usada por los adaptadores de prueba y por la decisión
+    /// administrativa. Solo permite las aristas de ARQ-003.
+    /// </summary>
+    public bool TryApplyPublicationTransition(
+        PublicationState expected,
+        PublicationState next)
+    {
+        if (PublicationState != expected)
+        {
+            return false;
+        }
+
+        var allowed = (expected, next) switch
+        {
+            (PublicationState.Borrador, PublicationState.EnRevision) => true,
+            (PublicationState.Rechazada, PublicationState.EnRevision) => true,
+            (PublicationState.EnRevision, PublicationState.Aprobada) => true,
+            (PublicationState.EnRevision, PublicationState.Rechazada) => true,
+            // Solo para compensar una decisión cuyo efecto no pudo persistirse.
+            (PublicationState.Aprobada, PublicationState.EnRevision) => true,
+            _ => false
+        };
+
+        if (!allowed)
+        {
+            return false;
+        }
+
+        PublicationState = next;
+        return true;
+    }
+
     public void AppendPhotos(IEnumerable<UnitPhoto> photos)
     {
         ArgumentNullException.ThrowIfNull(photos);

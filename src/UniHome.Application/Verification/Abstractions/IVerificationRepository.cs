@@ -14,6 +14,14 @@ public interface IVerificationRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Titulares con expediente Aprobado, para derivar la insignia de arrendador
+    /// verificado sin consultar uno por uno.
+    /// </summary>
+    Task<IReadOnlySet<Guid>> ListApprovedOwnerIdsAsync(
+        IReadOnlyCollection<Guid> ownerAccountIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Reemplazo con concurrencia optimista sobre <c>updatedAt</c>. Devuelve false
     /// si otra solicitud modificó el expediente desde la lectura.
     /// </summary>

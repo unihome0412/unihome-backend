@@ -2,8 +2,10 @@ using UniHome.Application.Common;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
+using UniHome.Application.Verification.Abstractions;
 using UniHome.Domain.Common;
 using UniHome.Domain.Units;
+using UniHome.Domain.Verification;
 
 namespace UniHome.Application.Units.Preview;
 
@@ -18,17 +20,20 @@ public sealed class GetUnitPreviewService
     private readonly IPropertyRepository _properties;
     private readonly IUniversityRepository _universities;
     private readonly IUnitPhotoStorage _storage;
+    private readonly IVerificationRepository _verification;
 
     public GetUnitPreviewService(
         IUnitRepository units,
         IPropertyRepository properties,
         IUniversityRepository universities,
-        IUnitPhotoStorage storage)
+        IUnitPhotoStorage storage,
+        IVerificationRepository verification)
     {
         _units = units;
         _properties = properties;
         _universities = universities;
         _storage = storage;
+        _verification = verification;
     }
 
     public async Task<OperationResult<UnitPreviewView>> GetAsync(
@@ -107,8 +112,20 @@ public sealed class GetUnitPreviewService
             distanceKm,
             TiempoTraslado: null,
             unit.ForWhom,
-            ArrendadorVerificado: false,
+            ArrendadorVerificado: await IsVerifiedAsync(unit.OwnerAccountId, cancellationToken)
+                .ConfigureAwait(false),
             EsFavorito: null,
             unit.PublicationState));
+    }
+
+    private async Task<bool> IsVerifiedAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken)
+    {
+        var expediente = await _verification
+            .FindByOwnerAsync(ownerAccountId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return expediente?.State == EstadoExpediente.Aprobado;
     }
 }

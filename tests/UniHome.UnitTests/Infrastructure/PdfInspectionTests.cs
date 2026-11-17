@@ -19,7 +19,11 @@ public sealed class PdfInspectionTests
             TesseractExecutablePath = Path.Combine(
                 Path.GetTempPath(),
                 $"sin-tesseract-{Guid.NewGuid():N}",
-                "tesseract.exe")
+                "tesseract.exe"),
+            PdftoppmExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-pdftoppm-{Guid.NewGuid():N}",
+                "pdftoppm.exe")
         };
         var engine = new TesseractCliOcrEngine(
             Options.Create(options),
@@ -27,6 +31,7 @@ public sealed class PdfInspectionTests
         var analyzer = new LocalDocumentAnalyzer(
             Options.Create(options),
             engine,
+            new PdfRasterizer(Options.Create(options), NullLogger<PdfRasterizer>.Instance),
             NullLogger<LocalDocumentAnalyzer>.Instance);
 
         var result = await analyzer.AnalyzeAsync(
@@ -50,7 +55,11 @@ public sealed class PdfInspectionTests
             TesseractExecutablePath = Path.Combine(
                 Path.GetTempPath(),
                 $"sin-tesseract-{Guid.NewGuid():N}",
-                "tesseract.exe")
+                "tesseract.exe"),
+            PdftoppmExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-pdftoppm-{Guid.NewGuid():N}",
+                "pdftoppm.exe")
         };
         var engine = new TesseractCliOcrEngine(
             Options.Create(options),
@@ -58,6 +67,7 @@ public sealed class PdfInspectionTests
         var analyzer = new LocalDocumentAnalyzer(
             Options.Create(options),
             engine,
+            new PdfRasterizer(Options.Create(options), NullLogger<PdfRasterizer>.Instance),
             NullLogger<LocalDocumentAnalyzer>.Instance);
 
         var result = await analyzer.AnalyzeAsync(

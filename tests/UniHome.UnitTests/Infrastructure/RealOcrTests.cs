@@ -23,7 +23,11 @@ public sealed class RealOcrTests
             TesseractExecutablePath = executable!,
             TesseractLanguage = "spa+eng",
             TesseractTimeoutSeconds = 60,
-            TesseractPageSegmentationMode = 6
+            TesseractPageSegmentationMode = 6,
+            PdftoppmExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-pdftoppm-{Guid.NewGuid():N}",
+                "pdftoppm.exe")
         };
         var engine = new TesseractCliOcrEngine(
             Options.Create(options),
@@ -31,6 +35,7 @@ public sealed class RealOcrTests
         var analyzer = new LocalDocumentAnalyzer(
             Options.Create(options),
             engine,
+            new PdfRasterizer(Options.Create(options), NullLogger<PdfRasterizer>.Instance),
             NullLogger<LocalDocumentAnalyzer>.Instance);
         var image = CreateNameImage();
 
@@ -57,7 +62,11 @@ public sealed class RealOcrTests
             TesseractExecutablePath = executable!,
             TesseractLanguage = "spa+eng",
             TesseractTimeoutSeconds = 60,
-            TesseractPageSegmentationMode = 6
+            TesseractPageSegmentationMode = 6,
+            PdftoppmExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-pdftoppm-{Guid.NewGuid():N}",
+                "pdftoppm.exe")
         };
         var engine = new TesseractCliOcrEngine(
             Options.Create(options),
@@ -65,6 +74,7 @@ public sealed class RealOcrTests
         var analyzer = new LocalDocumentAnalyzer(
             Options.Create(options),
             engine,
+            new PdfRasterizer(Options.Create(options), NullLogger<PdfRasterizer>.Instance),
             NullLogger<LocalDocumentAnalyzer>.Instance);
 
         var result = await analyzer.AnalyzeAsync(
@@ -88,7 +98,11 @@ public sealed class RealOcrTests
             TesseractExecutablePath = Path.Combine(
                 Path.GetTempPath(),
                 $"no-existe-{Guid.NewGuid():N}",
-                "tesseract.exe")
+                "tesseract.exe"),
+            PdftoppmExecutablePath = Path.Combine(
+                Path.GetTempPath(),
+                $"sin-pdftoppm-{Guid.NewGuid():N}",
+                "pdftoppm.exe")
         };
         var engine = new TesseractCliOcrEngine(
             Options.Create(options),
@@ -96,6 +110,7 @@ public sealed class RealOcrTests
         var analyzer = new LocalDocumentAnalyzer(
             Options.Create(options),
             engine,
+            new PdfRasterizer(Options.Create(options), NullLogger<PdfRasterizer>.Instance),
             NullLogger<LocalDocumentAnalyzer>.Instance);
 
         var result = await analyzer.AnalyzeAsync(

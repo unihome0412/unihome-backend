@@ -30,4 +30,7 @@ public static class VerificationAuditActions
     public const string ExpedienteViewed = "ExpedienteConsultado";
     public const string DocumentUrlIssued = "UrlDocumentoEmitida";
     public const string DocumentViewed = "DocumentoConsultado";
+    public const string ExpedienteApproved = "ExpedienteAprobado";
+    public const string ExpedienteRejected = "ExpedienteRechazado";
+    public const string DecisionCompensated = "DecisionCompensada";
 }

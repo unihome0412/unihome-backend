@@ -135,8 +135,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa fonts-dejavu-core
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa poppler-utils fonts-dejavu-core
           command -v tesseract
+          command -v pdftoppm
           tesseract --version | head -2
           tesseract --list-langs | grep -qx 'eng'
           tesseract --list-langs | grep -qx 'spa'
@@ -173,12 +174,12 @@ jobs:
               root = ET.parse(path).getroot()
               for result in root.findall(".//t:UnitTestResult", namespace):
                   name = result.attrib.get("testName", "")
-                  if "RealOcr" in name:
+                  if "RealOcr" in name or "RealScannedPdf" in name:
                       results.append((name, result.attrib.get("outcome", "")))
 
           print(f"OCR real: {len(results)} pruebas; omitidas={sum(1 for _, o in results if o != 'Passed')}")
-          if len(results) < 3:
-              raise SystemExit("Se esperaban al menos 3 pruebas reales de OCR en Linux.")
+          if len(results) < 5:
+              raise SystemExit("Se esperaban al menos 5 pruebas reales de OCR/PDF en Linux.")
           if any(outcome != "Passed" for _, outcome in results):
               raise SystemExit("Una prueba real de OCR fue omitida o falló.")
           PY

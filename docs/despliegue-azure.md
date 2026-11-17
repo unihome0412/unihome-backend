@@ -82,8 +82,13 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Jwt__Audience` | No | `JwtOptions` (`Jwt`) | No (tiene valor por defecto `UniHome.Mobile`) |
 | `VerificationCode__HmacSecret` | Sí | `VerificationCodeOptions` (`VerificationCode`) | Sí, mínimo 32 caracteres fuera de Development |
 | `DocumentSecurity__EncryptionKey` | Sí | `DocumentSecurityOptions` (`DocumentSecurity`) | Sí, Base64 de 32 bytes; obligatoria fuera de Development |
+| `DocumentSecurity__CurrentKeyVersion` | No | `DocumentSecurityOptions` (`DocumentSecurity`) | Opcional; 1 por defecto. Debe incrementarse junto con la rotación |
+| `DocumentSecurity__PreviousEncryptionKeys__0` | No | `DocumentSecurityOptions` (`DocumentSecurity`) | Clave anterior Base64 de 32 bytes si se rota; el índice representa la versión-1 |
 | `DocumentSecurity__UrlSigningKey` | No | `DocumentSecurityOptions` (`DocumentSecurity`) | Opcional; si falta se deriva de la clave de cifrado. Mínimo 32 caracteres si se configura |
 | `DocumentSecurity__PublicBaseUrl` | No | `DocumentSecurityOptions` (`DocumentSecurity`) | Opcional, URL HTTPS absoluta para enlaces de documentos; si falta se devuelve una ruta relativa |
+| `DocumentAnalysis__TesseractExecutablePath` | No | `DocumentAnalysisOptions` (`DocumentAnalysis`) | `tesseract` por defecto; la imagen instala el motor y los modelos `spa`/`eng` |
+| `DocumentAnalysis__TesseractLanguage` | No | `DocumentAnalysisOptions` (`DocumentAnalysis`) | `spa+eng` por defecto; no se inventa un nombre si falta el modelo |
+| `DocumentAnalysis__PdftoppmExecutablePath` | No | `DocumentAnalysisOptions` (`DocumentAnalysis`) | `pdftoppm` por defecto; la imagen instala `poppler-utils` |
 | `Smtp__Host` | No | `SmtpOptions` (`Smtp`) | Solo si se configura envío de correo |
 | `Smtp__Port` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host`; debe ser `587` (STARTTLS) |
 | `Smtp__UseStartTls` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host`; debe ser `true` |
@@ -104,6 +109,10 @@ obligatorias de esa sección se validan al arrancar. Para recuperación de contr
 `PasswordRecovery__ResetLinkBaseUrl` debe ser una URL HTTPS (o HTTP loopback en
 desarrollo) sin query ni fragmento; si falta, el endpoint responde igual pero no se
 simula el envío del enlace.
+
+La imagen final instala `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-spa` y `poppler-utils`.
+El OCR y la rasterización PDF se ejecutan localmente; no requieren un servicio
+externo ni una API key.
 
 ## Por qué `Proxy__TrustForwardedHeaders`
 

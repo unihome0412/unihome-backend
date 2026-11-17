@@ -27,7 +27,17 @@ internal sealed class MongoVerificationDocumentStore : IVerificationDocumentStor
         ILogger<MongoVerificationDocumentStore> logger)
     {
         _clientProvider = clientProvider;
-        _cipher = new AesGcmDocumentCipher(options.Value.GetEncryptionKeyBytes());
+        var security = options.Value;
+        var currentKey = security.GetEncryptionKeyBytes(security.CurrentKeyVersion);
+        var previousKeys = Enumerable
+            .Range(1, Math.Max(0, security.CurrentKeyVersion - 1))
+            .ToDictionary(
+                version => version,
+                version => security.GetEncryptionKeyBytes(version));
+        _cipher = new AesGcmDocumentCipher(
+            currentKey,
+            security.CurrentKeyVersion,
+            previousKeys);
         _logger = logger;
     }
 
@@ -57,6 +67,7 @@ internal sealed class MongoVerificationDocumentStore : IVerificationDocumentStor
             OriginalFileName = originalFileName,
             SizeBytes = content.LongLength,
             Sha256 = sha256.ToUpperInvariant(),
+            KeyVersion = encrypted.KeyVersion,
             Nonce = encrypted.Nonce,
             Tag = encrypted.Tag,
             Ciphertext = encrypted.Ciphertext,
@@ -113,7 +124,8 @@ internal sealed class MongoVerificationDocumentStore : IVerificationDocumentStor
                 expedienteId,
                 type,
                 document.Version,
-                document.Sha256);
+                document.Sha256,
+                document.KeyVersion <= 0 ? 1 : document.KeyVersion);
 
             var actualHash = Convert.ToHexString(SHA256.HashData(plaintext));
 

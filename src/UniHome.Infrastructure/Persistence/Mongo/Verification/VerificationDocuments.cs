@@ -38,6 +38,9 @@ public sealed class VerificationExpedienteDocument
     [BsonElement("resultadoComparacionNombres")]
     public string ResultadoComparacionNombres { get; set; } = "NoDisponible";
 
+    [BsonElement("comparacionNombresActualizadaAt")]
+    public DateTime? NameComparisonUpdatedAt { get; set; }
+
     [BsonElement("motivoRechazo")]
     public string? MotivoRechazo { get; set; }
 
@@ -148,6 +151,9 @@ public sealed class VerificationDocumentBlobDocument
 
     [BsonElement("sha256")]
     public string Sha256 { get; set; } = string.Empty;
+
+    [BsonElement("keyVersion")]
+    public int KeyVersion { get; set; }
 
     [BsonElement("nonce")]
     public byte[] Nonce { get; set; } = [];

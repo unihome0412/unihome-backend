@@ -3,6 +3,7 @@ using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
+using UniHome.Application.Verification.Abstractions;
 using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
 
@@ -23,19 +24,22 @@ public sealed class ExploreUnitsService
     private readonly IPropertyRepository _properties;
     private readonly IUnitFavoriteRepository _favorites;
     private readonly UnitPhotoUrlResolver _photos;
+    private readonly IVerificationRepository _verification;
 
     public ExploreUnitsService(
         IUniversityRepository universities,
         IUnitRepository units,
         IPropertyRepository properties,
         IUnitFavoriteRepository favorites,
-        UnitPhotoUrlResolver photos)
+        UnitPhotoUrlResolver photos,
+        IVerificationRepository verification)
     {
         _universities = universities;
         _units = units;
         _properties = properties;
         _favorites = favorites;
         _photos = photos;
+        _verification = verification;
     }
 
     public async Task<OperationResult<IReadOnlyList<UnitMapView>>> MapAsync(
@@ -150,13 +154,24 @@ public sealed class ExploreUnitsService
                     pageItems.Select(candidate => candidate.Unit.Id).ToArray(),
                     cancellationToken)
                 .ConfigureAwait(false);
+        var verifiedOwners = pageItems.Length == 0
+            ? new HashSet<Guid>()
+            : (await _verification
+                .ListApprovedOwnerIdsAsync(
+                    pageItems
+                        .Select(candidate => candidate.Unit.OwnerAccountId)
+                        .Distinct()
+                        .ToArray(),
+                    cancellationToken)
+                .ConfigureAwait(false)).ToHashSet();
 
         var cards = pageItems
             .Select(candidate => ExplorationProjection.BuildCard(
                 candidate.Unit,
                 candidate.DistanceKm,
                 accountId is null ? null : favoriteIds.Contains(candidate.Unit.Id),
-                _photos))
+                _photos,
+                verified: verifiedOwners.Contains(candidate.Unit.OwnerAccountId)))
             .ToArray();
 
         return OperationResult<ExplorationPage<UnitCardView>>.Success(

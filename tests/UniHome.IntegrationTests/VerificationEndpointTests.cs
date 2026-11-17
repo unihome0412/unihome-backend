@@ -1,5 +1,6 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
 using SkiaSharp;
 using UniHome.Application.Verification.Abstractions;
@@ -374,6 +375,281 @@ public sealed class VerificationEndpointTests : IClassFixture<UniHomeApiFactory>
             "ine.png",
             "image/png");
         Assert.Equal(HttpStatusCode.Forbidden, minorUpload.StatusCode);
+    }
+
+    [Fact]
+    public async Task Aprobar_DebePublicarUnidadCambiarPerfilYSerTerminal()
+    {
+        var (account, client) = await CreateApplicantAsync();
+        using var clientScope = client;
+        var publication = await SeedFirstPublicationAsync(account);
+        var uploaded = await UploadBothAsync(client);
+        using var admin = await CreateAdminClientAsync();
+
+        using var profileInReview = await client.GetAsync("/api/v1/perfil/mi-perfil");
+        using var profileInReviewJson = await ReadJsonAsync(profileInReview);
+        Assert.Equal(
+            "PublicacionEnRevision",
+            profileInReviewJson.RootElement.GetProperty("etiquetaCuenta").GetString());
+        Assert.False(profileInReviewJson.RootElement.GetProperty("puedePublicar").GetBoolean());
+        Assert.Equal(
+            "EnRevision",
+            profileInReviewJson.RootElement.GetProperty("estadoPrimeraPublicacion").GetString());
+
+        using var approve = await admin.PostAsync(
+            $"/api/v1/admin/expedientes/{uploaded.ExpedienteId}/aprobar",
+            null);
+        Assert.Equal(HttpStatusCode.OK, approve.StatusCode);
+        using var approveJson = await ReadJsonAsync(approve);
+        Assert.Equal("Aprobado", approveJson.RootElement.GetProperty("estado").GetString());
+
+        using var ownStatus = await client.GetAsync("/api/v1/expedientes/mi-expediente");
+        Assert.Equal(HttpStatusCode.OK, ownStatus.StatusCode);
+        using var ownStatusJson = await ReadJsonAsync(ownStatus);
+        Assert.Equal("Aprobado", ownStatusJson.RootElement.GetProperty("estado").GetString());
+        Assert.False(ownStatusJson.RootElement.GetProperty("decisionPendiente").GetBoolean());
+        var decision = ownStatusJson.RootElement.GetProperty("decision");
+        Assert.Equal("Aprobado", decision.GetProperty("estado").GetString());
+        Assert.Equal(JsonValueKind.Null, decision.GetProperty("motivo").ValueKind);
+        Assert.False(ownStatusJson.RootElement.TryGetProperty("esSospechoso", out _));
+        Assert.False(ownStatusJson.RootElement.TryGetProperty("nombreOcrIne", out _));
+
+        using var profile = await client.GetAsync("/api/v1/perfil/mi-perfil");
+        Assert.Equal(HttpStatusCode.OK, profile.StatusCode);
+        using var profileJson = await ReadJsonAsync(profile);
+        Assert.Equal("ConEspaciosPublicados", profileJson.RootElement.GetProperty("etiquetaCuenta").GetString());
+        Assert.False(profileJson.RootElement.GetProperty("puedePublicar").GetBoolean());
+        Assert.Equal(
+            "Aprobada",
+            profileJson.RootElement.GetProperty("estadoPrimeraPublicacion").GetString());
+
+        using var publicList = await client.GetAsync(
+            $"/api/v1/exploracion/lista?universidadId={publication.UniversityId}");
+        Assert.Equal(HttpStatusCode.OK, publicList.StatusCode);
+        using var publicListJson = await ReadJsonAsync(publicList);
+        var card = Assert.Single(publicListJson.RootElement.EnumerateArray());
+        Assert.Equal(publication.UnitId, card.GetProperty("id").GetGuid());
+        Assert.True(card.GetProperty("arrendadorVerificado").GetBoolean());
+
+        using var detail = await client.GetAsync($"/api/v1/unidades/{publication.UnitId}/ficha");
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        using var detailJson = await ReadJsonAsync(detail);
+        Assert.True(detailJson.RootElement.GetProperty("arrendadorVerificado").GetBoolean());
+
+        using var mapAfterApproval = await client.GetAsync(
+            "/api/v1/mi-publicacion/estado-mapa");
+        Assert.Equal(HttpStatusCode.NotFound, mapAfterApproval.StatusCode);
+
+        using var duplicate = await admin.PostAsync(
+            $"/api/v1/admin/expedientes/{uploaded.ExpedienteId}/aprobar",
+            null);
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+
+        using var rejectAfter = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/expedientes/{uploaded.ExpedienteId}/rechazar",
+            new { motivo = "Ya decidido" });
+        Assert.Equal(HttpStatusCode.Conflict, rejectAfter.StatusCode);
+    }
+
+    [Fact]
+    public async Task Rechazar_ExigeMotivoYNoPublicaLaUnidad()
+    {
+        var (account, client) = await CreateApplicantAsync();
+        using var clientScope = client;
+        var publication = await SeedFirstPublicationAsync(account);
+        var uploaded = await UploadBothAsync(client);
+        using var admin = await CreateAdminClientAsync();
+
+        using var missingReason = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/expedientes/{uploaded.ExpedienteId}/rechazar",
+            new { motivo = " " });
+        Assert.Equal(HttpStatusCode.BadRequest, missingReason.StatusCode);
+
+        using var reject = await admin.PostAsJsonAsync(
+            $"/api/v1/admin/expedientes/{uploaded.ExpedienteId}/rechazar",
+            new { motivo = "El comprobante no es legible" });
+        Assert.Equal(HttpStatusCode.OK, reject.StatusCode);
+        using var rejectJson = await ReadJsonAsync(reject);
+        Assert.Equal("Rechazado", rejectJson.RootElement.GetProperty("estado").GetString());
+        Assert.Equal(
+            "El comprobante no es legible",
+            rejectJson.RootElement.GetProperty("motivoRechazo").GetString());
+
+        using var ownStatus = await client.GetAsync("/api/v1/expedientes/mi-expediente");
+        using var ownStatusJson = await ReadJsonAsync(ownStatus);
+        Assert.Equal("Rechazado", ownStatusJson.RootElement.GetProperty("estado").GetString());
+        Assert.Equal(
+            "El comprobante no es legible",
+            ownStatusJson.RootElement.GetProperty("decision").GetProperty("motivo").GetString());
+
+        using var publicList = await client.GetAsync(
+            $"/api/v1/exploracion/lista?universidadId={publication.UniversityId}");
+        using var publicListJson = await ReadJsonAsync(publicList);
+        Assert.Empty(publicListJson.RootElement.EnumerateArray());
+
+        using var profileAfterReject = await client.GetAsync("/api/v1/perfil/mi-perfil");
+        using var profileAfterRejectJson = await ReadJsonAsync(profileAfterReject);
+        Assert.Equal(
+            "Rechazada",
+            profileAfterRejectJson.RootElement.GetProperty("estadoPrimeraPublicacion").GetString());
+        Assert.Equal(
+            "UsuarioUniHome",
+            profileAfterRejectJson.RootElement.GetProperty("etiquetaCuenta").GetString());
+        Assert.False(
+            profileAfterRejectJson.RootElement.GetProperty("puedePublicar").GetBoolean());
+
+        using var approveAfter = await admin.PostAsync(
+            $"/api/v1/admin/expedientes/{uploaded.ExpedienteId}/aprobar",
+            null);
+        Assert.Equal(HttpStatusCode.Conflict, approveAfter.StatusCode);
+    }
+
+    [Fact]
+    public async Task Decision_RequiereAdminYNoAceptaExpedienteInexistente()
+    {
+        var (_, client) = await CreateApplicantAsync();
+        using var clientScope = client;
+        var id = Guid.NewGuid();
+
+        using var anonymous = _factory.CreateClient();
+        using var anonymousApprove = await anonymous.PostAsync(
+            $"/api/v1/admin/expedientes/{id}/aprobar",
+            null);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousApprove.StatusCode);
+
+        using var applicantApprove = await client.PostAsync(
+            $"/api/v1/admin/expedientes/{id}/aprobar",
+            null);
+        Assert.Equal(HttpStatusCode.Forbidden, applicantApprove.StatusCode);
+
+        using var admin = await CreateAdminClientAsync();
+        using var missing = await admin.PostAsync(
+            $"/api/v1/admin/expedientes/{id}/aprobar",
+            null);
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+
+    [Fact]
+    public async Task AprobacionesConcurrentes_SoloUnaDebeGanar()
+    {
+        var (account, client) = await CreateApplicantAsync();
+        using var clientScope = client;
+        await SeedFirstPublicationAsync(account);
+        var uploaded = await UploadBothAsync(client);
+        using var firstAdmin = await CreateAdminClientAsync();
+        using var secondAdmin = await CreateAdminClientAsync();
+        var url = $"/api/v1/admin/expedientes/{uploaded.ExpedienteId}/aprobar";
+
+        var responses = await Task.WhenAll(
+            firstAdmin.PostAsync(url, null),
+            secondAdmin.PostAsync(url, null));
+
+        try
+        {
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.OK);
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+
+        using var ownStatus = await client.GetAsync("/api/v1/expedientes/mi-expediente");
+        using var ownStatusJson = await ReadJsonAsync(ownStatus);
+        Assert.Equal("Aprobado", ownStatusJson.RootElement.GetProperty("estado").GetString());
+    }
+
+    [Fact]
+    public async Task ComparacionOcr_DebeMarcarDiferenciaSinDecidirNiFiltrarAlSolicitante()
+    {
+        var (account, client) = await CreateApplicantAsync();
+        using var clientScope = client;
+        var publication = await SeedFirstPublicationAsync(account);
+
+        _factory.DocumentAnalyzer.ResultFactory = type => new DocumentAnalysisResult(
+            type == TipoDocumentoVerificacion.Ine ? "ANA PEREZ" : "CARLOS RAMIREZ",
+            EstadoAnalisisDocumento.Completado,
+            EstadoAnalisisDocumento.Completado,
+            EditionDetected: false,
+            EditionSignals: [],
+            ElaAvailable: true,
+            MetadataAvailable: true,
+            UnavailableDetail: null);
+
+        try
+        {
+            var uploaded = await UploadBothAsync(client);
+            using var admin = await CreateAdminClientAsync();
+            using var detail = await admin.GetAsync(
+                $"/api/v1/admin/expedientes/{uploaded.ExpedienteId}");
+            Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+            using var detailJson = await ReadJsonAsync(detail);
+            Assert.Equal(
+                "DiferenciaDetectada",
+                detailJson.RootElement.GetProperty("resultadoComparacionNombres").GetString());
+            Assert.True(detailJson.RootElement.GetProperty("esSospechoso").GetBoolean());
+
+            using var own = await client.GetAsync("/api/v1/expedientes/mi-expediente");
+            using var ownJson = await ReadJsonAsync(own);
+            Assert.Equal("EnRevision", ownJson.RootElement.GetProperty("estado").GetString());
+            Assert.False(ownJson.RootElement.TryGetProperty("resultadoComparacionNombres", out _));
+            Assert.False(ownJson.RootElement.TryGetProperty("esSospechoso", out _));
+
+            using var publicList = await client.GetAsync(
+                $"/api/v1/exploracion/lista?universidadId={publication.UniversityId}");
+            using var publicListJson = await ReadJsonAsync(publicList);
+            Assert.Empty(publicListJson.RootElement.EnumerateArray());
+        }
+        finally
+        {
+            _factory.DocumentAnalyzer.ResultFactory = null;
+        }
+    }
+
+    [Fact]
+    public async Task MiEspacioEnRevision_DebeSerPrivadoYMostrarEtiqueta()
+    {
+        var (owner, ownerClient) = await CreateApplicantAsync();
+        var (other, otherClient) = await CreateApplicantAsync();
+        using var ownerScope = ownerClient;
+        using var otherScope = otherClient;
+        var publication = await SeedFirstPublicationAsync(owner);
+        var otherPublication = await SeedFirstPublicationAsync(other);
+        await UploadBothAsync(ownerClient);
+
+        using var anonymous = _factory.CreateClient();
+        using var anonymousMap = await anonymous.GetAsync("/api/v1/mi-publicacion/estado-mapa");
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousMap.StatusCode);
+
+        using var ownerMap = await ownerClient.GetAsync("/api/v1/mi-publicacion/estado-mapa");
+        Assert.Equal(HttpStatusCode.OK, ownerMap.StatusCode);
+        using var ownerJson = await ReadJsonAsync(ownerMap);
+        Assert.Equal(publication.UnitId, ownerJson.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal("Tu espacio · En revisión", ownerJson.RootElement.GetProperty("etiqueta").GetString());
+        Assert.Equal("EnRevision", ownerJson.RootElement.GetProperty("estadoPublicacion").GetString());
+
+        using var otherMap = await otherClient.GetAsync("/api/v1/mi-publicacion/estado-mapa");
+        Assert.Equal(HttpStatusCode.NotFound, otherMap.StatusCode);
+
+        using var publicList = await otherClient.GetAsync(
+            $"/api/v1/exploracion/lista?universidadId={publication.UniversityId}");
+        using var publicListJson = await ReadJsonAsync(publicList);
+        Assert.Empty(publicListJson.RootElement.EnumerateArray());
+        Assert.NotEqual(Guid.Empty, otherPublication.UnitId);
+    }
+
+    [Fact]
+    public async Task EstadoPropio_SinExpediente_DebeResponder404()
+    {
+        var (_, client) = await CreateApplicantAsync();
+        using var clientScope = client;
+
+        using var response = await client.GetAsync("/api/v1/expedientes/mi-expediente");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]

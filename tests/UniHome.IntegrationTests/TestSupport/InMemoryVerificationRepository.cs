@@ -54,6 +54,21 @@ public sealed class InMemoryVerificationRepository : IVerificationRepository
         }
     }
 
+    public Task<IReadOnlySet<Guid>> ListApprovedOwnerIdsAsync(
+        IReadOnlyCollection<Guid> ownerAccountIds,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlySet<Guid>>(_items.Values
+                .Where(item =>
+                    item.State == EstadoExpediente.Aprobado &&
+                    ownerAccountIds.Contains(item.OwnerAccountId))
+                .Select(item => item.OwnerAccountId)
+                .ToHashSet());
+        }
+    }
+
     public Task<bool> TryReplaceAsync(
         Expediente expediente,
         DateTimeOffset expectedUpdatedAt,
@@ -154,7 +169,8 @@ public sealed class InMemoryVerificationRepository : IVerificationRepository
             source.RiskIndicator.Signals,
             source.NameComparison,
             source.RejectionReason,
-            source.Decision);
+            source.Decision,
+            source.NameComparisonUpdatedAt);
 
     private static DocumentoVerificacion Clone(DocumentoVerificacion source) =>
         DocumentoVerificacion.Restore(

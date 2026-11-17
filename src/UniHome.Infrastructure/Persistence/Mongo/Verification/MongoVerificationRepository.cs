@@ -96,6 +96,46 @@ internal sealed class MongoVerificationRepository : IVerificationRepository
         }
     }
 
+    public async Task<IReadOnlySet<Guid>> ListApprovedOwnerIdsAsync(
+        IReadOnlyCollection<Guid> ownerAccountIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(ownerAccountIds);
+
+        if (ownerAccountIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var ids = ownerAccountIds
+                .Select(id => id.ToString("N", CultureInfo.InvariantCulture))
+                .ToArray();
+            var filter = Builders<VerificationExpedienteDocument>.Filter.And(
+                Builders<VerificationExpedienteDocument>.Filter.In(
+                    item => item.OwnerAccountId,
+                    ids),
+                Builders<VerificationExpedienteDocument>.Filter.Eq(
+                    item => item.Estado,
+                    EstadoExpediente.Aprobado.ToString()));
+            var documents = await collection
+                .Find(filter)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents
+                .Select(document => Guid.ParseExact(document.OwnerAccountId, "N"))
+                .ToHashSet();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<bool> TryReplaceAsync(
         Expediente expediente,
         DateTimeOffset expectedUpdatedAt,
@@ -247,6 +287,7 @@ internal sealed class MongoVerificationRepository : IVerificationRepository
             EsSospechoso = expediente.IsSuspicious,
             SenalesRiesgo = [.. expediente.RiskIndicator.Signals],
             ResultadoComparacionNombres = expediente.NameComparison.ToString(),
+            NameComparisonUpdatedAt = expediente.NameComparisonUpdatedAt?.UtcDateTime,
             MotivoRechazo = expediente.RejectionReason,
             CreatedAt = expediente.CreatedAt.UtcDateTime,
             UpdatedAt = expediente.UpdatedAt.UtcDateTime,
@@ -307,7 +348,10 @@ internal sealed class MongoVerificationRepository : IVerificationRepository
             document.SenalesRiesgo,
             Enum.Parse<ResultadoComparacionNombres>(document.ResultadoComparacionNombres),
             document.MotivoRechazo,
-            ToDomain(document.Decision));
+            ToDomain(document.Decision),
+            document.NameComparisonUpdatedAt is null
+                ? null
+                : ToOffset(document.NameComparisonUpdatedAt.Value));
 
     private static DocumentoVerificacion ToDomain(VerificationDocumentMetadataDocument document) =>
         DocumentoVerificacion.Restore(

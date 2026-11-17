@@ -19,7 +19,7 @@ public sealed class ExplorationAndFavoritesServiceTests
             context.Units,
             context.Properties,
             context.Favorites,
-            new UnitPhotoUrlResolver(context.Storage));
+            new UnitPhotoUrlResolver(context.Storage), new FakeVerificationRepository());
 
         var result = await service.ListAsync(
             new ExplorationQuery(
@@ -47,7 +47,7 @@ public sealed class ExplorationAndFavoritesServiceTests
             context.Units,
             context.Properties,
             context.Favorites,
-            new UnitPhotoUrlResolver(context.Storage));
+            new UnitPhotoUrlResolver(context.Storage), new FakeVerificationRepository());
 
         var list = await service.ListAsync(
             new ExplorationQuery(
@@ -82,7 +82,7 @@ public sealed class ExplorationAndFavoritesServiceTests
             context.Units,
             context.Properties,
             context.Favorites,
-            new UnitPhotoUrlResolver(context.Storage));
+            new UnitPhotoUrlResolver(context.Storage), new FakeVerificationRepository());
 
         var result = await service.MapAsync(new ExplorationQuery(
             ExplorationTestData.UniversityId,
@@ -106,7 +106,7 @@ public sealed class ExplorationAndFavoritesServiceTests
             context.Properties,
             context.Universities,
             context.Favorites,
-            new UnitPhotoUrlResolver(context.Storage));
+            new UnitPhotoUrlResolver(context.Storage), new FakeVerificationRepository());
         await context.Favorites.AddAsync(
             context.AccountId,
             context.Available.Id,
@@ -130,7 +130,7 @@ public sealed class ExplorationAndFavoritesServiceTests
             context.Properties,
             context.Universities,
             context.Favorites,
-            new UnitPhotoUrlResolver(context.Storage));
+            new UnitPhotoUrlResolver(context.Storage), new FakeVerificationRepository());
 
         var result = await service.GetAsync(context.InReview.Id, null);
         var occupied = await service.GetAsync(context.Occupied.Id, null);
@@ -148,7 +148,7 @@ public sealed class ExplorationAndFavoritesServiceTests
             context.Properties,
             context.Universities,
             context.Favorites,
-            new UnitPhotoUrlResolver(context.Storage));
+            new UnitPhotoUrlResolver(context.Storage), new FakeVerificationRepository());
 
         var result = await service.GetAsync(context.Available.Id, context.AccountId);
 
@@ -173,7 +173,7 @@ public sealed class ExplorationAndFavoritesServiceTests
             context.Units,
             context.Properties,
             context.Universities,
-            new UnitPhotoUrlResolver(context.Storage));
+            new UnitPhotoUrlResolver(context.Storage), new FakeVerificationRepository());
         var remove = new RemoveFavoriteService(context.Favorites);
 
         await add.AddAsync(context.AccountId, context.InReview.Id);
