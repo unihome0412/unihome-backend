@@ -217,12 +217,31 @@ public sealed class DocumentoVerificacion
             return "documento";
         }
 
-        var fileName = Path.GetFileName(value.Trim());
-        var normalized = new string(fileName
-            .Where(character => !char.IsControl(character))
-            .ToArray());
+        // No depender de Path.GetFileName: en Linux '\' no es separador y una
+        // ruta Windows se conservaría completa. Se normalizan ambos separadores
+        // y se conserva únicamente el nombre base, sin exponer la ruta original.
+        var candidate = value.Trim().Replace('\\', '/');
+        var lastSeparator = candidate.LastIndexOf('/');
 
-        if (normalized.Length == 0)
+        if (lastSeparator >= 0)
+        {
+            candidate = candidate[(lastSeparator + 1)..];
+        }
+
+        // Caso de unidad relativa de Windows sin separador, por ejemplo C:ine.png.
+        if (candidate.Length >= 2 &&
+            char.IsAsciiLetter(candidate[0]) &&
+            candidate[1] == ':')
+        {
+            candidate = candidate[2..].TrimStart('/', '\\');
+        }
+
+        var normalized = new string(candidate
+            .Where(character => !char.IsControl(character))
+            .ToArray())
+            .Trim();
+
+        if (normalized.Length == 0 || normalized is "." or "..")
         {
             return "documento";
         }

@@ -108,6 +108,38 @@ public sealed class DocumentoVerificacionTests
         Assert.Equal("documento", fallback.OriginalFileName);
     }
 
+    [Theory]
+    [InlineData(@"C:\ruta\ine.png", "ine.png")]
+    [InlineData("C:/ruta/ine.png", "ine.png")]
+    [InlineData(@"C:\ruta/sub\ine.png", "ine.png")]
+    [InlineData("/home/ana/ine.png", "ine.png")]
+    [InlineData("ine.png", "ine.png")]
+    [InlineData("C:ine.png", "ine.png")]
+    [InlineData(@"..\..\ine.png", "ine.png")]
+    [InlineData("ine (1) #final.png", "ine (1) #final.png")]
+    [InlineData("ine\u0001.png", "ine.png")]
+    [InlineData(@"C:\ruta\", "documento")]
+    [InlineData("..", "documento")]
+    [InlineData(" ", "documento")]
+    [InlineData("", "documento")]
+    [InlineData(null, "documento")]
+    public void Create_NormalizaNombresDeArchivoEntreSistemasOperativos(
+        string? fileName,
+        string expected)
+    {
+        var document = DocumentoVerificacion.Create(
+            TipoDocumentoVerificacion.Ine,
+            "doc-1",
+            fileName,
+            "image/png",
+            1,
+            Sha,
+            1,
+            Now);
+
+        Assert.Equal(expected, document.OriginalFileName);
+    }
+
     [Fact]
     public void WithAnalysis_NormalizaNombreSenalesYEstado()
     {
