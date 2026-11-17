@@ -11,6 +11,7 @@ using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Publications.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
+using UniHome.Application.Verification.Abstractions;
 using UniHome.Infrastructure.Configuration;
 using UniHome.Infrastructure.Storage;
 using UniHome.IntegrationTests.TestSupport;
@@ -63,6 +64,14 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
     public InMemoryUnitPhotoStorage PhotoStorage { get; } = new();
 
+    public InMemoryVerificationRepository Verification { get; } = new();
+
+    public InMemoryVerificationDocumentStore VerificationDocuments { get; } = new();
+
+    public InMemoryVerificationAuditRepository VerificationAudit { get; } = new();
+
+    public FakeDocumentAnalyzer DocumentAnalyzer { get; } = new();
+
     internal InMemoryCloudinaryPhotoClient CloudinaryClient { get; } = new();
 
     protected virtual bool UseCloudinaryStorage => false;
@@ -73,6 +82,8 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     /// poder emitir un JWT válido sin depender de MongoDB.
     /// </summary>
     protected virtual bool UseInMemoryExploration => true;
+
+    protected virtual bool UseInMemoryVerification => true;
 
     public InMemoryFavoriteRepository Favorites { get; } = new();
 
@@ -101,6 +112,10 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
                 ["Jwt:AccessTokenMinutes"] = "60",
                 ["Jwt:RefreshTokenDays"] = "30",
                 ["VerificationCode:HmacSecret"] = TestVerificationCodeHmacSecret,
+                ["DocumentSecurity:EncryptionKey"] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                ["DocumentSecurity:UrlSigningKey"] = "unihome-test-document-url-signing-key-0123456789",
+                ["DocumentSecurity:UrlLifetimeSeconds"] = "300",
+                ["DocumentSecurity:PublicBaseUrl"] = string.Empty,
                 ["Admin:AccountIds:0"] = TestAdminAccountId.ToString("N"),
                 ["Redis:Enabled"] = "false",
                 ["Auth:RateLimit:IpHashSalt"] = "unihome-dev-test-salt-0123456789-abcdef",
@@ -115,7 +130,9 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
                 ["Auth:RateLimit:PasswordResetRequestPermitLimit"] = "1000",
                 ["Auth:RateLimit:PasswordResetRequestWindowSeconds"] = "60",
                 ["Auth:RateLimit:PasswordResetConfirmPermitLimit"] = "1000",
-                ["Auth:RateLimit:PasswordResetConfirmWindowSeconds"] = "60"
+                ["Auth:RateLimit:PasswordResetConfirmWindowSeconds"] = "60",
+                ["Auth:RateLimit:DocumentUploadPermitLimit"] = "10000",
+                ["Auth:RateLimit:DocumentUploadWindowSeconds"] = "60"
             });
 
             if (UseCloudinaryStorage)
@@ -180,6 +197,21 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
             {
                 services.RemoveAll<IUnitFavoriteRepository>();
                 services.AddSingleton<IUnitFavoriteRepository>(Favorites);
+            }
+
+            if (UseInMemoryVerification)
+            {
+                services.RemoveAll<IVerificationRepository>();
+                services.AddSingleton<IVerificationRepository>(Verification);
+
+                services.RemoveAll<IVerificationDocumentStore>();
+                services.AddSingleton<IVerificationDocumentStore>(VerificationDocuments);
+
+                services.RemoveAll<IVerificationAuditRepository>();
+                services.AddSingleton<IVerificationAuditRepository>(VerificationAudit);
+
+                services.RemoveAll<IDocumentAnalyzer>();
+                services.AddSingleton<IDocumentAnalyzer>(DocumentAnalyzer);
             }
 
             services.RemoveAll<IVerificationEmailSender>();

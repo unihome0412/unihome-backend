@@ -6,7 +6,8 @@ public enum OperationStatus
     ValidationFailed,
     NotFound,
     Forbidden,
-    Conflict
+    Conflict,
+    Unprocessable
 }
 
 public sealed record OperationResult<T>(
@@ -35,6 +36,9 @@ public sealed record OperationResult<T>(
 
     public static OperationResult<T> Conflict() =>
         new(OperationStatus.Conflict, default, EmptyErrors);
+
+    public static OperationResult<T> Unprocessable() =>
+        new(OperationStatus.Unprocessable, default, EmptyErrors);
 
     private static IReadOnlyDictionary<string, string[]> EmptyErrors { get; } =
         new Dictionary<string, string[]>(StringComparer.Ordinal);

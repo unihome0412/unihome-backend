@@ -2,7 +2,9 @@
   "stryker-config": {
     "project": "UniHome.Application.csproj",
     "mutate": [
-      "**/Identity/Login/LoginService.cs"
+      "**/Identity/Login/LoginService.cs",
+      "**/Verification/**/*.cs",
+      "**/Publications/SubmitFirstPublication/*.cs"
     ],
     "configuration": "Release",
     "reporters": [

@@ -2,6 +2,7 @@ using UniHome.Application.Profiles.GetProfile;
 using UniHome.Domain.Accounts;
 using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
+using UniHome.Domain.Verification;
 
 namespace UniHome.Api.Configuration;
 
@@ -27,6 +28,9 @@ internal static class PublicApiEnums
             ["UnitTemplate"] = typeof(UnitTemplate),
             ["ServiceName"] = typeof(ServiceName),
             ["ServiceMode"] = typeof(ServiceMode),
-            ["AccountLabel"] = typeof(AccountLabel)
+            ["AccountLabel"] = typeof(AccountLabel),
+            ["EstadoExpediente"] = typeof(EstadoExpediente),
+            ["TipoDocumentoVerificacion"] = typeof(TipoDocumentoVerificacion),
+            ["ResultadoComparacionNombres"] = typeof(ResultadoComparacionNombres)
         };
 }

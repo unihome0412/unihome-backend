@@ -2,6 +2,7 @@ using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
+using UniHome.Infrastructure.Persistence.Mongo.Verification;
 
 namespace UniHome.Infrastructure.Persistence.Mongo.Migrations;
 
@@ -19,6 +20,7 @@ public sealed class MongoMigrationRegistry
             MongoPasswordResetMigration.Definition,
             MongoUniversityMigration.Definition,
             MongoPublicationMigration.Definition,
+            MongoVerificationMigration.Definition,
             MongoExplorationMigration.Definition
         ]);
 

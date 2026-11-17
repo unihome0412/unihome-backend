@@ -45,6 +45,8 @@ internal sealed class FakeUnitRepository : IUnitRepository
 
     public bool AppendResult { get; set; } = true;
 
+    public bool SubmitResult { get; set; } = true;
+
     public Task AddAsync(Unit unit, CancellationToken cancellationToken = default)
     {
         Items.Add(unit);
@@ -61,6 +63,35 @@ internal sealed class FakeUnitRepository : IUnitRepository
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.SingleOrDefault(unit =>
             unit.Photos.Any(photo => photo.StorageKey == storageKey)));
+
+    public Task<Unit?> FindFirstOwnedAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(Items
+            .Where(unit => unit.OwnerAccountId == ownerAccountId)
+            .OrderBy(unit => unit.CreatedAt)
+            .ThenBy(unit => unit.Id)
+            .FirstOrDefault());
+
+    public Task<bool> TrySubmitForReviewAsync(
+        Guid id,
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        var unit = Items.SingleOrDefault(item =>
+            item.Id == id &&
+            item.OwnerAccountId == ownerAccountId);
+
+        if (!SubmitResult ||
+            unit is null ||
+            unit.PublicationState == PublicationState.Aprobada)
+        {
+            return Task.FromResult(false);
+        }
+
+        unit.SubmitForReview();
+        return Task.FromResult(true);
+    }
 
     public Task<IReadOnlyList<Unit>> FindByIdsAsync(
         IReadOnlyCollection<Guid> ids,
@@ -162,6 +193,11 @@ internal sealed class FakeTermsAcceptanceRepository : ITermsAcceptanceRepository
         Task.FromResult(ExistsResult || Items.Any(item =>
             item.AccountId == accountId &&
             string.Equals(item.Version, version, StringComparison.Ordinal)));
+
+    public Task<bool> ExistsAnyAsync(
+        Guid accountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult(ExistsResult || Items.Any(item => item.AccountId == accountId));
 }
 
 internal sealed class FakeUnitPhotoStorage : IUnitPhotoStorage

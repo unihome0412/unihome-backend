@@ -1,7 +1,6 @@
 using UniHome.Application.Units.Abstractions;
 using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
-
 namespace UniHome.IntegrationTests.TestSupport;
 
 public sealed class InMemoryUnitRepository : IUnitRepository
@@ -49,6 +48,41 @@ public sealed class InMemoryUnitRepository : IUnitRepository
         {
             return Task.FromResult(_units.Values.SingleOrDefault(unit =>
                 unit.Photos.Any(photo => photo.StorageKey == storageKey)));
+        }
+    }
+
+    public Task<Unit?> FindFirstOwnedAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            var unit = _units.Values
+                .Where(candidate => candidate.OwnerAccountId == ownerAccountId)
+                .OrderBy(candidate => candidate.CreatedAt)
+                .ThenBy(candidate => candidate.Id)
+                .FirstOrDefault();
+
+            return Task.FromResult(unit);
+        }
+    }
+
+    public Task<bool> TrySubmitForReviewAsync(
+        Guid id,
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (!_units.TryGetValue(id, out var unit) ||
+                unit.OwnerAccountId != ownerAccountId ||
+                unit.PublicationState == PublicationState.Aprobada)
+            {
+                return Task.FromResult(false);
+            }
+
+            unit.SubmitForReview();
+            return Task.FromResult(true);
         }
     }
 

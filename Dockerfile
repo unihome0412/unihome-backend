@@ -16,6 +16,16 @@ RUN dotnet publish src/UniHome.Api/UniHome.Api.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.14 AS final
 WORKDIR /app
 
+# OCR local real para M06 (HU-018). No se usa un servicio externo: el motor y
+# los modelos español/inglés se instalan en la imagen y el adaptador falla a "No
+# disponible" si el binario o el modelo no existen.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        tesseract-ocr-spa \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 

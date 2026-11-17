@@ -11,7 +11,9 @@ cuenta (HU-096).
 - Clean Architecture: `Domain` no depende de otros proyectos; `Application` depende de
   `Domain`; `Infrastructure` depende de `Application` y `Domain`; `Api` compone ambas.
 - MongoDB mediante `MongoDB.Driver`, aislado detrás de puertos de `Application`.
-- Sin SQL Server, EF Core, Docker, Testcontainers, Scalar ni Swagger UI.
+- Sin SQL Server, EF Core, Testcontainers, Scalar ni Swagger UI. Docker se usa
+  únicamente para construir/validar la imagen de Azure Container Apps y los jobs
+  de CI autorizados; no se usa Docker para el desarrollo local.
 
 ## Ejecutar localmente
 
@@ -118,7 +120,7 @@ Sprint 2 / M05: `POST /api/v1/propiedades`, `POST /api/v1/propiedades/{id}/unida
 `PUT /api/v1/unidades/{id}/zona-reglas`, `GET /api/v1/unidades/{id}/vista-previa` y
 `POST /api/v1/publicaciones/primera/terminos`. Todas las rutas requieren Bearer y
 verifican que el recurso pertenezca al titular. La edad se recalcula en servidor.
-La unidad nace en `Borrador`; no se implementó el envío a revisión de Sprint 4.
+La unidad nace en `Borrador`; el envío a revisión de Sprint 4 se implementó en M06.
 La carga de fotos usa **Cloudinary Free** mediante `IUnitPhotoStorage`; las im?genes
 se suben como `authenticated` y se entregan por `GET /api/v1/fotos/{photoRef}`, no por
 una URL de Cloudinary. Si faltan `Cloudinary__CloudName`, `Cloudinary__ApiKey` o
@@ -135,6 +137,40 @@ token emitido antes de eliminarla (BE-SEC-008 ya cubre esto: el estado se revisa
 cada petición autenticada). **Pendiente:** el rechazo `409` por vínculos activos de
 propiedades/ocupación (M05/M09) y la política de retención/anonimización de datos
 (ADR-005) no están implementados.
+
+## Sprint 4 / M06: verificación documental
+
+El flujo de primera publicación se completa con:
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/v1/expedientes/mi-expediente/ine` | Sube la INE (JPG/PNG/PDF, multipart, campo `Archivo`). |
+| `POST` | `/api/v1/expedientes/mi-expediente/comprobante` | Sube escritura, boleta predial o constancia. |
+| `POST` | `/api/v1/publicaciones/primera/enviar` | Confirma la primera publicación en `EnRevision`. |
+| `GET` | `/api/v1/admin/expedientes` | Bandeja administrativa con solicitante, folio, fecha, estado y `esSospechoso`. |
+| `GET` | `/api/v1/admin/expedientes/{id}` | Detalle con OCR, ELA/metadatos y enlaces temporales. |
+| `GET` | `/api/v1/admin/expedientes/{id}/documentos/{tipo}` | Emite un enlace firmado temporal para el documento. |
+| `GET` | `/api/v1/expedientes/documentos/{token}` | Consume el enlace; exige sesión administrativa y queda auditado. |
+
+Las cargas se validan por firma binaria real (no por extensión/MIME declarado),
+pesan como máximo 10 MB y rechazan PDF con JavaScript/Launch/EmbeddedFile. El
+expediente nace `Pendiente`; pasa a `EnRevision` solo cuando existen ambos
+documentos. La unidad también pasa a `EnRevision` si los términos están aceptados
+y tiene al menos una foto, por lo que M04 no la muestra. La decisión
+`Aprobado`/`Rechazado`, el motivo de rechazo y el cambio de etiqueta de cuenta
+pertenecen a Sprint 5 (HU-024/HU-025); el dominio ya valida esas transiciones,
+pero no se exponen endpoints en Sprint 4.
+
+Los documentos se guardan **cifrados con AES-256-GCM** en
+`documentos_verificacion`; el binario en claro no se persiste. El detalle
+administrativo nunca devuelve la `storageKey` ni una URL permanente. La respuesta
+de carga incluye `avisoAlmacenamiento` con el texto «Almacenamiento cifrado y
+acceso restringido» (HU-088). Las señales
+ELA/metadatos son orientativas y se acompañan del aviso «El análisis automático
+es orientativo y no determina la decisión». Si falta el motor OCR o el documento
+no es legible, el nombre queda `null` y se marca revisión manual; no se inventa.
+Detalle en [`docs/sprint-04-cierre.md`](docs/sprint-04-cierre.md) y
+[`docs/mongodb-m06.md`](docs/mongodb-m06.md).
 
 ## Seguridad de sesión
 
@@ -183,7 +219,8 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   `ResendPermitLimit` / `ResendWindowSeconds` valen 5 por 60;
   `PasswordResetRequestPermitLimit` / `PasswordResetRequestWindowSeconds` valen 5 por
   60; `PasswordResetConfirmPermitLimit` / `PasswordResetConfirmWindowSeconds` valen 10
-  por 60. Son umbrales provisionales pendientes de aprobación. El limitador usa el
+  por 60; `DocumentUploadPermitLimit` / `DocumentUploadWindowSeconds` valen 10 por 60.
+  Son umbrales provisionales pendientes de aprobación. El limitador usa el
   adaptador distribuido configurado: Upstash Redis cuando `Redis:Enabled=true` y el
   adaptador en memoria solo en Development/pruebas. Fuera de Development Redis es
   obligatorio y las IP se seudonimizan con `Auth:RateLimit:IpHashSalt`. El timeout
@@ -191,6 +228,20 @@ propiedades/ocupación (M05/M09) y la política de retención/anonimización de 
   `Redis:RetryDelayMs=100` y `Redis:ReadinessTimeoutMs=800`. Los fallos
   transitorios se reintentan de forma acotada; FailClosed conserva el 503 y los
   errores de autenticación/contrato no se reintentan.
+- `DocumentSecurity__EncryptionKey` debe ser Base64 de 32 bytes fuera de
+  Development y se usa para AES-256-GCM. `DocumentSecurity__UrlSigningKey` es
+  opcional (se deriva de la clave de cifrado) y `UrlLifetimeSeconds` vale 300 por
+  defecto, máximo 900. `DocumentSecurity__PublicBaseUrl` permite enlaces
+  absolutos HTTPS; si falta, el enlace es relativo y nunca se usa la cabecera
+  `Host`. En Development, si falta la clave de cifrado, se genera una efímera por
+  proceso y los documentos dejan de abrirse al reiniciar.
+- `DocumentAnalysis__TesseractExecutablePath` apunta al binario Tesseract
+  (`tesseract` por defecto). `TesseractLanguage=spa+eng`, timeout 30 s y PSM 6.
+  La imagen Docker instala `tesseract-ocr`, `tesseract-ocr-eng` y
+  `tesseract-ocr-spa`; si falta el binario, el OCR queda `NoDisponible` y no se
+  inventa el nombre. ELA y metadatos se ejecutan en proceso con SkiaSharp/PdfPig
+  y no requieren servicios.
+
 - Límite "por cuenta" de confirmación (spec EP-M01-02, sin valor fijado):
   provisional de 5 intentos incorrectos por verificador
   (`VerificationCode.MaxConfirmationAttempts`); al agotarse, el código se trata como
@@ -238,6 +289,12 @@ M05 usa `propiedades`, `unidades` y `aceptaciones_terminos` con la migración
 `M05-001`; las fotos guardan solo metadatos y el binario se almacena en Cloudinary. Detalle en
 [`docs/mongodb-m05.md`](docs/mongodb-m05.md).
 
+M06 usa `expedientes_verificacion`, `documentos_verificacion` y
+`eventos_expediente` con la migración `M06-001`. Los documentos se cifran con
+AES-256-GCM antes de persistirse; el binario en claro no se guarda. El detalle de
+colecciones, campos, índices, cifrado y límites está en
+[`docs/mongodb-m06.md`](docs/mongodb-m06.md).
+
 Sprint 3 / M04-M07: `GET /api/v1/exploracion/mapa`, `GET /api/v1/exploracion/lista`,
 `GET /api/v1/unidades/{id}/tarjeta`, `GET /api/v1/unidades/{id}/ficha`,
 `PUT/DELETE /api/v1/favoritos/{id}` y `GET /api/v1/favoritos`. Mapa, lista y tarjeta
@@ -249,7 +306,7 @@ usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
 [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
 
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001`, `M03-001`, `M05-001` y `M07-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001`, `M05-001`, `M06-001` y `M07-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -260,6 +317,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M03-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M05-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M05-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M06-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M06-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M07-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M07-001
 ```
@@ -287,9 +346,9 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
 
 No ejecutar ese comando sin completar las puertas de conectividad TLS/SSPI, usuario
 técnico separado, respaldo/restauración verificado y autorización humana. Cada
-promoción selecciona una versión; hoy existen `M01-001` y `M03-001`. Las demás
-colecciones externas aún no tienen migración versionada ni contratos BSON/DTO
-aprobados.
+promoción selecciona una versión; hoy existen `M01-001`, `M01-002`, `M03-001`,
+`M05-001`, `M06-001` y `M07-001`. Las demás colecciones externas aún no tienen
+migración versionada ni contratos BSON/DTO aprobados.
 
 Matriz de cierre, endpoints y responsabilidades Android del Sprint 1:
 [`docs/sprint-01-cierre.md`](docs/sprint-01-cierre.md).
@@ -325,9 +384,10 @@ o diverge, HU-006 responde `503` y no se declara operativa.
   sin preload).
 - OpenAPI nativo de .NET 10 disponible solo en desarrollo: `GET /openapi/v1.json`.
   Incluye el esquema Bearer y marca `logout` como operación autenticada.
-- Los 12 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
+- Los 15 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
   `Occupancy`, `ForWhom`, `BathroomType`, `FurnitureType`, `UnitTemplate`,
-  `ServiceName`, `ServiceMode`, `AccountLabel`) se documentan como string con sus
+  `ServiceName`, `ServiceMode`, `AccountLabel`, `EstadoExpediente`,
+  `TipoDocumentoVerificacion`, `ResultadoComparacionNombres`) se documentan como string con sus
   valores reales; los enteros se rechazan en runtime. `POST
   /api/v1/unidades/{unitId}/fotos` se documenta como `multipart/form-data` con
   `Fotos` repetible, array de binarios, JPEG/PNG, 10 fotos, 5 MB por archivo y
@@ -360,6 +420,22 @@ dotnet test UniHome.Backend.slnx --configuration Release
 dotnet format UniHome.Backend.slnx --verify-no-changes
 ```
 
+La suite local cubre M06 con validación de archivos, cifrado AES-GCM, firma y
+expiración de enlaces, transiciones del expediente, aislamiento administrativo,
+idempotencia, reenvío conflictivo y visibilidad pública. La prueba OCR real se
+habilita con Tesseract local:
+
+```powershell
+$env:UNIHOME_TESSERACT_PATH = "$env:LOCALAPPDATA\Programs\Tesseract-OCR\tesseract.exe"
+dotnet test tests/UniHome.UnitTests --configuration Release --filter "FullyQualifiedName~RealOcrTests"
+dotnet test tests/UniHome.IntegrationTests --configuration Release --filter "FullyQualifiedName~RealOcrVerificationEndpointTests"
+```
+
+Si Tesseract no está instalado, esas pruebas se omiten explícitamente y no se
+declaran aprobadas. El workflow manual
+[`.github/workflows/ocr-documental.yml`](.github/workflows/ocr-documental.yml)
+prepara la ejecución autorizada en CI con el motor real.
+
 Las pruebas de integración habituales usan `WebApplicationFactory` y dobles en memoria;
 no requieren un clúster real. La CI de GitHub Actions (`.github/workflows/ci.yml`)
 ejecuta restore/build/formato/pruebas, revisión de dependencias vulnerables y Gitleaks
@@ -370,9 +446,10 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 `UNIHOME_ENABLE_MONGO_CI=true`) levanta MongoDB Community 8.0.34 dentro del runner
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
-`unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`
-y `M07-001` a esa base temporal y las pruebas reales de identidad, recuperación de
-contraseña, universidades, publicaciones, exploración/favoritos y bloqueo distribuido
+`unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`,
+`M06-001` y `M07-001` a esa base temporal y las pruebas reales de identidad,
+recuperación de contraseña, universidades, publicaciones, verificación documental,
+exploración/favoritos y bloqueo distribuido
 se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
@@ -385,7 +462,7 @@ El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
 `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
 `127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M01-002, M03-001,
-M05-001 y M07-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+M05-001, M06-001 y M07-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
 confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
 operación documentada y publica `zap-report.html`, `zap-report.json`,
 `dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el
@@ -406,6 +483,12 @@ OpenAPI visitadas, 26 mensajes procesados, 0 Critical/High/Medium/Low y 2
 informativas. El artefacto `dast-zap-results` contiene HTML/JSON/Markdown y la
 limpieza confirmó API/SMTP detenidos, contenedor ZAP eliminado y base efímera
 borrada. `PR Quality Gate` y `Hardening Report` terminaron en verde.
+
+**Sprint 4:** el catálogo OpenAPI tiene **37 operaciones**. La ejecución manual
+#280 visitó 30/37 porque el fixture DAST no ejercía todavía las rutas M06; el
+fixture se amplió para cargar INE/comprobante, enviar la primera publicación y
+consultar bandeja/detalle/enlace firmado administrativo. La nueva ejecución
+37/37 queda **PENDIENTE_CI** y no se declara PASS anticipado.
 
 El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
 cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que
@@ -527,17 +610,26 @@ declara listo para el primer despliegue hasta completar esos pasos.
   almacenamiento falla cerrado con `503`. La prueba real opt-in est? **PENDIENTE**
   de credenciales seguras. Detalle en
   [`docs/dec-04-cloudinary.md`](docs/dec-04-cloudinary.md).
-- El Sprint 2 no implementa el envío a revisión ni el expediente de M06 (HU-013/HU-027,
-  Sprint 4); las unidades permanecen en `Borrador`.
-- M04/M07 requieren que M06 apruebe publicaciones para que existan unidades públicas
-  reales; `arrendadorVerificado` permanece `false` hasta la verificación de M06.
-- La ubicación de universidad no se administra por M03; sin ella la distancia es null
-  y un filtro `distanciaMaxKm` responde 400. Se requiere carga controlada.
-- El perfil devuelve `etiquetaCuenta=UsuarioUniHome` y `vinculadoAUnidad=false`
-  mientras M05/M06/M09 no existan. Son indicadores derivados, no estados
-  persistidos; deberán conectarse a esos módulos sin cambiar el contrato.
-- El panel de HU-011 cubre Universidades en Sprint 1. Expedientes y Usuarios
-  pertenecen a M06/M13 de sprints posteriores; no se crearon endpoints de relleno.
+- **Sprint 4 implementado, no productivo:** M06 recibe INE/comprobante, crea el
+  expediente, ejecuta OCR/ELA/metadatos, lo pasa a `EnRevision` y expone la
+  bandeja administrativa. La publicación no aparece en M04 hasta una decisión
+  favorable. HU-024/HU-025 (aprobar/rechazar), la etiqueta «Con espacios
+  publicados» y la notificación al solicitante pertenecen a Sprint 5.
+- `arrendadorVerificado` y `etiquetaCuenta` permanecen en sus valores actuales
+  hasta que exista la aprobación administrativa de Sprint 5; no se inventan.
+- `M06-001` no se aplicó ni promovió a Atlas. La prueba real
+  `MongoVerificationPersistenceTests` está preparada y **BLOCKED** en el entorno
+  local sin `mongod`; debe ejecutarse en `mongo-db-test` con autorización.
+- OCR: Tesseract real validado localmente para imágenes. Un PDF sin capa de texto
+  no se rasteriza (falta `pdftoppm` u otro rasterizador) y se marca
+  `NoDisponible`. La miniatura administrativa de PDF se sirve como vista previa
+  del PDF, no como imagen rasterizada.
+- Cifrado documental: AES-256-GCM con clave externa. No hay rotación de clave ni
+  política de retención/purga de versiones (ADR-005). Cambiar la clave invalida
+  los documentos previos.
+- El panel de HU-011 cubre Universidades en Sprint 1; la bandeja administrativa de
+  expedientes ya existe en backend. Usuarios pertenece a M13 y no se crearon
+  endpoints de relleno.
 - Retención/limpieza de cuentas no confirmadas y anonimización de datos tras
   eliminar una cuenta (ADR-005).
 - Scalar/Swagger UI solo si se aprueba explícitamente.

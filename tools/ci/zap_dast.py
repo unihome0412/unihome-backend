@@ -1205,8 +1205,45 @@ def run_scan(args: argparse.Namespace) -> int:
         body={"versionTerminos": TERMS_VERSION},
         token=access_a, expected={200}, auth=True, note="aceptación términos")
 
-    # M04/M07: el fixture se marca público en la base efímera porque M06 aún no
-    # existe. Así ZAP visita las siete operaciones con respuestas 2xx reales.
+    # M06: documentos reales, envío a revisión y lectura administrativa.
+    _, ine_payload, _ = http.request_multipart(
+        "POST", "/api/v1/expedientes/mi-expediente/ine",
+        files=[("Archivo", "ine.png", "image/png", DAST_PHOTO_PNG)],
+        token=access_a, expected={200}, note="carga INE")
+    expediente_id = _response_id(ine_payload, "carga INE")
+    http.request_multipart(
+        "POST", "/api/v1/expedientes/mi-expediente/comprobante",
+        files=[("Archivo", "predial.png", "image/png", DAST_PHOTO_PNG)],
+        token=access_a, expected={200}, note="carga comprobante")
+    http.request(
+        "POST", "/api/v1/publicaciones/primera/enviar",
+        token=access_a, expected={200}, auth=True,
+        note="envío primera publicación")
+
+    http.request(
+        "GET", "/api/v1/admin/expedientes",
+        token=access_admin, expected={200}, auth=True,
+        note="bandeja expedientes admin")
+    http.request(
+        "GET", f"/api/v1/admin/expedientes/{expediente_id}",
+        token=access_admin, expected={200}, auth=True,
+        note="detalle expediente admin")
+    _, document_url_payload, _ = http.request(
+        "GET", f"/api/v1/admin/expedientes/{expediente_id}/documentos/ine",
+        token=access_admin, expected={200}, auth=True,
+        note="enlace documento admin")
+    document_data = _json_body(document_url_payload)
+    document_url = str(document_data.get("url") or "")
+    document_path = urllib.parse.urlsplit(document_url).path
+    if not document_path.startswith("/api/v1/expedientes/documentos/"):
+        raise DastError("El detalle no devolvió un enlace documental válido.")
+    http.request(
+        "GET", document_path, token=access_admin, expected={200}, auth=True,
+        note="lectura documento admin")
+
+    # M04/M07: el flujo M06 del Sprint 4 no expone aprobación; se marca la
+    # unidad como pública en la base efímera para visitar las operaciones
+    # públicas reales de exploración y favoritos.
     _publish_unit_for_exploration(unit_id)
     http.request(
         "GET", f"/api/v1/exploracion/mapa?universidadId={university_id}",

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Abstractions.Storage;
@@ -11,6 +12,8 @@ using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Publications.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
+using UniHome.Application.Verification.Abstractions;
+using UniHome.Infrastructure.Analysis;
 using UniHome.Infrastructure.Configuration;
 using UniHome.Infrastructure.Email;
 using UniHome.Infrastructure.Identity;
@@ -23,8 +26,10 @@ using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Sessions;
 using UniHome.Infrastructure.Persistence.Mongo.Units;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
+using UniHome.Infrastructure.Persistence.Mongo.Verification;
 using UniHome.Infrastructure.Redis;
 using UniHome.Infrastructure.Storage;
+using UniHome.Infrastructure.Verification;
 
 namespace UniHome.Infrastructure;
 
@@ -56,6 +61,40 @@ public static class DependencyInjection
         services
             .AddOptions<PasswordRecoveryOptions>()
             .Bind(configuration.GetSection(PasswordRecoveryOptions.SectionName));
+
+        services
+            .AddOptions<DocumentSecurityOptions>()
+            .Bind(configuration.GetSection(DocumentSecurityOptions.SectionName))
+            .Configure<IHostEnvironment>((options, environment) =>
+            {
+                if (string.IsNullOrWhiteSpace(options.EncryptionKey))
+                {
+                    if (!environment.IsDevelopment())
+                    {
+                        throw new InvalidOperationException(
+                            $"Configure {DocumentSecurityOptions.SectionName}:EncryptionKey " +
+                            "con 32 bytes en Base64 fuera de Development.");
+                    }
+
+                    options.EncryptionKey = DocumentSecurityOptions.CreateEphemeralKey();
+                    options.EphemeralEncryptionKey = true;
+                }
+            })
+            .Validate(
+                options => options.HasValidEncryptionKey(),
+                $"{DocumentSecurityOptions.SectionName}:EncryptionKey debe contener 32 bytes en Base64.")
+            .Validate(
+                options => options.IsValid(),
+                $"{DocumentSecurityOptions.SectionName} contiene una vigencia, clave de URL o base pública inválida.")
+            .ValidateOnStart();
+
+        services
+            .AddOptions<DocumentAnalysisOptions>()
+            .Bind(configuration.GetSection(DocumentAnalysisOptions.SectionName))
+            .Validate(
+                options => options.IsValid(),
+                $"{DocumentAnalysisOptions.SectionName} contiene límites de análisis inválidos.")
+            .ValidateOnStart();
 
         services
             .AddOptions<JwtOptions>()
@@ -158,6 +197,13 @@ public static class DependencyInjection
         services.AddSingleton<IUnitRepository, MongoUnitRepository>();
         services.AddSingleton<ITermsAcceptanceRepository, MongoTermsAcceptanceRepository>();
         services.AddSingleton<IUnitFavoriteRepository, MongoFavoriteRepository>();
+        services.AddSingleton<IVerificationRepository, MongoVerificationRepository>();
+        services.AddSingleton<IVerificationAuditRepository, MongoVerificationAuditRepository>();
+        services.AddSingleton<IVerificationDocumentStore, MongoVerificationDocumentStore>();
+        services.AddSingleton<TesseractCliOcrEngine>();
+        services.AddSingleton<IDocumentAnalyzer, LocalDocumentAnalyzer>();
+        services.AddSingleton<IDocumentPreviewGenerator, SkiaDocumentPreviewGenerator>();
+        services.AddSingleton<IDocumentUrlSigner, HmacDocumentUrlSigner>();
         services.AddHttpContextAccessor();
 
         // La decisi?n se eval?a al resolver, no al construir el contenedor: as? la

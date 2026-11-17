@@ -81,6 +81,9 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Jwt__Issuer` | No | `JwtOptions` (`Jwt`) | No (tiene valor por defecto `UniHome`) |
 | `Jwt__Audience` | No | `JwtOptions` (`Jwt`) | No (tiene valor por defecto `UniHome.Mobile`) |
 | `VerificationCode__HmacSecret` | Sí | `VerificationCodeOptions` (`VerificationCode`) | Sí, mínimo 32 caracteres fuera de Development |
+| `DocumentSecurity__EncryptionKey` | Sí | `DocumentSecurityOptions` (`DocumentSecurity`) | Sí, Base64 de 32 bytes; obligatoria fuera de Development |
+| `DocumentSecurity__UrlSigningKey` | No | `DocumentSecurityOptions` (`DocumentSecurity`) | Opcional; si falta se deriva de la clave de cifrado. Mínimo 32 caracteres si se configura |
+| `DocumentSecurity__PublicBaseUrl` | No | `DocumentSecurityOptions` (`DocumentSecurity`) | Opcional, URL HTTPS absoluta para enlaces de documentos; si falta se devuelve una ruta relativa |
 | `Smtp__Host` | No | `SmtpOptions` (`Smtp`) | Solo si se configura envío de correo |
 | `Smtp__Port` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host`; debe ser `587` (STARTTLS) |
 | `Smtp__UseStartTls` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host`; debe ser `true` |
@@ -147,12 +150,13 @@ docker build -t unihome-api:local .
 ## Crear los recursos desde cero
 
 Requiere sesión iniciada (`az login`) con la suscripción "Azure subscription 1"
-activa, y el archivo de secretos local con las 9 variables no generadas aquí
+activa, y el archivo de secretos local con las 11 variables no generadas aquí
 (nunca en el repositorio). Ningún comando de esta sección imprime valores
 sensibles: los secretos sensibles (`MongoDb__ConnectionString`,
 `Smtp__Username`, `Smtp__Password`, `Jwt__SigningKey`,
-`VerificationCode__HmacSecret`) se cargan desde un script externo al
-repositorio y se fijan directamente como *secrets* de Container Apps.
+`VerificationCode__HmacSecret`, `DocumentSecurity__EncryptionKey`) se cargan
+desde un script externo al repositorio y se fijan directamente como *secrets* de
+Container Apps.
 
 ```powershell
 az group create --name rg-unihome-dev --location eastus
@@ -205,7 +209,9 @@ az containerapp secret set --name unihome-api --resource-group rg-unihome-dev --
   "smtp-username=<valor real>" `
   "smtp-password=<valor real>" `
   "jwt-signing-key=<aleatorio >= 64 bytes, generado en el script>" `
-  "verification-code-hmac-secret=<aleatorio >= 64 bytes, generado en el script>"
+  "verification-code-hmac-secret=<aleatorio >= 64 bytes, generado en el script>" `
+  "document-encryption-key=<32 bytes aleatorios en Base64, generado en el script>" `
+  "document-url-signing-key=<aleatorio >= 32 caracteres, generado en el script>"
 
 az containerapp update --name unihome-api --resource-group rg-unihome-dev --set-env-vars `
   "ASPNETCORE_ENVIRONMENT=Production" `
@@ -224,12 +230,13 @@ az containerapp update --name unihome-api --resource-group rg-unihome-dev --set-
   "Smtp__Username=secretref:smtp-username" `
   "Smtp__Password=secretref:smtp-password" `
   "Jwt__SigningKey=secretref:jwt-signing-key" `
-  "VerificationCode__HmacSecret=secretref:verification-code-hmac-secret"
+  "VerificationCode__HmacSecret=secretref:verification-code-hmac-secret" `
+  "DocumentSecurity__EncryptionKey=secretref:document-encryption-key" `
+  "DocumentSecurity__UrlSigningKey=secretref:document-url-signing-key"
 ```
 
 **Nota de PowerShell:** si alguno de estos valores (en particular
-`MongoDb__ConnectionString`) contiene `&`, invocar `az.cmd` directo desde
-PowerShell puede hacer que `cmd.exe` lo interprete como separador de
+`MongoDb__ConnectionString`) contiene `&`, invocar `az.cmd` directo desdePowerShell puede hacer que `cmd.exe` lo interprete como separador de
 comandos. La forma confiable es invocar el intérprete real del CLI sin pasar
 por el envoltorio `.cmd`:
 

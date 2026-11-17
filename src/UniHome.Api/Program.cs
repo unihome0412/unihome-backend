@@ -37,6 +37,7 @@ using UniHome.Application.Profiles;
 using UniHome.Application.Profiles.GetProfile;
 using UniHome.Application.Properties.CreateProperty;
 using UniHome.Application.Publications.AcceptTerms;
+using UniHome.Application.Publications.SubmitFirstPublication;
 using UniHome.Application.Units.CreateUnit;
 using UniHome.Application.Units.Photos;
 using UniHome.Application.Units.Preview;
@@ -47,6 +48,10 @@ using UniHome.Application.Universities.CreateUniversity;
 using UniHome.Application.Universities.ListUniversities;
 using UniHome.Application.Universities.SearchUniversities;
 using UniHome.Application.Universities.UpdateUniversity;
+using UniHome.Application.Verification.Abstractions;
+using UniHome.Application.Verification.Admin;
+using UniHome.Application.Verification.Documents;
+using UniHome.Api.Verification;
 using UniHome.Domain.Accounts;
 using UniHome.Infrastructure;
 using UniHome.Infrastructure.Configuration;
@@ -154,6 +159,13 @@ builder.Services.AddScoped<AddFavoriteService>();
 builder.Services.AddScoped<RemoveFavoriteService>();
 builder.Services.AddScoped<ListFavoritesService>();
 builder.Services.AddScoped<AcceptTermsService>();
+builder.Services.AddScoped<SubmitFirstPublicationService>();
+builder.Services.AddScoped<UploadVerificationDocumentService>();
+builder.Services.AddScoped<ListExpedientesService>();
+builder.Services.AddScoped<GetExpedienteDetailService>();
+builder.Services.AddScoped<IssueDocumentAccessUrlService>();
+builder.Services.AddScoped<ReadVerificationDocumentService>();
+builder.Services.AddScoped<IDocumentAccessUrlBuilder, DocumentAccessUrlBuilder>();
 builder.Services.AddScoped<CreateUniversityService>();
 builder.Services.AddScoped<ListUniversitiesService>();
 builder.Services.AddScoped<UpdateUniversityService>();
@@ -459,6 +471,27 @@ builder.Services.AddRateLimiter(options =>
                     Math.Max(1, limits.PasswordResetConfirmPermitLimit),
                     TimeSpan.FromSeconds(Math.Max(1, limits.PasswordResetConfirmWindowSeconds))));
         });
+
+    options.AddPolicy(
+        AuthRateLimitPolicies.DocumentUpload,
+        httpContext =>
+        {
+            var limits = httpContext.RequestServices
+                .GetRequiredService<IOptions<AuthRateLimitOptions>>()
+                .Value;
+            var distributedLimiter = httpContext.RequestServices
+                .GetRequiredService<IDistributedRateLimiter>();
+            var partitionKey = GetClientPartitionKey(httpContext, limits.IpHashSalt);
+            var redisKey = $"unihome:rl:{AuthRateLimitPolicies.DocumentUpload}:{partitionKey}";
+
+            return RateLimitPartition.Get(
+                redisKey,
+                key => new DistributedRateLimiterBridge(
+                    distributedLimiter,
+                    key,
+                    Math.Max(1, limits.DocumentUploadPermitLimit),
+                    TimeSpan.FromSeconds(Math.Max(1, limits.DocumentUploadWindowSeconds))));
+        });
 });
 
 builder.Services.AddHsts(options =>
@@ -596,6 +629,15 @@ builder.Services.AddOpenApi("v1", options =>
             UnitPhotosOpenApiContract.Apply(operation);
         }
 
+        if (DocumentUploadOpenApiContract.AppliesTo(relativePath) &&
+            string.Equals(
+                context.Description.HttpMethod,
+                DocumentUploadOpenApiContract.Method,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            DocumentUploadOpenApiContract.Apply(operation);
+        }
+
         var metadata = context.Description.ActionDescriptor.EndpointMetadata;
         var requiresAuthentication = metadata.OfType<IAuthorizeData>().Any() &&
             !metadata.OfType<IAllowAnonymous>().Any();
@@ -638,7 +680,10 @@ app.Use(async (context, next) =>
 
         if (path.StartsWithSegments("/api/v1/auth") ||
             path.StartsWithSegments("/api/v1/cuentas") ||
-            path.StartsWithSegments("/api/v1/perfil"))
+            path.StartsWithSegments("/api/v1/perfil") ||
+            path.StartsWithSegments("/api/v1/expedientes") ||
+            path.StartsWithSegments("/api/v1/admin/expedientes") ||
+            path.StartsWithSegments("/api/v1/publicaciones"))
         {
             headers.CacheControl = "no-store";
         }
@@ -656,6 +701,17 @@ if (jwtSettings.EphemeralSigningKey)
     app.Logger.LogWarning(
         "JWT:SigningKey no está configurada. Se usa una clave efímera de Development; " +
         "los tokens emitidos dejarán de ser válidos al reiniciar el proceso.");
+}
+
+var documentSecurity = app.Services
+    .GetRequiredService<IOptions<DocumentSecurityOptions>>()
+    .Value;
+
+if (documentSecurity.EphemeralEncryptionKey)
+{
+    app.Logger.LogWarning(
+        "DocumentSecurity:EncryptionKey no está configurada. Se usa una clave efímera de " +
+        "Development; los documentos cifrados dejarán de poder abrirse al reiniciar el proceso.");
 }
 
 // Errores homogéneos: excepciones no controladas y códigos sin cuerpo.

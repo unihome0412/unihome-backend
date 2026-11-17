@@ -269,4 +269,71 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
         Assert.True(paths.TryGetProperty("/api/v1/perfil/mi-perfil", out var profile));
         Assert.True(profile.TryGetProperty("get", out _));
     }
+
+    [Fact]
+    public async Task OpenApi_DebeIncluirLosEndpointsDeM06ConSeguridad()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        var paths = root.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/expedientes/mi-expediente/ine",
+            out var ine));
+        Assert.True(ine.TryGetProperty("post", out var inePost));
+        Assert.Contains(
+            inePost.GetProperty("security").EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/expedientes/mi-expediente/comprobante",
+            out var proof));
+        Assert.True(proof.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/publicaciones/primera/enviar",
+            out var submit));
+        Assert.True(submit.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/admin/expedientes", out var adminList));
+        Assert.True(adminList.TryGetProperty("get", out var adminListGet));
+        Assert.Contains(
+            adminListGet.GetProperty("security").EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/admin/expedientes/{id}",
+            out var adminDetail));
+        Assert.True(adminDetail.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/admin/expedientes/{id}/documentos/{tipo}",
+            out var adminDocument));
+        Assert.True(adminDocument.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/expedientes/documentos/{token}",
+            out var signedDocument));
+        Assert.True(signedDocument.TryGetProperty("get", out var signedGet));
+        Assert.Contains(
+            signedGet.GetProperty("security").EnumerateArray(),
+            requirement => requirement.TryGetProperty("Bearer", out _));
+
+        var schemas = root.GetProperty("components").GetProperty("schemas");
+
+        foreach (var enumName in new[]
+                 {
+                     "EstadoExpediente", "TipoDocumentoVerificacion",
+                     "ResultadoComparacionNombres"
+                 })
+        {
+            var schema = schemas.GetProperty(enumName);
+            Assert.Equal("string", schema.GetProperty("type").GetString());
+            Assert.NotEmpty(schema.GetProperty("enum").EnumerateArray());
+        }
+    }
 }

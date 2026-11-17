@@ -28,6 +28,12 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
     public const string TestIpHashSalt =
         "unihome-production-test-salt-0123456789-abcdef";
 
+    public const string TestDocumentEncryptionKey =
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+    public const string TestDocumentUrlSigningKey =
+        "unihome-production-test-document-url-signing-key-0123456789";
+
     protected virtual bool TrustForwardedHeaders => false;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -38,6 +44,8 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("VerificationCode__HmacSecret", TestVerificationCodeHmacSecret);
         Environment.SetEnvironmentVariable("Jwt__SigningKey", TestSigningKey);
         Environment.SetEnvironmentVariable("Auth__RateLimit__IpHashSalt", TestIpHashSalt);
+        Environment.SetEnvironmentVariable("DocumentSecurity__EncryptionKey", TestDocumentEncryptionKey);
+        Environment.SetEnvironmentVariable("DocumentSecurity__UrlSigningKey", TestDocumentUrlSigningKey);
         Environment.SetEnvironmentVariable("Redis__Enabled", "true");
         Environment.SetEnvironmentVariable("Redis__RestUrl", "https://test-mock.upstash.io");
         Environment.SetEnvironmentVariable("Redis__RestToken", "mock-token-test");
@@ -70,6 +78,8 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
                 ["Jwt:RefreshTokenDays"] = "30",
                 ["VerificationCode:HmacSecret"] = TestVerificationCodeHmacSecret,
                 ["Auth:RateLimit:IpHashSalt"] = TestIpHashSalt,
+                ["DocumentSecurity:EncryptionKey"] = TestDocumentEncryptionKey,
+                ["DocumentSecurity:UrlSigningKey"] = TestDocumentUrlSigningKey,
                 ["Redis:Enabled"] = "true",
                 ["Redis:RestUrl"] = "https://test-mock.upstash.io",
                 ["Redis:RestToken"] = "mock-token-test",
@@ -81,7 +91,9 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
                 ["Auth:RateLimit:ConfirmEmailPermitLimit"] = "1000",
                 ["Auth:RateLimit:ConfirmEmailWindowSeconds"] = "60",
                 ["Auth:RateLimit:ResendPermitLimit"] = "1000",
-                ["Auth:RateLimit:ResendWindowSeconds"] = "60"
+                ["Auth:RateLimit:ResendWindowSeconds"] = "60",
+                ["Auth:RateLimit:DocumentUploadPermitLimit"] = "1000",
+                ["Auth:RateLimit:DocumentUploadWindowSeconds"] = "60"
             };
 
             if (TrustForwardedHeaders)
@@ -117,6 +129,8 @@ public class ProductionApiFactory : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("Proxy__KnownProxies__1", null);
         Environment.SetEnvironmentVariable("Proxy__KnownNetworks__0", null);
         Environment.SetEnvironmentVariable("Auth__RateLimit__IpHashSalt", null);
+        Environment.SetEnvironmentVariable("DocumentSecurity__EncryptionKey", null);
+        Environment.SetEnvironmentVariable("DocumentSecurity__UrlSigningKey", null);
         Environment.SetEnvironmentVariable("Redis__Enabled", null);
         Environment.SetEnvironmentVariable("Redis__RestUrl", null);
         Environment.SetEnvironmentVariable("Redis__RestToken", null);
