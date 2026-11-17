@@ -140,6 +140,82 @@ public sealed class VerificationServiceTests
     }
 
     [Fact]
+    public async Task SubirSinDocumento_DebeRechazarArgumentoNulo()
+    {
+        var context = await CreateContextAsync();
+
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            context.Upload.UploadAsync(
+                context.Account.Id,
+                TipoDocumentoVerificacion.Ine,
+                null!));
+    }
+
+    [Fact]
+    public async Task SubirConExpedienteAprobadoODesvinculado_DebeRechazarse()
+    {
+        var context = await CreateContextAsync();
+        await context.Upload.UploadAsync(
+            context.Account.Id,
+            TipoDocumentoVerificacion.Ine,
+            Upload("ine.png", Png));
+        await context.Upload.UploadAsync(
+            context.Account.Id,
+            TipoDocumentoVerificacion.Comprobante,
+            Upload("predial.png", Png));
+        var expediente = await context.Repository.FindByOwnerAsync(context.Account.Id);
+        Assert.NotNull(expediente);
+        expediente!.Approve(Guid.NewGuid(), Now.AddMinutes(1));
+        Assert.True(await context.Repository.TryReplaceAsync(expediente, Now));
+
+        var approved = await context.Upload.UploadAsync(
+            context.Account.Id,
+            TipoDocumentoVerificacion.Ine,
+            Upload("otra.png", Png.Concat(new byte[] { 1 }).ToArray()));
+        Assert.Equal(OperationStatus.Conflict, approved.Status);
+
+        var unlinked = await CreateContextAsync();
+        await unlinked.Repository.AddAsync(
+            CreateExpediente(unlinked.Account.Id, suspicious: false, Now));
+        var missingUnit = await unlinked.Upload.UploadAsync(
+            unlinked.Account.Id,
+            TipoDocumentoVerificacion.Ine,
+            Upload("ine.png", Png));
+        Assert.Equal(OperationStatus.NotFound, missingUnit.Status);
+    }
+
+    [Fact]
+    public async Task SubirSinFotoOSinTerminos_NoDebeEnviarLaUnidadARevision()
+    {
+        var withoutPhoto = await CreateContextAsync(withPhoto: false);
+        await withoutPhoto.Upload.UploadAsync(
+            withoutPhoto.Account.Id,
+            TipoDocumentoVerificacion.Ine,
+            Upload("ine.png", Png));
+        await withoutPhoto.Upload.UploadAsync(
+            withoutPhoto.Account.Id,
+            TipoDocumentoVerificacion.Comprobante,
+            Upload("predial.png", Png));
+        Assert.Equal(
+            PublicationState.Borrador,
+            withoutPhoto.Units.Items.Single().PublicationState);
+
+        var withoutTerms = await CreateContextAsync();
+        withoutTerms.Terms.ExistsResult = false;
+        await withoutTerms.Upload.UploadAsync(
+            withoutTerms.Account.Id,
+            TipoDocumentoVerificacion.Ine,
+            Upload("ine.png", Png));
+        await withoutTerms.Upload.UploadAsync(
+            withoutTerms.Account.Id,
+            TipoDocumentoVerificacion.Comprobante,
+            Upload("predial.png", Png));
+        Assert.Equal(
+            PublicationState.Borrador,
+            withoutTerms.Units.Items.Single().PublicationState);
+    }
+
+    [Fact]
     public async Task FalloDeAlmacenamiento_DebePropagarseComo503()
     {
         var context = await CreateContextAsync();
@@ -191,6 +267,77 @@ public sealed class VerificationServiceTests
         context.Terms.ExistsResult = false;
         var withoutTermsAgain = await context.Submit.SubmitAsync(context.Account.Id);
         Assert.Equal(OperationStatus.Unprocessable, withoutTermsAgain.Status);
+    }
+
+    [Fact]
+    public async Task EnviarSinUnidad_DebeResponderNotFound()
+    {
+        var context = await CreateContextAsync();
+        context.Units.Items.Clear();
+
+        var result = await context.Submit.SubmitAsync(context.Account.Id);
+
+        Assert.Equal(OperationStatus.NotFound, result.Status);
+    }
+
+    [Fact]
+    public async Task EnviarSinFoto_DebeResponderUnprocessable()
+    {
+        var context = await CreateContextAsync(withPhoto: false);
+
+        var result = await context.Submit.SubmitAsync(context.Account.Id);
+
+        Assert.Equal(OperationStatus.Unprocessable, result.Status);
+    }
+
+    [Fact]
+    public async Task EnviarConExpedientePendiente_DebeResponderUnprocessable()
+    {
+        var context = await CreateContextAsync();
+        await context.Repository.AddAsync(
+            CreateExpediente(context.Account.Id, suspicious: false, Now));
+
+        var result = await context.Submit.SubmitAsync(context.Account.Id);
+
+        Assert.Equal(OperationStatus.Unprocessable, result.Status);
+    }
+
+    [Fact]
+    public async Task EnviarConExpedienteRechazado_DebeResponderUnprocessable()
+    {
+        var context = await CreateContextAsync();
+        var expediente = await CompleteExpedienteAsync(context);
+        expediente.Reject("Documento no legible", Guid.NewGuid(), Now);
+        Assert.True(await context.Repository.TryReplaceAsync(expediente, Now));
+
+        var result = await context.Submit.SubmitAsync(context.Account.Id);
+
+        Assert.Equal(OperationStatus.Unprocessable, result.Status);
+    }
+
+    [Fact]
+    public async Task EnviarConTransicionFallida_DebeResponderConflict()
+    {
+        var context = await CreateContextAsync(submitResult: false);
+        await CompleteExpedienteAsync(context);
+
+        var result = await context.Submit.SubmitAsync(context.Account.Id);
+
+        Assert.Equal(OperationStatus.Conflict, result.Status);
+    }
+
+    [Fact]
+    public async Task EnviarDesdeBorradorConExpedienteEnRevision_DebeAuditarYEnRevision()
+    {
+        var context = await CreateContextAsync();
+        await CompleteExpedienteAsync(context);
+
+        var result = await context.Submit.SubmitAsync(context.Account.Id);
+
+        Assert.Equal(OperationStatus.Success, result.Status);
+        Assert.Equal(PublicationState.EnRevision, result.Value!.Estado);
+        Assert.Contains(context.Audit.Entries, entry =>
+            entry.Action == VerificationAuditActions.PublicationSubmitted);
     }
 
     [Fact]
@@ -304,7 +451,10 @@ public sealed class VerificationServiceTests
         Assert.Equal(OperationStatus.NotFound, invalid.Status);
     }
 
-    private static async Task<TestContext> CreateContextAsync(bool minor = false)
+    private static async Task<TestContext> CreateContextAsync(
+        bool minor = false,
+        bool withPhoto = true,
+        bool submitResult = true)
     {
         var accounts = new InMemoryAccountRepository();
         var birthDate = minor
@@ -315,7 +465,7 @@ public sealed class VerificationServiceTests
             birthDate: birthDate);
         await accounts.AddAsync(account);
 
-        var units = new FakeUnitRepository();
+        var units = new FakeUnitRepository { SubmitResult = submitResult };
         var property = Property.Create(
             account.Id,
             $"Casa {Guid.NewGuid():N}",
@@ -343,17 +493,21 @@ public sealed class VerificationServiceTests
             [],
             null,
             Now);
-        unit.AppendPhotos(
-        [
-            new UnitPhoto(
-                $"photo-{Guid.NewGuid():N}",
-                "image/png",
-                10,
-                new string('A', 64),
-                0,
-                true,
-                Now)
-        ]);
+        if (withPhoto)
+        {
+            unit.AppendPhotos(
+            [
+                new UnitPhoto(
+                    $"photo-{Guid.NewGuid():N}",
+                    "image/png",
+                    10,
+                    new string('A', 64),
+                    0,
+                    true,
+                    Now)
+            ]);
+        }
+
         await units.AddAsync(unit);
 
         var terms = new FakeTermsAcceptanceRepository { ExistsResult = true };
@@ -394,6 +548,148 @@ public sealed class VerificationServiceTests
             submit,
             new FakeDocumentUrlSigner(),
             new FakeDocumentAccessUrlBuilder());
+    }
+
+    private static async Task<Expediente> CompleteExpedienteAsync(TestContext context)
+    {
+        var expediente = await SeedExpedienteAsync(context);
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Png));
+        expediente.AddOrReplaceDocument(
+            DocumentoVerificacion.Create(
+                TipoDocumentoVerificacion.Comprobante,
+                $"doc-{Guid.NewGuid():N}",
+                "predial.png",
+                "image/png",
+                Png.LongLength,
+                sha,
+                1,
+                Now),
+            Now);
+
+        if (!await context.Repository.TryReplaceAsync(expediente, Now))
+        {
+            throw new InvalidOperationException("No se pudo completar el expediente de prueba.");
+        }
+
+        return expediente;
+    }
+
+    [Fact]
+    public async Task LecturaFirmada_RechazaTokenExpedienteDocumentoVersionOAlmacenamiento()
+    {
+        var context = await CreateContextAsync();
+        var service = new ReadVerificationDocumentService(
+            context.Repository,
+            context.Documents,
+            new FakeDocumentPreviewGenerator(),
+            context.Signer,
+            context.Audit,
+            context.Clock);
+        var expediente = await SeedExpedienteAsync(context);
+
+        Assert.Equal(
+            OperationStatus.NotFound,
+            (await service.ReadAsync(Guid.NewGuid(), null)).Status);
+        Assert.Equal(
+            OperationStatus.NotFound,
+            (await service.ReadAsync(Guid.NewGuid(), "invalido")).Status);
+        Assert.Equal(
+            OperationStatus.NotFound,
+            (await service.ReadAsync(
+                Guid.NewGuid(),
+                context.Signer.Create(
+                    Guid.NewGuid(),
+                    TipoDocumentoVerificacion.Ine,
+                    1,
+                    DocumentUrlVariant.Full,
+                    context.Clock.UtcNow).Token)).Status);
+        Assert.Equal(
+            OperationStatus.NotFound,
+            (await service.ReadAsync(
+                Guid.NewGuid(),
+                context.Signer.Create(
+                    expediente.Id,
+                    TipoDocumentoVerificacion.Comprobante,
+                    1,
+                    DocumentUrlVariant.Full,
+                    context.Clock.UtcNow).Token)).Status);
+        Assert.Equal(
+            OperationStatus.NotFound,
+            (await service.ReadAsync(
+                Guid.NewGuid(),
+                context.Signer.Create(
+                    expediente.Id,
+                    TipoDocumentoVerificacion.Ine,
+                    2,
+                    DocumentUrlVariant.Full,
+                    context.Clock.UtcNow).Token)).Status);
+
+        var missingStorage = Expediente.Create(
+            Guid.NewGuid(),
+            $"UH-2026-{Guid.NewGuid():N}"[..20].ToUpperInvariant(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Now);
+        missingStorage.AddOrReplaceDocument(
+            DocumentoVerificacion.Create(
+                TipoDocumentoVerificacion.Ine,
+                $"doc-{Guid.NewGuid():N}",
+                "ine.png",
+                "image/png",
+                10,
+                new string('A', 64),
+                1,
+                Now),
+            Now);
+        await context.Repository.AddAsync(missingStorage);
+        Assert.Equal(
+            OperationStatus.NotFound,
+            (await service.ReadAsync(
+                Guid.NewGuid(),
+                context.Signer.Create(
+                    missingStorage.Id,
+                    TipoDocumentoVerificacion.Ine,
+                    1,
+                    DocumentUrlVariant.Full,
+                    context.Clock.UtcNow).Token)).Status);
+
+        var mismatch = Expediente.Create(
+            Guid.NewGuid(),
+            $"UH-2026-{Guid.NewGuid():N}"[..20].ToUpperInvariant(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Now);
+        var stored = await context.Documents.SaveAsync(
+            mismatch.Id,
+            TipoDocumentoVerificacion.Ine,
+            1,
+            Png,
+            "image/png",
+            "ine.png",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Png)));
+        mismatch.AddOrReplaceDocument(
+            DocumentoVerificacion.Create(
+                TipoDocumentoVerificacion.Ine,
+                stored.StorageKey,
+                "ine.png",
+                "image/png",
+                Png.LongLength,
+                new string('B', 64),
+                1,
+                Now),
+            Now);
+        await context.Repository.AddAsync(mismatch);
+        await Assert.ThrowsAsync<UniHome.Application.Identity.Exceptions.StorageUnavailableException>(
+            () => service.ReadAsync(
+                Guid.NewGuid(),
+                context.Signer.Create(
+                    mismatch.Id,
+                    TipoDocumentoVerificacion.Ine,
+                    1,
+                    DocumentUrlVariant.Full,
+                    context.Clock.UtcNow).Token));
     }
 
     private static async Task<Expediente> SeedExpedienteAsync(TestContext context)

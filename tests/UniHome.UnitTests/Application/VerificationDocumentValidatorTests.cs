@@ -99,4 +99,78 @@ public sealed class VerificationDocumentValidatorTests
                 TipoDocumentoVerificacion.Ine,
                 new VerificationDocumentUpload("ine.png", "image/png", oversized)));
     }
+
+    [Fact]
+    public void EntradasVaciasYArgumentosNulos_DebenRechazarse()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            VerificationDocumentValidator.Validate(
+                TipoDocumentoVerificacion.Ine,
+                null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            VerificationDocumentValidator.Validate(
+                TipoDocumentoVerificacion.Ine,
+                new VerificationDocumentUpload("ine.png", "image/png", null!)));
+        Assert.Throws<VerificationDocumentValidationException>(() =>
+            VerificationDocumentValidator.Validate(
+                TipoDocumentoVerificacion.Ine,
+                new VerificationDocumentUpload("ine.png", "image/png", [])));
+    }
+
+    [Fact]
+    public void JpegConExtensionYMimeAlternativos_DebeAceptarse()
+    {
+        var jpeg = new byte[] { 0xFF, 0xD8, 0xFF, 0xD9 };
+        var result = VerificationDocumentValidator.Validate(
+            TipoDocumentoVerificacion.Ine,
+            new VerificationDocumentUpload("ine.jpeg", "image/jpg", jpeg));
+
+        Assert.Equal("image/jpeg", result.ContentType);
+        Assert.Equal("ine.jpeg", result.OriginalFileName);
+    }
+
+    [Fact]
+    public void PdfSinEofOConContenidoActivo_DebeRechazarse()
+    {
+        var incomplete = Encoding.ASCII.GetBytes("%PDF-1.4\n1 0 obj << >> endobj\n");
+        var launch = Encoding.ASCII.GetBytes("%PDF-1.4\n/Launch /Action\n%%EOF\n");
+        var embedded = Encoding.ASCII.GetBytes("%PDF-1.4\n/EmbeddedFile\n%%EOF\n");
+        var js = Encoding.ASCII.GetBytes("%PDF-1.4\n/JS (app.alert(1))\n%%EOF\n");
+
+        foreach (var pdf in new[] { incomplete, launch, embedded, js })
+        {
+            Assert.Throws<VerificationDocumentValidationException>(() =>
+                VerificationDocumentValidator.Validate(
+                    TipoDocumentoVerificacion.Comprobante,
+                    new VerificationDocumentUpload("predial.pdf", "application/pdf", pdf)));
+        }
+    }
+
+    [Fact]
+    public void NombreInvalidoODemasiadoLargo_DebeRechazarse()
+    {
+        foreach (var name in new[]
+                 {
+                     "ine\u0001.png",
+                     "ine?.png",
+                     new string('x', DocumentoVerificacion.MaxOriginalFileNameLength + 1) + ".png"
+                 })
+        {
+            Assert.Throws<VerificationDocumentValidationException>(() =>
+                VerificationDocumentValidator.Validate(
+                    TipoDocumentoVerificacion.Ine,
+                    new VerificationDocumentUpload(name, "image/png", Png)));
+        }
+    }
+
+    [Fact]
+    public void NombreVacioYMimeOctetStream_DebenNormalizarseSinConfiarEnElCliente()
+    {
+        var result = VerificationDocumentValidator.Validate(
+            TipoDocumentoVerificacion.Ine,
+            new VerificationDocumentUpload(null, "application/octet-stream; charset=binary", Png));
+
+        Assert.Equal("documento", result.OriginalFileName);
+        Assert.Equal("image/png", result.ContentType);
+    }
 }

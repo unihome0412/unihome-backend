@@ -45,6 +45,8 @@ internal sealed class FakeUnitRepository : IUnitRepository
 
     public bool AppendResult { get; set; } = true;
 
+    public bool SubmitResult { get; set; } = true;
+
     public Task AddAsync(Unit unit, CancellationToken cancellationToken = default)
     {
         Items.Add(unit);
@@ -80,7 +82,9 @@ internal sealed class FakeUnitRepository : IUnitRepository
             item.Id == id &&
             item.OwnerAccountId == ownerAccountId);
 
-        if (unit is null || unit.PublicationState == PublicationState.Aprobada)
+        if (!SubmitResult ||
+            unit is null ||
+            unit.PublicationState == PublicationState.Aprobada)
         {
             return Task.FromResult(false);
         }

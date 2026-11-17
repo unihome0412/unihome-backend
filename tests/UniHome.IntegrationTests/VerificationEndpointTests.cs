@@ -343,9 +343,71 @@ public sealed class VerificationEndpointTests : IClassFixture<UniHomeApiFactory>
         Assert.Equal(HttpStatusCode.UnprocessableEntity, noPhoto.StatusCode);
     }
 
-    private async Task<(Account Account, HttpClient Client)> CreateApplicantAsync()
+    [Fact]
+    public async Task CargasSinSesionSinUnidadYMenor_DebenFallarConElCodigoCorrecto()
     {
-        var account = await AuthTestHelpers.SeedAccountAsync(_factory, AuthTestHelpers.UniqueEmail());
+        using var anonymous = _factory.CreateClient();
+        using var noSession = await UploadAsync(
+            anonymous,
+            "mi-expediente/ine",
+            CreatePng(160, 120),
+            "ine.png",
+            "image/png");
+        Assert.Equal(HttpStatusCode.Unauthorized, noSession.StatusCode);
+
+        var (_, withoutUnit) = await CreateApplicantAsync();
+        using var withoutUnitScope = withoutUnit;
+        using var noUnit = await UploadAsync(
+            withoutUnit,
+            "mi-expediente/ine",
+            CreatePng(161, 121),
+            "ine.png",
+            "image/png");
+        Assert.Equal(HttpStatusCode.NotFound, noUnit.StatusCode);
+
+        var (_, minor) = await CreateApplicantAsync(new DateOnly(2010, 1, 1));
+        using var minorScope = minor;
+        using var minorUpload = await UploadAsync(
+            minor,
+            "mi-expediente/ine",
+            CreatePng(162, 122),
+            "ine.png",
+            "image/png");
+        Assert.Equal(HttpStatusCode.Forbidden, minorUpload.StatusCode);
+    }
+
+    [Fact]
+    public async Task EnvioSinPublicacionYAdminConParametrosInvalidos_DebenFallarControladamente()
+    {
+        var (_, applicant) = await CreateApplicantAsync();
+        using var applicantScope = applicant;
+        using var noPublication = await applicant.PostAsync(
+            "/api/v1/publicaciones/primera/enviar",
+            null);
+        Assert.Equal(HttpStatusCode.NotFound, noPublication.StatusCode);
+
+        using var admin = await CreateAdminClientAsync();
+        using var invalidPage = await admin.GetAsync(
+            "/api/v1/admin/expedientes?page=0&pageSize=20");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidPage.StatusCode);
+
+        var missingId = Guid.NewGuid();
+        using var missingDetail = await admin.GetAsync(
+            $"/api/v1/admin/expedientes/{missingId}");
+        Assert.Equal(HttpStatusCode.NotFound, missingDetail.StatusCode);
+
+        using var missingDocument = await admin.GetAsync(
+            $"/api/v1/admin/expedientes/{missingId}/documentos/ine");
+        Assert.Equal(HttpStatusCode.NotFound, missingDocument.StatusCode);
+    }
+
+    private async Task<(Account Account, HttpClient Client)> CreateApplicantAsync(
+        DateOnly? birthDate = null)
+    {
+        var account = await AuthTestHelpers.SeedAccountAsync(
+            _factory,
+            AuthTestHelpers.UniqueEmail(),
+            birthDate: birthDate);
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer",
@@ -431,7 +493,7 @@ public sealed class VerificationEndpointTests : IClassFixture<UniHomeApiFactory>
         return new SeededPublication(unit.Id, university.Id);
     }
 
-    private async Task<UploadedExpediente> UploadBothAsync(HttpClient client)
+    private static async Task<UploadedExpediente> UploadBothAsync(HttpClient client)
     {
         var ine = await UploadDocumentAndReadAsync(
             client,

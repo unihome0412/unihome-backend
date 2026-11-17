@@ -86,18 +86,14 @@ internal static partial class DocumentNameExtractor
     {
         foreach (var label in labels)
         {
-            var pattern = LabelRegex(label);
-
             for (var index = 0; index < lines.Count; index++)
             {
-                var match = pattern.Match(lines[index]);
-
-                if (!match.Success)
+                if (!TryExtractLabelValue(lines[index], label, out var rawValue))
                 {
                     continue;
                 }
 
-                var inline = CleanName(match.Groups["value"].Value, allowSingleWord: true);
+                var inline = CleanName(rawValue, allowSingleWord: true);
 
                 if (inline is not null)
                 {
@@ -124,6 +120,39 @@ internal static partial class DocumentNameExtractor
         return null;
     }
 
+    private static bool TryExtractLabelValue(
+        string line,
+        string label,
+        out string value)
+    {
+        value = string.Empty;
+
+        if (!line.StartsWith(label, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var remainder = line[label.Length..].TrimStart();
+
+        if (remainder.StartsWith('('))
+        {
+            var closing = remainder.IndexOf(')');
+
+            if (closing >= 0)
+            {
+                remainder = remainder[(closing + 1)..].TrimStart();
+            }
+        }
+
+        if (remainder.Length > 0 && remainder[0] is ':' or '-')
+        {
+            remainder = remainder[1..].TrimStart();
+        }
+
+        value = remainder;
+        return true;
+    }
+
     private static string? ExtractFallback(IReadOnlyList<string> lines)
     {
         foreach (var line in lines.Take(25))
@@ -147,7 +176,7 @@ internal static partial class DocumentNameExtractor
             return null;
         }
 
-        var candidate = Regex.Replace(value, @"\s+", " ").Trim(' ', ':', '-', '.', ',', ';');
+        var candidate = WhitespaceRegex().Replace(value, " ").Trim(' ', ':', '-', '.', ',', ';');
         candidate = candidate.Replace("  ", " ", StringComparison.Ordinal).Trim();
 
         if (candidate.Length is < 3 or > 80 ||
@@ -171,7 +200,7 @@ internal static partial class DocumentNameExtractor
     }
 
     private static string JoinName(IEnumerable<string> parts) =>
-        Regex.Replace(string.Join(' ', parts), @"\s+", " ").Trim();
+        WhitespaceRegex().Replace(string.Join(' ', parts), " ").Trim();
 
     private static string NormalizeLine(string line)
     {
@@ -189,24 +218,47 @@ internal static partial class DocumentNameExtractor
             }
         }
 
-        return Regex.Replace(builder.ToString(), @"\s+", " ").Trim();
+        return WhitespaceRegex().Replace(builder.ToString(), " ").Trim();
     }
 
     private static bool LooksLikeLabel(string line) =>
         line.Contains(':', StringComparison.Ordinal) ||
-        Regex.IsMatch(
-            line,
-            @"^(NOMBRE|APELLIDO|PROPIETARIO|CONTRIBUYENTE|TITULAR|DOMICILIO|CLAVE|FECHA)\b",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        LabelPrefixRegex().IsMatch(line);
 
-    private static bool ContainsWord(string line, string word) =>
-        Regex.IsMatch(
-            line,
-            $@"\b{Regex.Escape(word)}\b",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static bool ContainsWord(string line, string word)
+    {
+        var index = 0;
 
-    private static Regex LabelRegex(string label) =>
-        new(
-            $@"^\s*{Regex.Escape(label)}\s*(?:\([^)]*\))?\s*[:\-]?\s*(?<value>.*)$",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        while (index < line.Length &&
+               (index = line.IndexOf(word, index, StringComparison.OrdinalIgnoreCase)) >= 0)
+        {
+            var startsAtBoundary = index == 0 || !IsWordCharacter(line[index - 1]);
+            var end = index + word.Length;
+            var endsAtBoundary = end >= line.Length || !IsWordCharacter(line[end]);
+
+            if (startsAtBoundary && endsAtBoundary)
+            {
+                return true;
+            }
+
+            index++;
+        }
+
+        return false;
+    }
+
+    private static bool IsWordCharacter(char value) =>
+        char.IsLetterOrDigit(value) || value == '_';
+
+    [GeneratedRegex(
+        @"\s+",
+        RegexOptions.CultureInvariant,
+        matchTimeoutMilliseconds: 200)]
+    private static partial Regex WhitespaceRegex();
+
+    [GeneratedRegex(
+        @"^(NOMBRE|APELLIDO|PROPIETARIO|CONTRIBUYENTE|TITULAR|DOMICILIO|CLAVE|FECHA)\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        matchTimeoutMilliseconds: 200)]
+    private static partial Regex LabelPrefixRegex();
 }

@@ -55,7 +55,7 @@ public sealed class VerificationDocumentsController : AuthenticatedControllerBas
 
         var document = result.Value!;
         Response.Headers.CacheControl = "no-store";
-        Response.Headers["Content-Security-Policy"] = "default-src 'none'";
+        Response.Headers.ContentSecurityPolicy = "default-src 'none'";
         Response.Headers.XContentTypeOptions = "nosniff";
 
         return document.IsThumbnail

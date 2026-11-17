@@ -159,7 +159,8 @@ public static partial class VerificationDocumentValidator
 
     [GeneratedRegex(
         @"/(JavaScript|JS|Launch|EmbeddedFile)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        matchTimeoutMilliseconds: 200)]
     private static partial Regex ActivePdfContentRegex();
 }
 

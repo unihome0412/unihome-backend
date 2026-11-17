@@ -166,6 +166,161 @@ public sealed class ExpedienteTests
         Assert.Null(expediente.GetRequiredDocument(TipoDocumentoVerificacion.Ine).NombreOcr);
     }
 
+    [Fact]
+    public void DatosObligatoriosYFolioInvalido_DebenRechazarse()
+    {
+        Assert.Throws<ArgumentException>(() => Expediente.Create(
+            Guid.Empty,
+            "UH-2026-ABCDEF123456",
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Now));
+        Assert.Throws<ArgumentException>(() => Expediente.Create(
+            Guid.NewGuid(),
+            "UH-2026-ABCDEF123456",
+            Guid.Empty,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Now));
+        Assert.Throws<ArgumentException>(() => Expediente.Create(
+            Guid.NewGuid(),
+            " ",
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Now));
+
+        foreach (var folio in new[] { "CORTO", "UH 2026", "UH_2026", new string('A', 41) })
+        {
+            Assert.Throws<ArgumentException>(() => Expediente.Create(
+                Guid.NewGuid(),
+                folio,
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                Now));
+        }
+    }
+
+    [Fact]
+    public void DocumentoInexistenteYVersionInicialIncorrecta_DebenRechazarse()
+    {
+        var expediente = CreateExpediente();
+
+        Assert.Null(expediente.FindDocument(TipoDocumentoVerificacion.Ine));
+        Assert.Throws<KeyNotFoundException>(() =>
+            expediente.GetRequiredDocument(TipoDocumentoVerificacion.Ine));
+        Assert.Throws<ArgumentException>(() =>
+            expediente.AddOrReplaceDocument(
+                CreateDocument(TipoDocumentoVerificacion.Ine, ShaA, 2),
+                Now));
+        Assert.False(expediente.RecordAnalysis(
+            TipoDocumentoVerificacion.Ine,
+            1,
+            "Nombre",
+            EstadoAnalisisDocumento.Completado,
+            EstadoAnalisisDocumento.Completado,
+            false,
+            true,
+            true,
+            [],
+            null,
+            Now));
+    }
+
+    [Fact]
+    public void VersionAnteriorEnBorrador_DebeRechazarse()
+    {
+        var expediente = CreateExpediente();
+        expediente.AddOrReplaceDocument(CreateDocument(TipoDocumentoVerificacion.Ine, ShaA, 1), Now);
+
+        Assert.Throws<ArgumentException>(() =>
+            expediente.AddOrReplaceDocument(
+                CreateDocument(TipoDocumentoVerificacion.Ine, ShaB, 1),
+                Now.AddMinutes(1)));
+    }
+
+    [Fact]
+    public void RechazoPermiteReenviarEvidenciaYVolverARevision()
+    {
+        var expediente = CreateExpediente();
+        expediente.AddOrReplaceDocument(CreateDocument(TipoDocumentoVerificacion.Ine, ShaA, 1), Now);
+        expediente.AddOrReplaceDocument(
+            CreateDocument(TipoDocumentoVerificacion.Comprobante, ShaB, 1),
+            Now);
+        expediente.Reject("Documento no legible", Guid.NewGuid(), Now.AddMinutes(1));
+
+        expediente.AddOrReplaceDocument(
+            CreateDocument(TipoDocumentoVerificacion.Ine, ShaB, 2),
+            Now.AddMinutes(2));
+
+        Assert.Equal(EstadoExpediente.EnRevision, expediente.State);
+        Assert.Null(expediente.RejectionReason);
+        Assert.Null(expediente.Decision);
+        Assert.Equal(
+            2,
+            expediente.GetRequiredDocument(TipoDocumentoVerificacion.Ine).Version);
+    }
+
+    [Fact]
+    public void AnalisisCompletoYEdicionSinDetalle_DebenReflejarseEnRiesgo()
+    {
+        var expediente = CreateExpediente();
+        expediente.AddOrReplaceDocument(
+            CreateDocument(TipoDocumentoVerificacion.Ine, ShaA, 1).WithAnalysis(
+                "Ana Pérez",
+                EstadoAnalisisDocumento.Completado,
+                EstadoAnalisisDocumento.Completado,
+                edicionDetectada: true,
+                elaDisponible: true,
+                metadatosDisponibles: true,
+                editionSignals: [],
+                detalleAnalisis: null),
+            Now);
+        expediente.AddOrReplaceDocument(
+            CreateDocument(TipoDocumentoVerificacion.Comprobante, ShaB, 1).WithAnalysis(
+                "Ana Pérez",
+                EstadoAnalisisDocumento.Completado,
+                EstadoAnalisisDocumento.Completado,
+                edicionDetectada: false,
+                elaDisponible: true,
+                metadatosDisponibles: true,
+                editionSignals: [],
+                detalleAnalisis: null),
+            Now);
+
+        Assert.True(expediente.AutomaticReviewCompleted);
+        Assert.True(expediente.IsSuspicious);
+        Assert.Contains(expediente.RiskIndicator.Signals, signal =>
+            signal.Contains("sin detalle", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void DecisionesInvalidas_DebenRechazarseSinCambiarEstado()
+    {
+        var expediente = CreateExpediente();
+
+        Assert.Throws<ArgumentException>(() =>
+            expediente.Approve(Guid.Empty, Now));
+        Assert.Throws<InvalidOperationException>(() =>
+            expediente.Approve(Guid.NewGuid(), Now));
+        Assert.Throws<InvalidOperationException>(() =>
+            expediente.Reject("Motivo", Guid.NewGuid(), Now));
+
+        expediente.AddOrReplaceDocument(CreateDocument(TipoDocumentoVerificacion.Ine, ShaA, 1), Now);
+        expediente.AddOrReplaceDocument(
+            CreateDocument(TipoDocumentoVerificacion.Comprobante, ShaB, 1),
+            Now);
+
+        Assert.Throws<ArgumentException>(() =>
+            expediente.Reject("Motivo", Guid.Empty, Now));
+        Assert.Throws<ArgumentException>(() =>
+            expediente.Reject(new string('a', Expediente.MaxRejectionReasonLength + 1), Guid.NewGuid(), Now));
+        Assert.Throws<ArgumentException>(() =>
+            expediente.Reject("Motivo\u0001", Guid.NewGuid(), Now));
+    }
+
     private static Expediente CreateExpediente() =>
         Expediente.Create(
             Guid.NewGuid(),

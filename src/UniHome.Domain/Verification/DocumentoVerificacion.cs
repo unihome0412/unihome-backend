@@ -127,10 +127,7 @@ public sealed class DocumentoVerificacion
             throw new ArgumentException("La huella del documento no es válida.", nameof(sha256));
         }
 
-        if (version <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(version));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(version);
 
         return new DocumentoVerificacion(
             tipo,

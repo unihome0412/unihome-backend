@@ -60,4 +60,73 @@ public sealed class DocumentNameExtractorTests
         Assert.Null(DocumentNameExtractor.Extract(null, TipoDocumentoVerificacion.Ine));
         Assert.Null(DocumentNameExtractor.Extract("   ", TipoDocumentoVerificacion.Ine));
     }
+
+    [Fact]
+    public void EtiquetaConParentesisYGuion_DebeExtraerElValor()
+    {
+        const string text = """
+            NOMBRE (NOMBRES): ANA PEREZ
+            APELLIDO PATERNO - LOPEZ
+            """;
+
+        var name = DocumentNameExtractor.Extract(text, TipoDocumentoVerificacion.Ine);
+
+        Assert.Equal("LOPEZ ANA PEREZ", name);
+    }
+
+    [Fact]
+    public void Fallback_DebeSaltarStopWordsSinCortarPalabrasParecidas()
+    {
+        const string text = """
+            TOTAL 1500
+            ANA PEREZ
+            TOTALIZADOR
+            """;
+
+        var name = DocumentNameExtractor.Extract(text, TipoDocumentoVerificacion.Comprobante);
+
+        Assert.Equal("ANA PEREZ", name);
+    }
+
+    [Fact]
+    public void EtiquetaSinValorInmediato_DebeDetenerLaBusquedaAnteOtraEtiqueta()
+    {
+        const string text = """
+            PROPIETARIO
+            DOMICILIO: CALLE 1
+            ANA PEREZ
+            """;
+
+        var name = DocumentNameExtractor.Extract(text, TipoDocumentoVerificacion.Comprobante);
+
+        Assert.Equal("ANA PEREZ", name);
+    }
+
+    [Fact]
+    public void ValoresConDigitosDemasiadoLargosOUnaPalabra_NoDebenInventarse()
+    {
+        Assert.Null(DocumentNameExtractor.Extract(
+            "NOMBRE: ANA 123",
+            TipoDocumentoVerificacion.Ine));
+        Assert.Null(DocumentNameExtractor.Extract(
+            "NOMBRE: ANA MARIA PEREZ LOPEZ GARCIA HERNANDEZ SANCHEZ",
+            TipoDocumentoVerificacion.Ine));
+        Assert.Null(DocumentNameExtractor.Extract(
+            "NOMBRE: A",
+            TipoDocumentoVerificacion.Ine));
+    }
+
+    [Fact]
+    public void ParentesisSinCierreYFallbackConStopWord_DebenUsarTextoLegible()
+    {
+        const string text = """
+            NOMBRE (SIN CIERRE
+            TOTAL 1500
+            ANA MARIA PEREZ
+            """;
+
+        var name = DocumentNameExtractor.Extract(text, TipoDocumentoVerificacion.Ine);
+
+        Assert.Equal("ANA MARIA PEREZ", name);
+    }
 }

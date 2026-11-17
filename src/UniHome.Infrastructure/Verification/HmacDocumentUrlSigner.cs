@@ -35,10 +35,7 @@ internal sealed class HmacDocumentUrlSigner : IDocumentUrlSigner
             throw new ArgumentException("El expediente es obligatorio.", nameof(expedienteId));
         }
 
-        if (version <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(version));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(version);
 
         var expiresAt = now.AddSeconds(_lifetimeSeconds);
         var nonce = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(12));

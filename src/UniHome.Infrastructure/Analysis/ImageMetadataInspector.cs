@@ -137,7 +137,7 @@ internal static class ImageMetadataInspector
         return null;
     }
 
-    private static IReadOnlyList<string> ReadTiffSoftware(byte[] tiff)
+    internal static List<string> ReadTiffSoftware(byte[] tiff)
     {
         if (tiff.Length < 8)
         {

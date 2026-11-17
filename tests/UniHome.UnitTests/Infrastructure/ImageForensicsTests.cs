@@ -91,6 +91,56 @@ public sealed class ImageForensicsTests
         Assert.Equal(pdf, preview.Content);
     }
 
+    [Fact]
+    public void ImagenInvalidaQuedaNoDisponibleSinLanzar()
+    {
+        var result = ImageForensics.AnalyzeImage([1, 2, 3, 4], new DocumentAnalysisOptions());
+
+        Assert.Equal(EstadoAnalisisDocumento.NoDisponible, result.Status);
+        Assert.False(result.ElaAvailable);
+        Assert.False(result.MetadataAvailable);
+        Assert.Empty(result.Signals);
+    }
+
+    [Fact]
+    public void ElaConUmbralesCero_DebeReportarDiferenciaSinInventarMetadatos()
+    {
+        var jpeg = CreateUniformJpeg(40, 30);
+        var options = new DocumentAnalysisOptions
+        {
+            ElaMeanDifferenceThreshold = 0,
+            ElaHighDifferenceRatioThreshold = 0,
+            ElaHighDifferenceLevel = 1
+        };
+
+        var result = ImageForensics.AnalyzeImage(jpeg, options);
+
+        Assert.True(result.ElaAvailable);
+        Assert.Equal(EstadoAnalisisDocumento.Completado, result.Status);
+        Assert.Contains(result.Signals, signal =>
+            signal.Contains("ELA", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void PdfSinMetadatos_NoDebeInventarSenales()
+    {
+        var result = ImageForensics.AnalyzePdfMetadata(null, " ");
+
+        Assert.Equal(EstadoAnalisisDocumento.Completado, result.Status);
+        Assert.False(result.Detected);
+        Assert.True(result.MetadataAvailable);
+        Assert.Empty(result.Signals);
+    }
+
+    private static byte[] CreateUniformJpeg(int width, int height)
+    {
+        using var bitmap = new SKBitmap(width, height);
+        bitmap.Erase(SKColors.White);
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 94);
+        return data.ToArray();
+    }
+
     private static byte[] CreateJpeg(int width, int height, bool edited)
     {
         using var bitmap = new SKBitmap(width, height);
