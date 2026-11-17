@@ -58,6 +58,58 @@ public sealed class ForwardedHeadersTests :
     }
 
     [Fact]
+    public async Task ConHttpsReenviadoSinConfiarEnProxies_EmiteHsts()
+    {
+        // El ingress de Container Apps puede no estar en Proxy:KnownProxies.
+        // HSTS debe emitirse igualmente cuando el borde declara HTTPS, sin que
+        // esa cabecera se use para IP, autenticación ni redirección.
+        using var client = CreateNoRedirectClient(_disabled);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/health/live");
+        request.Headers.Add("X-Forwarded-Proto", "https");
+        request.Headers.Host = "unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io";
+
+        using var response = await client.SendAsync(request);
+
+        // El redirect HTTPS del host de pruebas también debe llevar HSTS: el
+        // navegador que llegó por HTTPS no puede quedarse sin la política.
+        Assert.Equal(HttpStatusCode.TemporaryRedirect, response.StatusCode);
+        var hsts = response.Headers.GetValues("Strict-Transport-Security").Single();
+        Assert.Contains("max-age=31536000", hsts, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("includeSubDomains", hsts, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("preload", hsts, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SinHttpsReenviado_NoEmiteHsts()
+    {
+        using var client = CreateNoRedirectClient(_disabled);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/health/live");
+        request.Headers.Host = "unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io";
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.TemporaryRedirect, response.StatusCode);
+        Assert.False(response.Headers.Contains("Strict-Transport-Security"));
+    }
+
+    [Fact]
+    public async Task HostLoopback_NoEmiteHsts()
+    {
+        using var client = CreateNoRedirectClient(_enabled);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/health/live");
+        request.Headers.Add("X-Forwarded-Proto", "https");
+        request.Headers.Host = "localhost";
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(response.Headers.Contains("Strict-Transport-Security"));
+    }
+
+    [Fact]
     public async Task ConHttpReenviado_Redirige()
     {
         using var client = CreateNoRedirectClient(_enabled);

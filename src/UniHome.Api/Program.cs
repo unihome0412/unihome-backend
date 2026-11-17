@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics;
@@ -17,11 +18,13 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Net.Http.Headers;
 using Microsoft.OpenApi;
 using UniHome.Api.Authorization;
 using UniHome.Api.Configuration;
 using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
+using UniHome.Api.Security;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Exploration;
@@ -177,8 +180,30 @@ builder.Services.AddScoped<ChangeUniversityStatusService>();
 builder.Services.AddScoped<SearchUniversitiesService>();
 
 builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer();
+    .AddAuthentication(options =>
+    {
+        // El selector conserva Bearer para /api/* y solo acepta la cookie de
+        // documentación en /swagger y /openapi. Una cookie robada no sirve para
+        // operar la API.
+        options.DefaultAuthenticateScheme = SwaggerAccessOptions.PolicyScheme;
+        options.DefaultChallengeScheme = SwaggerAccessOptions.PolicyScheme;
+        options.DefaultForbidScheme = SwaggerAccessOptions.PolicyScheme;
+    })
+    .AddJwtBearer()
+    .AddScheme<AuthenticationSchemeOptions, SwaggerCookieAuthenticationHandler>(
+        SwaggerAccessOptions.AuthenticationScheme,
+        _ => { })
+    .AddPolicyScheme(
+        SwaggerAccessOptions.PolicyScheme,
+        "UniHome: Bearer para la API y cookie solo para documentación",
+        options =>
+        {
+            options.ForwardDefaultSelector = context =>
+                SwaggerAccessOptions.IsDocumentationPath(context.Request.Path) &&
+                !context.Request.Headers.ContainsKey(HeaderNames.Authorization)
+                    ? SwaggerAccessOptions.AuthenticationScheme
+                    : JwtBearerDefaults.AuthenticationScheme;
+        });
 
 builder.Services
     .AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
@@ -250,9 +275,27 @@ builder.Services
 builder.Services.AddSingleton<IAuthorizationHandler, AdminAccessHandler>();
 
 builder.Services
+    .AddOptions<SwaggerAccessOptions>()
+    .Bind(builder.Configuration.GetSection(SwaggerAccessOptions.SectionName))
+    .Validate(
+        options => options.IsValid(),
+        $"{SwaggerAccessOptions.SectionName}:CookieLifetimeMinutes debe estar entre " +
+        $"{SwaggerAccessOptions.MinLifetimeMinutes} y {SwaggerAccessOptions.MaxLifetimeMinutes}.")
+    .ValidateOnStart();
+
+builder.Services.AddSingleton<SwaggerAccessTicketService>();
+
+builder.Services
     .AddAuthorizationBuilder()
     .AddPolicy(AdminAccessOptions.PolicyName, policy =>
     {
+        policy.RequireAuthenticatedUser();
+        policy.AddRequirements(new AdminAccessRequirement());
+    })
+    .AddPolicy(SwaggerAccessOptions.PolicyName, policy =>
+    {
+        // La documentación usa exactamente el mismo privilegio administrativo
+        // que las rutas /admin, no una lista de usuarios paralela.
         policy.RequireAuthenticatedUser();
         policy.AddRequirements(new AdminAccessRequirement());
     });
@@ -678,9 +721,19 @@ app.Use(async (context, next) =>
         headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
 
         var path = context.Request.Path;
-        headers["Content-Security-Policy"] = path.StartsWithSegments("/swagger") || path == "/"
-            ? "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'none'"
+        var isSwaggerUi = path.StartsWithSegments("/swagger") || path == "/";
+        headers["Content-Security-Policy"] = isSwaggerUi
+            ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'none'"
             : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+
+        if (isSwaggerUi || path.StartsWithSegments("/openapi"))
+        {
+            // La documentación es interna y autenticada; no debe quedar en cachés
+            // compartidas ni indexarse. Los assets de Swagger UI se sirven con la
+            // misma política porque el navegador los solicita desde /swagger.
+            headers.CacheControl = "no-store";
+            headers["X-Robots-Tag"] = "noindex, nofollow";
+        }
 
         if (path.StartsWithSegments("/api/v1/auth") ||
             path.StartsWithSegments("/api/v1/cuentas") ||
@@ -747,7 +800,11 @@ if (proxyCurrentConfig.TrustForwardedHeaders)
 
 if (!app.Environment.IsDevelopment())
 {
-    app.UseHsts();
+    // El ingress de Container Apps termina TLS y reenvía HTTP. HSTS se emite
+    // también con X-Forwarded-Proto: https, aunque la allowlist de proxies no
+    // cubra el salto interno; esa cabecera solo decide este header y no altera
+    // el esquema ni la IP usados por autenticación o rate limiting.
+    app.UseMiddleware<StrictTransportSecurityMiddleware>();
     app.UseHttpsRedirection();
 }
 
@@ -764,13 +821,22 @@ if (apiOptions.EnableSwagger)
     // requisitos de seguridad por operación ya están en el documento (ver
     // AddOpenApi arriba), así que el botón "Authorize" de Swagger UI los toma
     // de ahí sin configuración adicional.
-    app.MapOpenApi();
+    //
+    // Ni el JSON ni la interfaz son anónimos. La policy es la misma allowlist
+    // administrativa existente; un JWT administrativo puede canjearse por la
+    // cookie de corta vida en POST /api/v1/auth/swagger-session para que el
+    // navegador cargue los recursos de Swagger UI.
+    app.MapOpenApi()
+        .RequireAuthorization(SwaggerAccessOptions.PolicyName);
+    app.UseMiddleware<SwaggerAccessMiddleware>();
     app.UseSwaggerUI(options =>
     {
         options.SwaggerEndpoint("/openapi/v1.json", "UniHome API v1");
         options.RoutePrefix = "swagger";
     });
-    app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
+    app.MapGet("/", () => Results.Redirect("/swagger"))
+        .RequireAuthorization(SwaggerAccessOptions.PolicyName)
+        .ExcludeFromDescription();
 }
 
 app.MapHealthChecks("/health/live", new HealthCheckOptions

@@ -9,7 +9,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
 
     public OpenApiTests(SwaggerEnabledApiFactory factory)
     {
-        _client = factory.CreateClient();
+        _client = factory.CreateAdminClient();
     }
 
     [Fact]

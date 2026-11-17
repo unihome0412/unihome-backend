@@ -76,6 +76,10 @@ DATA = prepare.SyntheticData(
     recovery_request_email="recovery-request@uni.edu",
     reset_token="reset-token",
     reset_password="reset-password",
+    detail_expediente_id="44444444-4444-4444-4444-444444444444",
+    approve_expediente_id="55555555-5555-5555-5555-555555555555",
+    reject_expediente_id="66666666-6666-6666-6666-666666666666",
+    document_access_token="document-token-synthetic",
 )
 
 
@@ -83,9 +87,19 @@ class FakeHttp:
     def __init__(self, target, proxy):
         del target, proxy
 
-    def request(self, method, path, *, body=None, expected=None, openapi=True, note=""):
-        del body, openapi, note
-        if method == "GET" and path == "/openapi/v1.json":
+    def request(
+        self, method, path, *, body=None, token=None, expected=None,
+        auth=False, openapi=True, note="",
+    ):
+        del body, auth, openapi, note
+        if method == "POST" and path == "/api/v1/auth/login":
+            status, payload = 200, json.dumps({
+                "accessToken": "admin-token",
+                "refreshToken": "admin-refresh",
+            }).encode()
+        elif method == "GET" and path == "/openapi/v1.json":
+            if token != "admin-token":
+                raise AssertionError("El contrato debe descargarse con Bearer administrativo.")
             status, payload = 200, json.dumps(SPEC).encode()
         else:
             raise AssertionError(f"Ruta simulada inesperada: {method} {path}")
@@ -126,6 +140,18 @@ class RestlerPrepareTests(unittest.TestCase):
         self.assertEqual(DATA.university_id, exploration["universidadId"][0])
         self.assertEqual("Mixto", exploration["paraQuien"][0])
         self.assertEqual("true", exploration["soloIndividual"][0])
+        self.assertEqual(
+            DATA.detail_expediente_id,
+            dictionaries["admin-detail"]["restler_custom_payload"]["id"][0])
+        self.assertEqual(
+            DATA.approve_expediente_id,
+            dictionaries["admin-approve"]["restler_custom_payload"]["id"][0])
+        self.assertEqual(
+            DATA.reject_expediente_id,
+            dictionaries["admin-reject"]["restler_custom_payload"]["id"][0])
+        self.assertEqual(
+            DATA.document_access_token,
+            dictionaries["document-token"]["restler_custom_payload"]["token"][0])
 
     def test_compile_dictionary_fija_ids_y_no_duplica_quotes(self):
         dictionary = prepare.build_compile_dictionary(DATA)
@@ -170,6 +196,9 @@ class RestlerPrepareTests(unittest.TestCase):
             state = root / "state"
             mailbox = root / "mail"
             admin_state = root / "admin.json"
+            admin_state.write_text(
+                json.dumps({"email": "admin@uni.edu", "password": "synthetic"}),
+                encoding="utf-8")
             with (
                 patch.object(prepare, "ARTIFACTS_DIR", artifacts),
                 patch.object(prepare, "WORK_DIR", work),

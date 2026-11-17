@@ -18,6 +18,20 @@ OPERATIONS = [
 ]
 
 
+def build_spec():
+    return {
+        "paths": {
+            path: {
+                method.lower(): {
+                    "responses": {"200": {}, "204": {}},
+                }
+            }
+            for method, path in OPERATIONS
+        }
+    }
+
+
+
 def write_json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
@@ -94,7 +108,7 @@ class RestlerReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_work(root)
-            spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
+            spec = build_spec()
             write_json(root / "artifacts" / "openapi-original.json", spec)
             with (
                 patch.object(report, "WORK_DIR", root),
@@ -115,7 +129,7 @@ class RestlerReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_work(root)
-            spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
+            spec = build_spec()
             write_json(root / "artifacts" / "openapi-original.json", spec)
             with (
                 patch.object(report, "WORK_DIR", root),
@@ -135,7 +149,7 @@ class RestlerReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_work(root)
-            spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
+            spec = build_spec()
             write_json(root / "artifacts" / "openapi-original.json", spec)
             write_json(
                 root / "TestMain" / "ResponseBuckets" / "runSummary.json",
@@ -157,7 +171,7 @@ class RestlerReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_work(root, omit=("POST", "/api/v1/auth/logout"))
-            spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
+            spec = build_spec()
             write_json(root / "artifacts" / "openapi-original.json", spec)
             with (
                 patch.object(report, "WORK_DIR", root),
@@ -176,7 +190,7 @@ class RestlerReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_work(root, omit=("DELETE", "/api/v1/cuentas/mi-cuenta"))
-            spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
+            spec = build_spec()
             write_json(root / "artifacts" / "openapi-original.json", spec)
             with (
                 patch.object(report, "WORK_DIR", root),
@@ -195,7 +209,7 @@ class RestlerReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build_work(root)
-            spec = {"paths": {path: {method.lower(): {}} for method, path in OPERATIONS}}
+            spec = build_spec()
             write_json(root / "artifacts" / "openapi-original.json", spec)
             for task, name in (("TestMain", "speccov.json"),
                                ("FuzzLean", "speccov-min.json")):
@@ -203,6 +217,7 @@ class RestlerReportTests(unittest.TestCase):
                 data = json.loads(speccov.read_text(encoding="utf-8"))
                 first = next(iter(data.values()))
                 first["valid"] = 0
+                first["status_code"] = "400"
                 write_json(speccov, data)
             with (
                 patch.object(report, "WORK_DIR", root),

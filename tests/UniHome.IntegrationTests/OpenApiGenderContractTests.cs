@@ -13,7 +13,7 @@ public sealed class OpenApiGenderContractTests : IClassFixture<SwaggerEnabledApi
 
     public OpenApiGenderContractTests(SwaggerEnabledApiFactory factory)
     {
-        _client = factory.CreateClient();
+        _client = factory.CreateAdminClient();
     }
 
     [Fact]

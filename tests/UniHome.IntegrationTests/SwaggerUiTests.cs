@@ -33,9 +33,10 @@ public sealed class SwaggerUiTests :
     }
 
     [Fact]
-    public async Task ConLaOpcionActivada_SwaggerYOpenApi_Responden200()
+    public async Task ConLaOpcionActivada_UnAdministradorAutorizado_Recibe200()
     {
-        using var client = _enabled.CreateClient();
+        using var client = _enabled.CreateAdminClient(
+            new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
 
         using var swagger = await client.GetAsync("/swagger");
         Assert.Equal(HttpStatusCode.OK, swagger.StatusCode);
@@ -45,10 +46,14 @@ public sealed class SwaggerUiTests :
     }
 
     [Fact]
-    public async Task ConLaOpcionActivada_RaizRedirigeASwagger()
+    public async Task ConLaOpcionActivada_RaizRedirigeASwaggerSoloParaAdministrador()
     {
-        using var client = _enabled.CreateClient(
-            new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var client = _enabled.CreateAdminClient(
+            new WebApplicationFactoryClientOptions
+            {
+                BaseAddress = new Uri("https://localhost"),
+                AllowAutoRedirect = false
+            });
 
         using var response = await client.GetAsync("/");
 

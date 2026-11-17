@@ -45,4 +45,56 @@ public sealed class PasswordRecoveryOptionsTests
         Assert.True(options.TryBuildResetUrl("token", out var url));
         Assert.StartsWith("http://localhost:3000/recuperacion?token=", url, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TryBuildResetUrl_ConEsquemaAndroidConfigurado_ConstruyeDeepLink()
+    {
+        var options = new PasswordRecoveryOptions
+        {
+            ResetLinkBaseUrl = "unihome://recuperacion",
+            AndroidAppScheme = "unihome"
+        };
+
+        Assert.True(options.IsValid());
+        Assert.True(options.TryBuildResetUrl("abc.def_-", out var url));
+        Assert.Equal("unihome://recuperacion?token=abc.def_-", url);
+    }
+
+    [Theory]
+    [InlineData("unihome://recuperacion", null)]
+    [InlineData("unihome://recuperacion", "otraapp")]
+    [InlineData("javascript://recuperacion", "javascript")]
+    [InlineData("unihome://recuperacion?token=previo", "unihome")]
+    [InlineData("unihome://recuperacion#fragmento", "unihome")]
+    [InlineData("unihome://", "unihome")]
+    public void EsquemaAndroid_RechazaConfiguracionesNoAutorizadas(
+        string baseUrl,
+        string? configuredScheme)
+    {
+        var options = new PasswordRecoveryOptions
+        {
+            ResetLinkBaseUrl = baseUrl,
+            AndroidAppScheme = configuredScheme
+        };
+
+        Assert.False(options.IsValid());
+        Assert.False(options.TryBuildResetUrl("token", out _));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("1unihome")]
+    [InlineData("uni home")]
+    [InlineData("https")]
+    [InlineData("unihome/recuperacion")]
+    public void AndroidAppScheme_Invalido_NoEsValido(string scheme)
+    {
+        var options = new PasswordRecoveryOptions
+        {
+            ResetLinkBaseUrl = "unihome://recuperacion",
+            AndroidAppScheme = scheme
+        };
+
+        Assert.False(options.IsValid());
+    }
 }

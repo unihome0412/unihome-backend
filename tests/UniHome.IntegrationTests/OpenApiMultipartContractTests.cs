@@ -21,7 +21,7 @@ public sealed class OpenApiMultipartContractTests : IClassFixture<SwaggerEnabled
     public OpenApiMultipartContractTests(SwaggerEnabledApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
+        _client = factory.CreateAdminClient();
     }
 
     [Fact]

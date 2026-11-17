@@ -215,6 +215,7 @@ opt-in no sustituye esta comprobación.
 | `VerificationCode__HmacSecret` | Presente como secreto |
 | `DocumentSecurity__EncryptionKey` | **Faltante; obligatoria para Sprint 4** |
 | `M06-001` en la base | **Faltante; aplicar antes de M06** |
+| `M07-001` en la base | **Faltante; favoritos fallan cerrados con 503 hasta promover** |
 | SMTP | Presente |
 | `Proxy__TrustForwardedHeaders=true` | Presente |
 | `Redis__*` | **Faltante** |
@@ -224,8 +225,16 @@ opt-in no sustituye esta comprobación.
 | `PasswordRecovery__ResetLinkBaseUrl` | Faltante; necesario para recuperación |
 | `Admin__AccountIds` | Faltante; M06 ya existe, provisión formal pendiente de M13 |
 
-`Api__EnableSwagger=true` está activo en Production; se recomienda cambiarlo a
-`false` en la ventana de configuración.
+**Actualización 17-nov-2026:** la lectura de solo lectura de `unihome-api`
+mostró `Api__EnableSwagger=false`, `Redis__Enabled=true` con referencias a
+secretos, `Cloudinary__*`, `Admin__AccountIds` y `Proxy__TrustForwardedHeaders=true`
+con proxies loopback. No se modificó Azure. Si se habilita Swagger en una ventana
+autorizada, el código actual exige administrador y cookie de documentación; ya no
+es público. La migración `M07-001` sigue siendo un Gate independiente: no se
+aplicó en Atlas y los favoritos fallan cerrados con `503` hasta su promoción.
+
+`Api__EnableSwagger=false` sigue siendo el valor recomendado fuera de una ventana
+autorizada.
 
 ## 8. Gate de despliegue
 

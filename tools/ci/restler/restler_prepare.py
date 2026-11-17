@@ -40,6 +40,7 @@ ARTIFACTS_DIR = ROOT_DIR / "artifacts/restler"
 WORK_DIR = ROOT_DIR / ".restler-work"
 STATE_DIR = ROOT_DIR / ".restler-state"
 TOKEN_PROVIDER = Path(__file__).with_name("token_provider.py").resolve()
+TERMS_VERSION = "2026-01"
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,10 @@ class SyntheticData:
     recovery_request_email: str
     reset_token: str
     reset_password: str
+    detail_expediente_id: str
+    approve_expediente_id: str
+    reject_expediente_id: str
+    document_access_token: str
 
 
 def _write_json(path: Path, value: Any, private: bool = False) -> None:
@@ -222,6 +227,71 @@ def _upload_photo_and_read_ref(
     return path[len(prefix):]
 
 
+def _create_owner_session(http: HttpClient, password: str) -> str:
+    email = f"restler.owner.{uuid.uuid4().hex}@uni.edu"
+    code = _register(http, email, password)
+    _confirm(http, email, code)
+    tokens = _login(http, email, password)
+    return str(tokens["accessToken"])
+
+
+def _prepare_expediente(
+    http: HttpClient,
+    owner_token: str,
+    university_id: str,
+    *,
+    submit: bool,
+    label: str,
+) -> tuple[str, str]:
+    """Crea una unidad real y, si se pide, la deja EnRevision con sus documentos."""
+    property_id = _create_property(http, owner_token, university_id)
+    unit_id = _create_unit(http, owner_token, property_id)
+    _upload_photo_and_read_ref(http, owner_token, unit_id)
+    http.request(
+        "POST", "/api/v1/publicaciones/primera/terminos",
+        body={"versionTerminos": TERMS_VERSION}, token=owner_token,
+        expected={200, 422}, auth=True, note=f"restler términos {label}")
+
+    _, ine_payload, _ = http.request_multipart(
+        "POST", "/api/v1/expedientes/mi-expediente/ine",
+        files=[("Archivo", "ine.png", "image/png", DAST_PHOTO_PNG)],
+        token=owner_token, expected={200}, note=f"restler INE {label}")
+    expediente = _json_object(ine_payload)
+    expediente_id = str(expediente.get("id") or "")
+    if not expediente_id:
+        raise RuntimeError(f"La carga INE de {label} no devolvió expediente.")
+
+    http.request_multipart(
+        "POST", "/api/v1/expedientes/mi-expediente/comprobante",
+        files=[("Archivo", "comprobante.png", "image/png", DAST_PHOTO_PNG)],
+        token=owner_token, expected={200}, note=f"restler comprobante {label}")
+
+    if submit:
+        http.request(
+            "POST", "/api/v1/publicaciones/primera/enviar",
+            token=owner_token, expected={200}, auth=True,
+            note=f"restler envío {label}")
+
+    return unit_id, expediente_id
+
+
+def _document_access_token(
+    http: HttpClient,
+    admin_token: str,
+    expediente_id: str,
+) -> str:
+    _, payload, _ = http.request(
+        "GET", f"/api/v1/admin/expedientes/{expediente_id}/documentos/ine",
+        token=admin_token, expected={200}, auth=True,
+        note="restler enlace documental")
+    value = _json_object(payload)
+    path = urllib.parse.urlsplit(str(value.get("url") or "")).path
+    prefix = "/api/v1/expedientes/documentos/"
+    if not path.startswith(prefix) or len(path) <= len(prefix):
+        raise RuntimeError("El enlace documental no contiene un token utilizable.")
+    return path[len(prefix):]
+
+
 def _request_password_reset(http: HttpClient, email: str) -> str:
     http.request(
         "POST", "/api/v1/auth/recuperacion/solicitud",
@@ -275,6 +345,23 @@ def build_private_dictionaries(data: SyntheticData) -> dict[str, dict[str, Any]]
             "id": data.university_id,
             "activa": "false",
         }),
+        "admin-detail": _custom_dictionary({
+            "id": data.detail_expediente_id,
+        }),
+        "admin-approve": _custom_dictionary({
+            "id": data.approve_expediente_id,
+        }),
+        "admin-reject": _custom_dictionary({
+            "id": data.reject_expediente_id,
+            "motivo": "Motivo sintético de rechazo RESTler",
+        }),
+        "admin-document": _custom_dictionary({
+            "id": data.detail_expediente_id,
+            "tipo": "ine",
+        }),
+        "document-token": _custom_dictionary({
+            "token": data.document_access_token,
+        }),
         "property": _custom_dictionary({
             "universidadId": data.university_id,
             "latitud": "19.4326",
@@ -323,6 +410,8 @@ def build_compile_dictionary(data: SyntheticData) -> dict[str, Any]:
         "propertyId": data.property_id,
         "unitId": data.unit_id,
         "id": data.university_id,
+        "tipo": "ine",
+        "motivo": "Motivo sintético de rechazo RESTler",
         "latitud": "19.4326",
         "longitud": "-99.1332",
     })
@@ -410,13 +499,7 @@ def build_compile_config(
     }
 
 
-def _provision_synthetic_data(http: HttpClient) -> SyntheticData:
-    admin_state = Path(os.environ.get(
-        "UNIHOME_ADMIN_STATE", ROOT_DIR / ".ci-state/admin.json"))
-    admin = load_admin_state(admin_state)
-    admin_tokens = _login(http, admin["email"], admin["password"])
-    admin_access = str(admin_tokens["accessToken"])
-
+def _provision_synthetic_data(http: HttpClient, admin_access: str) -> SyntheticData:
     login_email = f"restler.login.{uuid.uuid4().hex}@uni.edu"
     login_password = _generate_password()
     login_code = _register(http, login_email, login_password)
@@ -431,6 +514,27 @@ def _provision_synthetic_data(http: HttpClient) -> SyntheticData:
     unit_id = _create_unit(http, admin_access, property_id)
     _publish_unit_for_exploration(unit_id)
     photo_ref = _upload_photo_and_read_ref(http, admin_access, unit_id)
+
+    # M06: fixtures reales por HTTP. El administrador conserva un expediente
+    # EnRevision para detalle/documento/mapa privado y otro Borrador listo para
+    # que RESTler ejercite el envío. Dos cuentas normales aportan expedientes
+    # independientes para aprobar y rechazar sin carreras entre operaciones.
+    _, detail_expediente_id = _prepare_expediente(
+        http, admin_access, university_id,
+        submit=True, label="admin detalle")
+    _, _ = _prepare_expediente(
+        http, admin_access, university_id,
+        submit=False, label="admin envío")
+    approve_owner = _create_owner_session(http, _generate_password())
+    _, approve_expediente_id = _prepare_expediente(
+        http, approve_owner, university_id,
+        submit=True, label="aprobar")
+    reject_owner = _create_owner_session(http, _generate_password())
+    _, reject_expediente_id = _prepare_expediente(
+        http, reject_owner, university_id,
+        submit=True, label="rechazar")
+    document_access_token = _document_access_token(
+        http, admin_access, detail_expediente_id)
 
     confirm_email = f"restler.confirm.{uuid.uuid4().hex}@uni.edu"
     confirm_password = _generate_password()
@@ -470,6 +574,10 @@ def _provision_synthetic_data(http: HttpClient) -> SyntheticData:
         recovery_request_email=recovery_request_email,
         reset_token=reset_token,
         reset_password=reset_password,
+        detail_expediente_id=detail_expediente_id,
+        approve_expediente_id=approve_expediente_id,
+        reject_expediente_id=reject_expediente_id,
+        document_access_token=document_access_token,
     )
 
 
@@ -478,9 +586,17 @@ def prepare() -> dict[str, Any]:
         directory.mkdir(parents=True, exist_ok=True)
 
     http = HttpClient(TARGET, None)
+    admin = load_admin_state(
+        Path(os.environ.get(
+            "UNIHOME_ADMIN_STATE", ROOT_DIR / ".ci-state/admin.json")))
+    admin_tokens = _login(http, admin["email"], admin["password"])
+    admin_access = str(admin_tokens["accessToken"])
+
+    # El contrato interno exige el privilegio administrativo. Se usa el mismo
+    # administrador sintético del job, nunca un token productivo.
     _, spec_payload, _ = http.request(
-        "GET", "/openapi/v1.json", expected={200}, openapi=False,
-        note="OpenAPI RESTler")
+        "GET", "/openapi/v1.json", expected={200}, token=admin_access,
+        auth=True, openapi=False, note="OpenAPI RESTler")
     source_spec = _json_object(spec_payload)
     _write_json(ARTIFACTS_DIR / "openapi-original.json", source_spec)
 
@@ -490,7 +606,7 @@ def prepare() -> dict[str, Any]:
     transformation = normalize_openapi.report(source_spec, normalized_spec, changes)
     _write_json(ARTIFACTS_DIR / "openapi-transformation.json", transformation)
 
-    data = _provision_synthetic_data(http)
+    data = _provision_synthetic_data(http, admin_access)
     dictionaries = build_private_dictionaries(data)
     dictionary_paths: dict[str, Path] = {}
     for name, value in dictionaries.items():
@@ -533,6 +649,11 @@ def prepare() -> dict[str, Any]:
         "/api/v1/cuentas/mi-cuenta": dictionary_paths["delete"],
         "/api/v1/admin/universidades/{id}": dictionary_paths["admin-update"],
         "/api/v1/admin/universidades/{id}/estado": dictionary_paths["admin-status"],
+        "/api/v1/admin/expedientes/{id}": dictionary_paths["admin-detail"],
+        "/api/v1/admin/expedientes/{id}/aprobar": dictionary_paths["admin-approve"],
+        "/api/v1/admin/expedientes/{id}/rechazar": dictionary_paths["admin-reject"],
+        "/api/v1/admin/expedientes/{id}/documentos/{tipo}": dictionary_paths["admin-document"],
+        "/api/v1/expedientes/documentos/{token}": dictionary_paths["document-token"],
         "/api/v1/propiedades": dictionary_paths["property"],
         "/api/v1/propiedades/{propertyId}/unidades": dictionary_paths["unit"],
         "/api/v1/unidades/{unitId}/servicios": dictionary_paths["services"],

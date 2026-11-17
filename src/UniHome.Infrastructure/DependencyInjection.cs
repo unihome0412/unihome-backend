@@ -60,7 +60,11 @@ public static class DependencyInjection
 
         services
             .AddOptions<PasswordRecoveryOptions>()
-            .Bind(configuration.GetSection(PasswordRecoveryOptions.SectionName));
+            .Bind(configuration.GetSection(PasswordRecoveryOptions.SectionName))
+            .Validate(
+                options => options.IsValid(),
+                $"{PasswordRecoveryOptions.SectionName}:ResetLinkBaseUrl o AndroidAppScheme no son válidos.")
+            .ValidateOnStart();
 
         services
             .AddOptions<DocumentSecurityOptions>()

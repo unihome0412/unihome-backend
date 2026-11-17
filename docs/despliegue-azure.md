@@ -21,7 +21,7 @@ protecciones, rollback y FinOps. No se tocó `main` en esta auditoría.
 | Container App | `unihome-api` | 0.25 vCPU / 0.5 GiB, 1–1 réplicas |
 
 URL pública: `https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io`
-Swagger UI (demo, ver sección dedicada): `https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io/swagger`
+Swagger UI (protegida, ver sección dedicada): `https://unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io/swagger`
 
 ## Swagger UI (demostración)
 
@@ -32,13 +32,21 @@ Controlado por `Api__EnableSwagger`, **desactivado por defecto**:
 
 - `Api__EnableSwagger=false` (o ausente): `/swagger` y `/openapi/v1.json`
   responden `404`; `/` no tiene ninguna ruta mapeada.
-- `Api__EnableSwagger=true`: `/swagger` y `/openapi/v1.json` responden `200`;
-  `/` redirige (`302`) a `/swagger`.
+- `Api__EnableSwagger=true`: `/swagger`, sus assets y `/openapi/v1.json`
+  responden `401` sin sesión y `200` solo con la policy administrativa
+  (`Admin__AccountIds`). `/` redirige (`302`) a `/swagger` solo para un
+  administrador.
+- Para el navegador, el administrador canjea su Bearer por la cookie
+  `__Host-unihome-swagger` con `POST /api/v1/auth/swagger-session`. La cookie es
+  HttpOnly, Secure, SameSite=Strict y dura 15 minutos por defecto
+  (`SwaggerAccess__CookieLifetimeMinutes`, 1–60). No se acepta en `/api/*`.
+- No se permite acceso anónimo ni se oculta la URL como sustituto de
+  autorización. La activación en Azure requiere autorización productiva.
 
-El documento incluye un `servers` con la URL pública exacta en `https`
-(detectada de la propia solicitud), así que el botón "Authorize" (esquema
-Bearer, ya documentado en el propio OpenAPI) y cualquier solicitud de "Try it
-out" desde Swagger UI usan HTTPS, nunca HTTP plano.
+El documento declara el esquema Bearer. El botón "Authorize" de Swagger UI
+permite adjuntar un JWT administrativo a las solicitudes "Try it out"; si se
+omite, la petición sigue las reglas normales de autorización y no eleva
+privilegios. El entorno debe servirse siempre por HTTPS.
 
 Activar/desactivar en el entorno ya desplegado:
 
@@ -71,7 +79,7 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Redis__ConnectionString` | S? | `RedisOptions` (`Redis`) | Una de las formas de credencial Upstash (`rediss://...`) |
 | `Redis__RestUrl` | No | `RedisOptions` (`Redis`) | Alternativa a ConnectionString; URL REST HTTPS de Upstash |
 | `Redis__RestToken` | S? | `RedisOptions` (`Redis`) | Requerido con `Redis__RestUrl` |
-| `Redis__CommandTimeoutMs` | No | `RedisOptions` (`Redis`) | Opcional; predeterminado 250 ms |
+| `Redis__CommandTimeoutMs` | No | `RedisOptions` (`Redis`) | Opcional; predeterminado 2000 ms por intento |
 | `Admin__AccountIds` | No | `AdminAccessOptions` (`Admin`) | Solo para cuentas administrativas autorizadas; lista vac?a deniega todo |
 | `Cloudinary__CloudName` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
 | `Cloudinary__ApiKey` | S? | `CloudinaryOptions` (`Cloudinary`) | Requerido para habilitar fotos |
@@ -98,17 +106,22 @@ imagen. Nombres verificados contra las clases de opciones correspondientes en
 | `Smtp__FromEmail` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `Smtp__FromName` | No | `SmtpOptions` (`Smtp`) | Solo con `Smtp__Host` |
 | `PasswordRecovery__ResetLinkBaseUrl` | No | `PasswordRecoveryOptions` (`PasswordRecovery`) | Solo si se habilita recuperación de contraseña; URL HTTPS del cliente (se le agrega `?token=...`) |
+| `PasswordRecovery__AndroidAppScheme` | No | `PasswordRecoveryOptions` (`PasswordRecovery`) | Opcional; esquema Android autorizado (p. ej. `unihome`) si se usa deep link en lugar de App Link HTTPS |
+| `SwaggerAccess__CookieLifetimeMinutes` | No | `SwaggerAccessOptions` (`SwaggerAccess`) | Opcional; 15 por defecto, rango 1–60; solo aplica con Swagger habilitado |
 | `Proxy__TrustForwardedHeaders` | No | `ProxyOptions` (`Proxy`) | Sí, en `true`, solo si el contenedor corre detrás del ingress de Container Apps |
 | `Proxy__KnownProxies__0` | No | `ProxyOptions` (`Proxy`) | `127.0.0.1`; obligatorio si `TrustForwardedHeaders=true` (el ingress llega por loopback) |
 | `Proxy__KnownProxies__1` | No | `ProxyOptions` (`Proxy`) | `::1`; obligatorio si `TrustForwardedHeaders=true` (loopback IPv6) |
-| `Api__EnableSwagger` | No | `ApiOptions` (`Api`) | No; `false` por defecto, activar solo para demostraciones puntuales |
+| `Api__EnableSwagger` | No | `ApiOptions` (`Api`) | No; `false` por defecto. Si se activa, exige administrador y cookie de documentación; requiere autorización productiva |
 
 Si no existe ninguna clave bajo `Smtp`, el registro funciona sin enviar correo
 real (`correoConfirmacionEnviado: false`); si existe alguna, todas las
 obligatorias de esa sección se validan al arrancar. Para recuperación de contraseña,
 `PasswordRecovery__ResetLinkBaseUrl` debe ser una URL HTTPS (o HTTP loopback en
 desarrollo) sin query ni fragmento; si falta, el endpoint responde igual pero no se
-simula el envío del enlace.
+simula el envío del enlace. Para un deep link Android se declara además
+`PasswordRecovery__AndroidAppScheme` con el esquema exacto de la app; un App Link
+HTTPS sigue siendo preferible. El token se agrega como `?token=...` y nunca se
+registra.
 
 La imagen final instala `tesseract-ocr`, `tesseract-ocr-eng`, `tesseract-ocr-spa` y `poppler-utils`.
 El OCR y la rasterización PDF se ejecutan localmente; no requieren un servicio

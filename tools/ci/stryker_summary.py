@@ -118,7 +118,7 @@ def _escape(value: str) -> str:
     return value.replace("|", "\\|")
 
 
-def main(root: Path = REPORT_ROOT) -> int:
+def main(root: Path = REPORT_ROOT, minimum_score: float | None = None) -> int:
     report_path = find_latest_report(root)
     if report_path is None or not report_path.is_file():
         print(
@@ -151,8 +151,20 @@ def main(root: Path = REPORT_ROOT) -> int:
         )
         return 1
 
+    if minimum_score is not None and summary["score"] < minimum_score:
+        print(
+            f"::error::Mutation score {summary['score']:.2f}% por debajo del mínimo {minimum_score:.2f}%.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=REPORT_ROOT)
+    parser.add_argument("--minimum-score", type=float, default=None)
+    args = parser.parse_args()
+    raise SystemExit(main(args.root, args.minimum_score))

@@ -11,7 +11,9 @@ cuenta (HU-096).
 - Clean Architecture: `Domain` no depende de otros proyectos; `Application` depende de
   `Domain`; `Infrastructure` depende de `Application` y `Domain`; `Api` compone ambas.
 - MongoDB mediante `MongoDB.Driver`, aislado detrás de puertos de `Application`.
-- Sin SQL Server, EF Core, Testcontainers, Scalar ni Swagger UI. Docker se usa
+- Sin SQL Server, EF Core, Testcontainers ni Scalar. Swagger UI y el documento
+  OpenAPI nativo existen como documentación interna **protegida** por el
+  privilegio administrativo existente; no se exponen públicamente. Docker se usa
   únicamente para construir/validar la imagen de Azure Container Apps y los jobs
   de CI autorizados; no se usa Docker para el desarrollo local.
 
@@ -210,6 +212,39 @@ Reglas principales:
 Detalle en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md), incluida la
 matriz de las 56 HU de Sprints 1–5.
 
+## Swagger/OpenAPI protegido
+
+La documentación interna se habilita explícitamente con
+`Api__EnableSwagger=true`; el valor por defecto es `false`. Cuando está activa:
+
+- `/openapi/v1.json`, `/swagger`, sus assets y `/` exigen la policy
+  administrativa existente (`Admin__AccountIds`). No hay acceso anónimo.
+- Un JWT administrativo puede consultar el contrato con
+  `Authorization: Bearer` y descargarlo para Android o Postman.
+- Para abrir Swagger UI en el navegador, el administrador canjea una vez su
+  Bearer por una cookie `__Host-unihome-swagger` HttpOnly, Secure,
+  SameSite=Strict y de 15 minutos por defecto:
+
+  ```powershell
+  curl.exe -i -X POST "$env:UNIHOME_BASE_URL/api/v1/auth/swagger-session" `
+    -H "Authorization: Bearer $env:UNIHOME_ADMIN_JWT" `
+    -c cookies.txt
+  ```
+
+  La cookie solo autentica `/swagger` y `/openapi`; no se acepta en `/api/*`.
+  `DELETE /api/v1/auth/swagger-session` la elimina. En local debe usarse HTTPS
+  (la cookie `__Host-` exige `Secure`); el contrato también se puede descargar
+  directamente con `Authorization: Bearer` sin canjear la cookie.
+- `SwaggerAccess__CookieLifetimeMinutes` se valida entre 1 y 60. No se guardan
+  usuarios, contraseñas ni tokens en configuración.
+- La interfaz y el JSON envían `Cache-Control: no-store` y
+  `X-Robots-Tag: noindex, nofollow`. La CSP de Swagger permite estilos inline
+  necesarios para su renderizado, pero mantiene `script-src 'self'` y
+  `frame-ancestors 'none'`; el resto de la API conserva `default-src 'none'`.
+- La activación en Azure requiere autorización productiva. El valor
+  `Api__EnableSwagger=false` sigue siendo el recomendado fuera de una ventana
+  autorizada.
+
 ## Seguridad de sesión
 
 - Login universal con correo normalizado y contraseña; no se solicita ni se acepta un
@@ -294,6 +329,9 @@ matriz de las 56 HU de Sprints 1–5.
 - `PasswordRecovery__ResetLinkBaseUrl` (o `PasswordRecovery:ResetLinkBaseUrl`) es la
   URL HTTPS del cliente a la que se agrega `?token=...`. Es necesaria para que el
   correo de recuperación se envíe; si falta o no es válida, no se simula el enlace.
+  `PasswordRecovery__AndroidAppScheme` permite declarar un esquema Android
+  (por ejemplo `unihome`) para deep links; se valida contra una lista de esquemas
+  peligrosos y un App Link HTTPS sigue siendo la opción recomendada.
 - El envío SMTP es opcional en Development. Si no existe la sección `Smtp`, el registro
   persiste la cuenta y devuelve `correoConfirmacionEnviado: false`; si existe, se valida
   al arrancar y `correoConfirmacionEnviado: true` solo indica que el relé aceptó el
@@ -324,8 +362,12 @@ sobre `nombreNormalizado`. La migración versionada `M03-001` crea la colección
 diverge. Detalle en [`docs/mongodb-m03.md`](docs/mongodb-m03.md).
 
 M07 usa `favoritos` (`accountId`, `unitId`, `createdAt`) con índice único
-`ux_favoritos_cuenta_unidad` y la migración `M07-001`; no cambia M05-001. Detalle
-en [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
+`ux_favoritos_cuenta_unidad`, índice `ix_favoritos_cuenta_fecha` y la migración
+`M07-001` (checksum SHA-256
+`003D4CC39CCB6ACC6E44C8762AEEBD60C417A08C03ABA35B2AE585392F38887E`); no cambia
+M05-001. La API no crea la colección: si falta la migración o un índice, los
+endpoints de favoritos fallan cerrados con `503`. Detalle, preflight de solo
+lectura y recuperación en [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
 
 M05 usa `propiedades`, `unidades` y `aceptaciones_terminos` con la migración
 `M05-001`; las fotos guardan solo metadatos y el binario se almacena en Cloudinary. Detalle en
@@ -420,12 +462,17 @@ o diverge, HU-006 responde `503` y no se declara operativa.
 - Todas las respuestas incluyen `X-Content-Type-Options`, `X-Frame-Options`,
   `Referrer-Policy`, `Permissions-Policy` y una CSP; las rutas de autenticación,
   cuentas y perfil añaden `Cache-Control: no-store`. La CSP de Swagger UI permite
-  sus recursos propios e inline; el resto de la API usa `default-src 'none'`.
+  sus recursos propios y estilos inline; el resto de la API usa
+  `default-src 'none'`.
   Fuera de Development, HSTS se emite para requests HTTPS con host público no
-  loopback y `X-Forwarded-Proto` confiable (`max-age=31536000; includeSubDomains`,
-  sin preload).
-- OpenAPI nativo de .NET 10 disponible solo en desarrollo: `GET /openapi/v1.json`.
-  Incluye el esquema Bearer y marca `logout` como operación autenticada.
+  loopback (`max-age=31536000; includeSubDomains`, sin preload). También se
+  emite si el ingress declara `X-Forwarded-Proto: https`, aunque su red no esté
+  en `Proxy:KnownProxies`; esa cabecera solo decide HSTS y no altera el esquema,
+  la IP, la autenticación ni el rate limiting.
+- OpenAPI nativo de .NET 10 disponible solo con `Api:EnableSwagger=true` y
+  sesión administrativa: `GET /openapi/v1.json`. Incluye el esquema Bearer y
+  marca `logout` como operación autenticada. La interfaz `/swagger` usa la misma
+  policy; ver “Swagger/OpenAPI protegido”.
 - Los 15 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
   `Occupancy`, `ForWhom`, `BathroomType`, `FurnitureType`, `UnitTemplate`,
   `ServiceName`, `ServiceMode`, `AccountLabel`, `EstadoExpediente`,
@@ -480,9 +527,14 @@ y no se declaran aprobadas. El workflow manual
 [`.github/workflows/ocr-documental.yml`](.github/workflows/ocr-documental.yml)
 prepara la ejecución autorizada en CI con ambos motores reales.
 
-Estado local del cierre: **654 unitarias** y **224 integraciones ejecutadas**
+Estado local del cierre: **788 unitarias** y **240 integraciones ejecutadas**
 (9 opt-in de Mongo/Cloudinary omitidas de forma explícita). La matriz de las
 56 HU de Sprints 1–5 está en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md).
+La matriz de aceptación HTTPS de las 41 operaciones y la colección
+Postman/Newman parametrizada están en
+[`docs/aceptacion-sprints-1-5.md`](docs/aceptacion-sprints-1-5.md) y
+[`tests/acceptance/`](tests/acceptance/). La ejecución remota autenticada queda
+**PENDIENTE_AUTORIZACIÓN** hasta disponer de una sesión legítima.
 
 Las pruebas de integración habituales usan `WebApplicationFactory` y dobles en memoria;
 no requieren un clúster real. La CI de GitHub Actions (`.github/workflows/ci.yml`)
@@ -690,4 +742,5 @@ declara listo para el primer despliegue hasta completar esos pasos.
   endpoints de relleno.
 - Retención/limpieza de cuentas no confirmadas y anonimización de datos tras
   eliminar una cuenta (ADR-005).
-- Scalar/Swagger UI solo si se aprueba explícitamente.
+- Scalar no se usa. Swagger UI está implementado y protegido por la policy
+  administrativa; su activación por entorno sigue siendo una decisión explícita.
