@@ -40,7 +40,7 @@ public sealed class OpenApiEnumContractTests : IClassFixture<SwaggerEnabledApiFa
     public OpenApiEnumContractTests(SwaggerEnabledApiFactory factory)
     {
         _factory = factory;
-        _client = factory.CreateClient();
+        _client = factory.CreateAdminClient();
     }
 
     [Fact]

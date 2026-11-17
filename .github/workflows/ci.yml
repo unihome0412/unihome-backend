@@ -327,7 +327,7 @@ jobs:
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
           -c Release --no-build --no-restore
-          --filter "FullyQualifiedName~OpenApi|FullyQualifiedName~SwaggerUiTests|FullyQualifiedName~HealthReadinessTests"
+          --filter "FullyQualifiedName~OpenApi|FullyQualifiedName~SwaggerUiTests|FullyQualifiedName~SwaggerAccessTests|FullyQualifiedName~HealthReadinessTests"
           --logger "trx;LogFileName=openapi-contract.trx"
           --results-directory TestResults/contracts
       - name: Guardar contratos verificados
@@ -716,7 +716,7 @@ jobs:
         if: always()
         run: |
           set -o pipefail
-          python3 tools/ci/stryker_summary.py | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 tools/ci/stryker_summary.py --minimum-score 60 | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Conservar reportes HTML y JSON
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -1042,6 +1042,16 @@ jobs:
                   raise SystemExit(f"{name} no está Healthy: {payload}")
           PY
 
+          hsts_headers=$(curl --silent --show-error --dump-header - --output /dev/null \
+            -H 'X-Forwarded-Proto: https' \
+            -H 'Host: unihome-smoke.invalid' \
+            http://127.0.0.1:8080/health/live)
+          printf '%s\n' "$hsts_headers" | grep -iq '^strict-transport-security: max-age=31536000; includeSubDomains'
+          if curl --fail --silent --show-error --output /dev/null \
+            http://127.0.0.1:8080/openapi/v1.json; then
+            echo "::error::OpenAPI no debe estar disponible con Api__EnableSwagger=false."
+            exit 1
+          fi
           sleep 5
           test "$(docker inspect -f '{{.State.Running}}' "$SMOKE_CONTAINER")" = "true"
           test "$(docker inspect -f '{{.State.ExitCode}}' "$SMOKE_CONTAINER")" = "0"
@@ -1420,6 +1430,7 @@ jobs:
           Smtp__FromName: UniHome DAST
           Smtp__TimeoutSeconds: '15'
           PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          DocumentSecurity__UrlLifetimeSeconds: '900'
           Cloudinary__UseEphemeralStorage: 'true'
           Auth__RateLimit__LoginPermitLimit: '10000'
           Auth__RateLimit__RefreshPermitLimit: '10000'
@@ -1849,6 +1860,7 @@ jobs:
           Auth__RateLimit__PasswordResetRequestPermitLimit: '10000'
           Auth__RateLimit__PasswordResetConfirmPermitLimit: '10000'
           PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          DocumentSecurity__UrlLifetimeSeconds: '900'
           Cloudinary__UseEphemeralStorage: 'true'
           Smtp__Host: 127.0.0.1
           Smtp__Port: '587'
@@ -1931,6 +1943,7 @@ jobs:
           Auth__RateLimit__PasswordResetRequestPermitLimit: '10000'
           Auth__RateLimit__PasswordResetConfirmPermitLimit: '10000'
           PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
+          DocumentSecurity__UrlLifetimeSeconds: '900'
           Cloudinary__UseEphemeralStorage: 'true'
           Smtp__Host: 127.0.0.1
           Smtp__Port: '587'

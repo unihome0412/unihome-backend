@@ -174,10 +174,30 @@ def count_sequences(root: Path) -> int:
     return len(sequences)
 
 
+def documented_statuses(spec: dict[str, Any]) -> dict[tuple[str, str], set[int]]:
+    """Códigos de respuesta declarados por operación en el contrato OpenAPI."""
+    result: dict[tuple[str, str], set[int]] = {}
+    for path, item in (spec.get("paths") or {}).items():
+        if not isinstance(item, dict):
+            continue
+        for method in ("get", "post", "put", "patch", "delete", "head", "options"):
+            operation = item.get(method)
+            if not isinstance(operation, dict):
+                continue
+            result[(method.upper(), path)] = _recursive_codes(
+                operation.get("responses") or {})
+    return result
+
+
+def _has_2xx(entries: Iterable[dict[str, Any]]) -> bool:
+    return any(200 <= code < 300 for code in _statuses(entries))
+
+
 def compact_coverage(
     operations: list[tuple[str, str]],
     test: dict[tuple[str, str], list[dict[str, Any]]],
     fuzz: dict[tuple[str, str], list[dict[str, Any]]],
+    contract_statuses: dict[tuple[str, str], set[int]] | None = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for key in operations:
@@ -185,6 +205,7 @@ def compact_coverage(
         test_entries = test.get(key, [])
         fuzz_entries = fuzz.get(key, [])
         all_entries = test_entries + fuzz_entries
+        documented = sorted((contract_statuses or {}).get(key, set()))
         rows.append({
             "method": method,
             "path": endpoint,
@@ -194,8 +215,19 @@ def compact_coverage(
             "attempted": bool(all_entries),
             "valid_test": any(int(entry.get("valid") or 0) == 1 for entry in test_entries),
             "valid_fuzz_lean": any(int(entry.get("valid") or 0) == 1 for entry in fuzz_entries),
+            # "valid" es la validación del motor RESTler (gramática); no
+            # significa que la respuesta sea 2xx. Se conserva para fuzzing.
             "valid": any(int(entry.get("valid") or 0) == 1 for entry in all_entries),
+            "has_2xx_test": _has_2xx(test_entries),
+            "has_2xx_fuzz_lean": _has_2xx(fuzz_entries),
+            "has_2xx": _has_2xx(all_entries),
+            "requires_2xx": any(200 <= code < 300 for code in documented),
+            "documented_status_codes": documented,
             "status_codes": _statuses(all_entries),
+            "unexpected_status_codes": sorted(
+                set(_statuses(all_entries)) - set(documented)
+                if documented else set()
+            ),
             "http_500": _has_five_hundred(all_entries),
         })
     return rows
@@ -213,8 +245,21 @@ def classify(
         return "ERROR"
     if any(code >= 500 for code in http_codes) or bugs:
         return "FAIL"
-    if any(row["auth_required"] and not row["valid"] for row in rows):
+    if any(row["auth_required"] and not row["attempted"] for row in rows):
         return "ERROR"
+    # Una operación autenticada que solo devuelve 401/403 no demuestra el flujo
+    # funcional. Un 400/415 por una limitación del fuzzer (por ejemplo multipart)
+    # se conserva como WARN y no se confunde con una autorización rota.
+    if any(
+        row["auth_required"]
+        and row["attempted"]
+        and not row["has_2xx"]
+        and set(row["status_codes"]).issubset({401, 403})
+        for row in rows
+    ):
+        return "ERROR"
+    if any(row["requires_2xx"] and not row["has_2xx"] for row in rows):
+        return "WARN"
     if any(not row["valid"] for row in rows):
         return "WARN"
     return "PASS"
@@ -326,23 +371,24 @@ def render_markdown(
         "",
         f"- Operaciones OpenAPI: **{len(rows)}**.",
         f"- Operaciones intentadas: **{sum(1 for row in rows if row['attempted'])}**.",
-        f"- Operaciones con al menos una respuesta 2xx: **{sum(1 for row in rows if row['valid'])}**.",
+        f"- Operaciones con al menos una respuesta 2xx: **{sum(1 for row in rows if row['has_2xx'])}**.",
+        f"- Operaciones que el contrato exige con 2xx: **{sum(1 for row in rows if row['requires_2xx'])}**.",
         f"- Solicitudes observadas en logs: **{requests}**.",
         f"- Secuencias RESTler observadas: **{sequences}**.",
         "",
-        "| Método | Ruta | Auth | Test | Fuzz-lean | Válida | HTTP |",
-        "|---|---|---:|---|---|---:|---|",
+        "| Método | Ruta | Auth | Test 2xx | Fuzz 2xx | 2xx | RESTler válido | HTTP | Documentado |",
+        "|---|---|---:|---|---|---:|---|---|---|",
     ]
     for row in rows:
         lines.append(
             f"| {row['method']} | `{row['path']}` | "
             f"{'sí' if row['auth_required'] else 'no'} | "
-            f"{'sí' if row['attempted_test'] else 'no'} / "
-            f"{'2xx' if row['valid_test'] else 'sin 2xx'} | "
-            f"{'sí' if row['attempted_fuzz_lean'] else 'no'} / "
-            f"{'2xx' if row['valid_fuzz_lean'] else 'sin 2xx'} | "
-            f"{'sí' if row['valid'] else '**NO**'} | "
-            f"{', '.join(str(code) for code in row['status_codes']) or '—'} |")
+            f"{'sí' if row['has_2xx_test'] else 'no'} | "
+            f"{'sí' if row['has_2xx_fuzz_lean'] else 'no'} | "
+            f"{'sí' if row['has_2xx'] else '**NO**'} | "
+            f"{'sí' if row['valid'] else 'no'} | "
+            f"{', '.join(str(code) for code in row['status_codes']) or '—'} | "
+            f"{', '.join(str(code) for code in row['documented_status_codes']) or '—'} |")
     lines += [
         "",
         "## Errores HTTP",
@@ -358,7 +404,10 @@ def render_markdown(
             lines.append(f"- `{bug['name']}`: {bug['count']} ocurrencia(s).")
     else:
         lines.append("No se detectaron bug buckets ni violaciones de checkers.")
-    invalid = [row for row in rows if row["attempted"] and not row["valid"]]
+    invalid = [
+        row for row in rows
+        if row["attempted"] and row["requires_2xx"] and not row["has_2xx"]
+    ]
     if invalid:
         lines += ["", "## Operaciones sin 2xx", ""]
         for row in invalid:
@@ -386,8 +435,10 @@ def render_markdown(
         "",
         "- ERROR si la compilación, alguna pasada Test/Fuzz o la cobertura de operaciones falla.",
         "- FAIL si aparece un HTTP 5xx o un bug bucket; no se ocultan ni se desactivan checkers.",
-        "- WARN si una operación fue intentada pero no obtuvo 2xx (por ejemplo, multipart no soportado).",
-        f"- PASS solo con las {len(rows)} operaciones intentadas, autenticación válida y sin 5xx/bugs.",
+        "- WARN si una operación fue intentada pero no obtuvo 2xx "
+        "(por ejemplo, multipart no soportado) o si RESTler no la marcó válida.",
+        f"- PASS solo con las {len(rows)} operaciones intentadas, autenticación válida, "
+        f"2xx donde el contrato lo exige y sin 5xx/bugs.",
     ]
     if technical_errors:
         lines += ["", "## Errores técnicos", ""] + [f"- {error}" for error in technical_errors]
@@ -434,9 +485,11 @@ def main() -> int:
     if not isinstance(original, dict):
         original = read_json(WORK_DIR / "openapi-restler-30.json")
     operations = operations_from_spec(original) if isinstance(original, dict) else []
+    contract_statuses = (
+        documented_statuses(original) if isinstance(original, dict) else {})
     test, test_exits, missing_test_dirs = _load_test_results()
     fuzz = load_speccov(WORK_DIR / "FuzzLean")
-    rows = compact_coverage(operations, test, fuzz)
+    rows = compact_coverage(operations, test, fuzz, contract_statuses)
     http_codes = collect_http_codes(WORK_DIR)
     bugs = collect_bugs(WORK_DIR)
     requests = count_requests(WORK_DIR)
@@ -492,6 +545,13 @@ def main() -> int:
         "test_exits": test_exits,
         "fuzz_lean_exit": fuzz_exit,
         "routes": rows,
+        "operations_with_2xx": sum(1 for row in rows if row["has_2xx"]),
+        "operations_requiring_2xx": sum(1 for row in rows if row["requires_2xx"]),
+        "operations_without_required_2xx": [
+            f"{row['method']} {row['path']}"
+            for row in rows
+            if row["requires_2xx"] and not row["has_2xx"]
+        ],
         "missing_operations": missing,
         "http_codes": sorted(http_codes),
         "http_5xx": sorted(code for code in http_codes if code >= 500),
@@ -552,7 +612,7 @@ def main() -> int:
     print(f"RESTler status: {status}")
     print(
         f"Operaciones: {sum(1 for row in rows if row['attempted'])}/{len(rows)} intentadas; "
-        f"{sum(1 for row in rows if row['valid'])}/{len(rows)} con 2xx; "
+        f"{sum(1 for row in rows if row['has_2xx'])}/{len(rows)} con 2xx; "
         f"5xx={summary['http_5xx']}; bugs={len(bugs)}")
     if technical_errors:
         print("\n".join(technical_errors))

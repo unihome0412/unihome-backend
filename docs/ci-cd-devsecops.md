@@ -27,7 +27,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Cloudinary Integration | `UNIHOME_ENABLE_CLOUDINARY_INTEGRATION=true` | Environment protegido `cloudinary-integration` y secretos dedicados `CLOUDINARY_INTEGRATION_CLOUD_NAME`, `CLOUDINARY_INTEGRATION_API_KEY`, `CLOUDINARY_INTEGRATION_API_SECRET`; el test real sube un PNG sintético y limpia el asset en `finally` | Solo manual y con aprobación |
-| Docker Build + Dockle + Container Smoke | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen. El smoke arranca la imagen real con MongoDB efímero y configuración de Production, exige `/health/live` y `/health/ready` en 200, proceso vivo y ausencia de exit 139/errores fatales | PR, push main, manual |
+| Docker Build + Dockle + Container Smoke | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen. El smoke arranca la imagen real con MongoDB efímero y configuración de Production, exige `/health/live` y `/health/ready` en 200, HSTS con `X-Forwarded-Proto: https`, `/openapi/v1.json` no disponible con Swagger desactivado, proceso vivo y ausencia de exit 139/errores fatales | PR, push main, manual |
 | DAST ZAP | `UNIHOME_ENABLE_ZAP=true` | API efímera en loopback con MongoDB 8.0.34 y SMTP de captura; descubre OpenAPI, ejecuta rutas reales y flujo autenticado; ZAP **baseline pasivo**; reportes HTML/JSON/Markdown | Manual desde `main` o `feature/*` |
 | Pact | `UNIHOME_ENABLE_PACT=true` | Verificador de proveedor PactNet 5.0.1 con API Kestrel aislada; requiere contratos JSON reales del consumidor Android en `pacts/`; sin ellos **falla** y permanece desactivado | Solo manual |
 | RESTler | `UNIHOME_ENABLE_RESTLER=true` | RESTler `v9.3.1` fijado por commit; API/MongoDB/SMTP efímeros, Compile + Test + Fuzz-lean con límites; cobertura y bug buckets | Manual desde `main` o `feature/*` |
@@ -59,9 +59,10 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
   confirmación con el código capturado del SMTP, login, refresh, logout y
   eliminación de cuenta. Las claves JWT/HMAC y la contraseña SMTP son valores
   sintéticos del runner; los tokens no se publican en artefactos.
-- Descubre las operaciones en `/openapi/v1.json` y envía una petición real por
-  cada método HTTP documentado. También visita `/health/live`, `/health/ready`,
-  Swagger UI y `/`. La tabla `route-coverage.json` registra método, ruta,
+- Inicia sesión con el administrador sintético y descarga `/openapi/v1.json` con
+  Bearer. Antes comprueba que `/openapi/v1.json` y `/swagger/index.html`
+  responden `401` sin sesión; después visita Swagger UI y `/` con la sesión
+  administrativa. La tabla `route-coverage.json` registra método, ruta,
   autenticación requerida, códigos de respuesta y ruta visitada. Una operación
   nueva en OpenAPI que no tenga tráfico hace fallar el job.
 - Envía el tráfico a través del proxy de ZAP y ejecuta únicamente análisis
@@ -134,7 +135,7 @@ en el runner. No se usa una imagen móvil ni un servicio remoto.
   repetible; no se inventa tráfico ni se omite esa operación. Los 15 enums
   públicos se validan como string.
 - Ejecuta **Compile**, **Test/Smoke** y **Fuzz-lean**. No se usa `fuzz` ni
-  fuzzing exhaustivo. Límites: `max_combinations=3`, `max_sequence_length=2`,
+  fuzzing exhaustivo. Límites: `max_combinations=2..3`, `max_sequence_length=10`,
   `max_request_execution_time=20s`, timeout de shell por etapa, sin checkers
   desactivados. En la instancia efímera se elevan los rate limits de
   autenticación para que el fuzzer no quede bloqueado por 429; la autenticación
@@ -161,14 +162,22 @@ observadas, 0 HTTP 5xx y 0 bug buckets.
 **Sprint 5:** el catálogo ahora tiene **41 operaciones**. La preparación crea una
 universidad, propiedad y unidad sintéticas, publica la unidad solo en la base
 efímera `unihome_restler` y añade diccionarios para `universidadId`, `unitId` y
-los filtros de exploración. Las rutas M06 se intentan con el token administrativo
-real; las cargas multipart y las rutas sin fixture pueden quedar sin 2xx y se
-reportan como WARN, nunca como PASS. La ejecución #280 terminó con estado PASS,
-37/37 operaciones intentadas, 28/37 con 2xx, 0 HTTP 5xx y 0 bug buckets. La
-cobertura funcional M06 con 2xx se valida en DAST y en las pruebas de integración;
-RESTler conserva la cobertura de esquema y fuzzing. **Sprint 5** añade cuatro
-operaciones hasta llegar a 41; la ejecución real 41/41 queda **PENDIENTE_CI** y
-no se declara PASS anticipado.
+los filtros de exploración. También siembra por HTTP expedientes M06 reales:
+uno `EnRevision` para detalle/documento/mapa privado, uno `Borrador` para el
+envío, y dos independientes para aprobar y rechazar; los IDs y el token firmado
+se pasan como diccionarios privados. Los expedientes del administrador se crean
+**antes** de la unidad pública, porque `SubmitFirstPublicationService`
+selecciona la unidad más antigua del titular; además, la unidad pública
+`Aprobada` pertenece a una cuenta sintética distinta. Crear primero una unidad
+pública bajo el administrador hacía que el envío respondiera `409`. Las cargas
+multipart que RESTler no puede representar y las operaciones cuyo contrato exige
+rechazo se reportan como WARN, nunca como PASS. El reporte ahora cuenta **respuestas 2xx reales**; no confunde
+el flag `valid` de RESTler con éxito funcional. La ejecución #280 terminó con
+37/37 operaciones intentadas, 28/37 con 2xx, 0 HTTP 5xx y 0 bug buckets; con el
+criterio anterior se reportó PASS, pero el criterio corregido la clasifica como
+**WARN** porque 9 operaciones no obtuvieron 2xx. La cobertura funcional M06 con
+2xx se valida además en DAST y en las pruebas de integración. **Sprint 5** añade cuatro operaciones hasta llegar a 41;
+la ejecución real 41/41 queda **PENDIENTE_CI** y no se declara PASS anticipado.
 
 ### OCR real M06
 
@@ -251,7 +260,10 @@ Actions.
 ## Mutation testing (Stryker.NET)
 
 - Herramienta local fijada en `dotnet-tools.json` (`dotnet-stryker` 5.0.0); no se instala una versión global variable.
-- Configuración versionada: `tests/UniHome.UnitTests/stryker-config.json`. Muta únicamente `src/UniHome.Application/Identity/Login/LoginService.cs`.
+- Configuración versionada: `tests/UniHome.UnitTests/stryker-config.json`. Muta
+  login, recuperación, refresh, borrado de cuenta, favoritos, fotos, propiedades,
+  publicaciones, universidades y verificación; el detalle exacto está en
+  `mutate`.
 - Ejecución local reproducible:
 
 ```bash
@@ -263,15 +275,17 @@ dotnet stryker --config-file stryker-config.json
 - Reportes: `tests/UniHome.UnitTests/StrykerOutput/<timestamp>/reports/mutation-report.html` y `mutation-report.json`. No se versionan.
 - El job manual `mutation-test` restaura la herramienta desde el manifiesto, ejecuta pruebas unitarias, corre Stryker y publica ambos reportes. Falla si no hay mutaciones evaluadas, si hay errores de ejecución o si faltan los reportes.
 - Línea base histórica de Login: 57 mutantes en el archivo objetivo, 46 evaluados, 44 detectados, 2 sobrevivientes en `ConfigureAwait(false)` y mutation score de 95.65 %.
-- **Sprint 5:** el alcance de mutación se amplía a `Verification/**`,
-  `SubmitFirstPublication`, `MyPublicationMap` y `GetProfileService`. Ejecución
-  local del 17 de noviembre de 2026: 493 mutantes evaluados, 294 killed, 158
-  survived, 41 NoCoverage, 28 CompileError (safe mode), 0 timeout, 0 errores de
-  ejecución y mutation score **59.63 %**. El reporte JSON contiene 594 mutantes.
-  El umbral `break` sigue en 0 porque el job es informativo; el resultado se
-  reporta sin ocultar sobrevivientes ni errores de compilación. Los servicios
-  nuevos se cubren además con pruebas de integración, que Stryker no usa en esta
-  configuración.
+- **Sprint 5 + saneamiento:** el alcance de mutación cubre login, recuperación,
+  refresh, borrado de cuenta, favoritos, fotos, servicios, zona/reglas,
+  propiedades, términos, publicación, mapa privado, perfil y `Verification/**`.
+  Ejecución local del 17 de noviembre de 2026: 507 killed, 236 survived, 84
+  NoCoverage, 165 CompileError (safe mode), 124 ignorados, 0 timeout, 0
+  errores de ejecución y mutation score **61.31 %**. El umbral pasa a
+  `break=60` (high 80, low 60 se conservan) y `stryker_summary.py
+  --minimum-score 60` falla si el score baja. Los 236 sobrevivientes se reportan
+  sin ocultarlos; los `ConfigureAwait` y mutaciones equivalentes no se eliminan
+  del reporte para no inflar la métrica. Los servicios nuevos se cubren además
+  con pruebas de integración, que Stryker no usa en esta configuración.
 
 ## MongoDB CI efímero
 

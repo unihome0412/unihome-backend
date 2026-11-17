@@ -72,6 +72,8 @@ SENSITIVE_CACHE_PATHS = {
     "/api/v1/auth/refresh",
     "/api/v1/auth/logout",
     "/api/v1/cuentas/mi-cuenta",
+    "/openapi/v1.json",
+    "/swagger/index.html",
 }
 SECURITY_HEADERS = {
     "x-content-type-options": ("nosniff",),
@@ -1030,6 +1032,13 @@ def run_scan(args: argparse.Namespace) -> int:
     http = HttpClient(target, args.proxy)
     zap = ZapApi(args.zap_api, args.zap_api_key)
 
+    # La documentación interna ya no es anónima. Se comprueba primero el
+    # rechazo sin sesión y luego se descarga el contrato con el administrador
+    # sintético provisionado por el job; nunca se usa un token productivo.
+
+    access_admin, _ = _login(
+        http, admin["email"], admin["password"], "login administrador")
+
     version = zap.version()
     if version != EXPECTED_ZAP_VERSION:
         technical_errors.append(
@@ -1048,15 +1057,26 @@ def run_scan(args: argparse.Namespace) -> int:
             raise DastError(f"/{name} no reportó Healthy: {body.get('status')!r}")
     _write_json(output / "api-health.json", health)
 
+    http.request(
+        "GET", "/openapi/v1.json", expected={401}, openapi=False,
+        note="OpenAPI sin sesión")
+    http.request(
+        "GET", "/swagger/index.html", expected={401}, openapi=False,
+        note="Swagger UI sin sesión")
+
     _, spec_payload, _ = http.request(
-        "GET", "/openapi/v1.json", expected={200}, openapi=False, note="OpenAPI")
+        "GET", "/openapi/v1.json", expected={200}, token=access_admin,
+        auth=True, openapi=False, note="OpenAPI administrador")
     spec = _json_body(spec_payload)
     operations = parse_openapi_operations(spec)
     _write_json(output / "openapi-operations.json", operations)
 
-    http.request("GET", "/swagger/index.html", expected={200}, openapi=False,
-                 note="Swagger UI")
-    http.request("GET", "/", expected={302}, openapi=False, note="redirección raíz")
+    http.request(
+        "GET", "/swagger/index.html", expected={200}, token=access_admin,
+        auth=True, openapi=False, note="Swagger UI administrador")
+    http.request(
+        "GET", "/", expected={302}, token=access_admin, auth=True,
+        openapi=False, note="redirección raíz")
 
     # M01: cuentas A (operaciones normales), C (borrado) y R (recuperación).
     account_a = _register_account(http, mailbox, password, "a")
@@ -1107,8 +1127,6 @@ def run_scan(args: argparse.Namespace) -> int:
     http.request(
         "GET", "/api/v1/universidades?buscar=DAST", expected={200},
         note="búsqueda universidades")
-    access_admin, _ = _login(
-        http, admin["email"], admin["password"], "login administrador")
     university_name = f"DAST Universidad {uuid.uuid4().hex}"
     _, university_payload, _ = http.request(
         "POST", "/api/v1/admin/universidades",

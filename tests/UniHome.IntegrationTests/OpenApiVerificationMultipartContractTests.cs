@@ -10,7 +10,7 @@ public sealed class OpenApiVerificationMultipartContractTests
 
     public OpenApiVerificationMultipartContractTests(SwaggerEnabledApiFactory factory)
     {
-        _client = factory.CreateClient();
+        _client = factory.CreateAdminClient();
     }
 
     [Theory]

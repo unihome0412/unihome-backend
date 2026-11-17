@@ -138,7 +138,7 @@ class FakeHttpClient:
         openapi=True,
         note="",
     ):
-        status, payload = self._response(method, path, body, note)
+        status, payload = self._response(method, path, body, note, token)
         if expected is not None and status not in expected:
             raise AssertionError(
                 f"Respuesta simulada {status} no esperada para {method} {path}: {expected}")
@@ -182,7 +182,7 @@ class FakeHttpClient:
         return status, payload, dict(SAFE_HEADERS)
 
     @staticmethod
-    def _response(method, path, body, note):
+    def _response(method, path, body, note, token=None):
         del body
         base = path.split("?", 1)[0]
         if base == "/health/live":
@@ -190,10 +190,16 @@ class FakeHttpClient:
         if base == "/health/ready":
             return 200, b'{"status":"Healthy"}'
         if base == "/openapi/v1.json":
+            if not token:
+                return 401, b"{}"
             return 200, json.dumps(SPEC).encode("utf-8")
         if base == "/swagger/index.html":
+            if not token:
+                return 401, b"{}"
             return 200, b"<html></html>"
         if base == "/":
+            if not token:
+                return 401, b"{}"
             return 302, b""
         if base == "/api/v1/auth/registro":
             return 201, json.dumps({

@@ -228,3 +228,43 @@ lo confirma.
    `azure-cd-evidence`.
 
 No ejecutar ninguno de estos pasos sin autorización humana específica.
+
+## Estado de preparación productiva (2026-11-17)
+
+La lectura de solo lectura de la Container App confirmó:
+
+- `ASPNETCORE_ENVIRONMENT=Production`.
+- `Proxy__TrustForwardedHeaders=true` con `Proxy__KnownProxies__0=127.0.0.1`
+  y `Proxy__KnownProxies__1=::1`.
+- `Api__EnableSwagger=false`.
+- `Redis__Enabled=true` con referencias a secretos.
+- `Cloudinary__*`, `DocumentSecurity__*`, SMTP y `Admin__AccountIds` con
+  referencias/valores configurados. No se leyeron ni registraron secretos.
+
+No se modificó Azure, no se publicó una imagen y no se activó CD. Para una
+ventana autorizada:
+
+1. Verificar que el environment `azure-dev` tenga required reviewers y branch
+   policy `main`; si faltan, restaurarlos en GitHub Settings > Environments.
+2. Revisar la identidad federada OIDC con subject
+   `repo:unihome0412/unihome-backend:environment:azure-dev`.
+3. Confirmar `AcrPush`/`AcrPull` y `Container Apps Contributor` con el mínimo
+   privilegio, sin crear recursos nuevos.
+4. Verificar respaldo/restauración de Atlas y ejecutar la migración `M07-001`
+   con el procedimiento de `docs/mongodb-m07.md`.
+5. Configurar `Api__EnableSwagger=true` solo si el equipo autorizado lo aprueba;
+   `Admin__AccountIds` debe contener una cuenta administrativa legítima y
+   `SwaggerAccess__CookieLifetimeMinutes` puede mantenerse en 15.
+6. Configurar `PasswordRecovery__ResetLinkBaseUrl` (HTTPS) y, solo si se usa
+   deep link, `PasswordRecovery__AndroidAppScheme`.
+7. Confirmar HSTS en el ingress con una petición HTTPS real y
+   `X-Forwarded-Proto: https`; el código ya emite la cabecera aunque la red del
+   ingress no esté en `Proxy__KnownProxies`. Para rate limiting por IP, agregar
+   la red/CIDR real del ingress a `Proxy__KnownNetworks`, no confiar en
+   `X-Forwarded-For` de Internet.
+8. Ejecutar una sola vez el workflow integral autorizado sobre el commit del PR,
+   revisar `mongo-db-test`, DAST, RESTler, Sonar, Stryker y Container Smoke, y
+   mantener `UNIHOME_ENABLE_AZURE_CD=false` fuera de la ventana.
+
+La aceptación HTTPS autenticada sigue **PENDIENTE_AUTORIZACIÓN**; no se
+inventaron sesiones ni se usaron credenciales productivas.

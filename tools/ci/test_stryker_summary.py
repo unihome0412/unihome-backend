@@ -124,6 +124,17 @@ class StrykerSummaryTests(unittest.TestCase):
                 result = main(root)
         self.assertEqual(1, result)
 
+    def test_main_umbral_minimo_falla(self):
+        report = {"files": {"a.cs": {"mutants": [
+            {"status": "Killed"}, {"status": "Survived"}]}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._write_report(root, report)
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:
+                result = main(root, minimum_score=60.0)
+        self.assertEqual(1, result)
+        self.assertIn("por debajo", stderr.getvalue())
+
     def test_main_error_de_ejecucion_falla(self):
         report = {"files": {"a.cs": {"mutants": [
             {"status": "Killed"}, {"status": "RuntimeError"}]}}}

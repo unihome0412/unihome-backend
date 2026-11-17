@@ -3,10 +3,19 @@
     "project": "UniHome.Application.csproj",
     "mutate": [
       "**/Identity/Login/LoginService.cs",
-      "**/Verification/**/*.cs",
+      "**/Identity/DeleteAccount/*.cs",
+      "**/Identity/PasswordRecovery/*.cs",
+      "**/Identity/RefreshSessions/*.cs",
+      "**/Favorites/*.cs",
+      "**/Units/Photos/*.cs",
+      "**/Units/Services/*.cs",
+      "**/Units/ZoneRules/*.cs",
+      "**/Properties/CreateProperty/*.cs",
+      "**/Publications/AcceptTerms/*.cs",
       "**/Publications/SubmitFirstPublication/*.cs",
       "**/Publications/MyPublicationMap/*.cs",
-      "**/Profiles/GetProfile/GetProfileService.cs"
+      "**/Profiles/GetProfile/GetProfileService.cs",
+      "**/Verification/**/*.cs"
     ],
     "configuration": "Release",
     "reporters": [
@@ -17,7 +26,7 @@
     "thresholds": {
       "high": 80,
       "low": 60,
-      "break": 0
+      "break": 60
     },
     "concurrency": 4
   }
