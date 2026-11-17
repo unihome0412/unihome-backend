@@ -165,9 +165,13 @@ efímera `unihome_restler` y añade diccionarios para `universidadId`, `unitId` 
 los filtros de exploración. También siembra por HTTP expedientes M06 reales:
 uno `EnRevision` para detalle/documento/mapa privado, uno `Borrador` para el
 envío, y dos independientes para aprobar y rechazar; los IDs y el token firmado
-se pasan como diccionarios privados. Las cargas multipart que RESTler no puede
-representar y las operaciones cuyo contrato exige rechazo se reportan como WARN,
-nunca como PASS. El reporte ahora cuenta **respuestas 2xx reales**; no confunde
+se pasan como diccionarios privados. Los expedientes del administrador se crean
+**antes** de la unidad pública, porque `SubmitFirstPublicationService`
+selecciona la unidad más antigua del titular; además, la unidad pública
+`Aprobada` pertenece a una cuenta sintética distinta. Crear primero una unidad
+pública bajo el administrador hacía que el envío respondiera `409`. Las cargas
+multipart que RESTler no puede representar y las operaciones cuyo contrato exige
+rechazo se reportan como WARN, nunca como PASS. El reporte ahora cuenta **respuestas 2xx reales**; no confunde
 el flag `valid` de RESTler con éxito funcional. La ejecución #280 terminó con
 37/37 operaciones intentadas, 28/37 con 2xx, 0 HTTP 5xx y 0 bug buckets; con el
 criterio anterior se reportó PASS, pero el criterio corregido la clasifica como

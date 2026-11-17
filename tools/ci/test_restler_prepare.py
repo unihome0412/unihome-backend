@@ -69,8 +69,10 @@ DATA = prepare.SyntheticData(
     refresh_token="refresh-synthetic",
     delete_password="delete-password",
     university_id="11111111-1111-1111-1111-111111111111",
+    admin_university_id="88888888-8888-8888-8888-888888888888",
     property_id="22222222-2222-2222-2222-222222222222",
     unit_id="33333333-3333-3333-3333-333333333333",
+    owner_unit_id="77777777-7777-7777-7777-777777777777",
     photo_ref="photo-ref",
     recovery_email="recovery@uni.edu",
     recovery_request_email="recovery-request@uni.edu",
@@ -136,6 +138,15 @@ class RestlerPrepareTests(unittest.TestCase):
         self.assertEqual(
             DATA.unit_id,
             dictionaries["services"]["restler_custom_payload"]["unitId"][0])
+        self.assertEqual(
+            DATA.owner_unit_id,
+            dictionaries["owner-unit"]["restler_custom_payload"]["unitId"][0])
+        self.assertEqual(
+            DATA.admin_university_id,
+            dictionaries["admin-update"]["restler_custom_payload"]["id"][0])
+        self.assertEqual(
+            DATA.admin_university_id,
+            dictionaries["admin-status"]["restler_custom_payload"]["id"][0])
         exploration = dictionaries["exploration-query"]["restler_custom_payload"]
         self.assertEqual(DATA.university_id, exploration["universidadId"][0])
         self.assertEqual("Mixto", exploration["paraQuien"][0])
@@ -187,6 +198,84 @@ class RestlerPrepareTests(unittest.TestCase):
                          settings["authentication"]["token"]["module"]["data"]["mode"])
         self.assertIn("/api/v1/auth/login", settings["per_resource_settings"])
         self.assertIn("exclude_requests", settings)
+
+    def test_fixture_admin_crea_envio_antes_de_la_unidad_publica(self):
+        calls = []
+        universities = []
+
+        def fake_university(http, token):
+            del http, token
+            universities.append("university")
+            return "university"
+
+        def fake_prepare(http, token, university_id, *, submit, label):
+            del http, university_id
+            calls.append(("prepare", label, submit, token))
+            return f"unit-{label}", f"exp-{label}"
+
+        def fake_property(http, token, university_id):
+            del http, university_id
+            calls.append(("property", token))
+            return f"property-{token}"
+
+        def fake_unit(http, token, property_id):
+            del http, property_id
+            calls.append(("unit", token))
+            return f"unit-{token}"
+
+        def fake_photo(http, token, unit_id):
+            del http, unit_id
+            calls.append(("photo", token))
+            return f"photo-{token}"
+
+        def fake_publish(unit_id):
+            del unit_id
+            calls.append(("publish",))
+
+        def fake_owner(http, password):
+            del http, password
+            calls.append(("owner",))
+            return "owner-token"
+
+        def fake_login(http, email, password):
+            del http, email, password
+            return {"accessToken": "access-token", "refreshToken": "refresh-token"}
+
+        with (
+            patch.object(prepare, "_create_university", side_effect=fake_university),
+            patch.object(prepare, "_prepare_expediente", side_effect=fake_prepare),
+            patch.object(prepare, "_create_property", side_effect=fake_property),
+            patch.object(prepare, "_create_unit", side_effect=fake_unit),
+            patch.object(prepare, "_upload_photo_and_read_ref", side_effect=fake_photo),
+            patch.object(prepare, "_publish_unit_for_exploration", side_effect=fake_publish),
+            patch.object(prepare, "_create_owner_session", side_effect=fake_owner),
+            patch.object(prepare, "_document_access_token", return_value="document-token"),
+            patch.object(prepare, "_register", return_value="123456"),
+            patch.object(prepare, "_confirm", return_value=None),
+            patch.object(prepare, "_login", side_effect=fake_login),
+            patch.object(prepare, "_generate_password", return_value="synthetic-password"),
+            patch.object(prepare, "_request_password_reset", return_value="reset-token"),
+        ):
+            data = prepare._provision_synthetic_data(object(), "admin-token")
+
+        # La unidad pública no puede existir antes del primer expediente del
+        # administrador: SubmitFirstPublicationService elige la unidad más
+        # antigua y devolvería 409 si ya estuviera Aprobada.
+        self.assertEqual(("prepare", "admin detalle", True), calls[0][:3])
+        self.assertEqual(("prepare", "admin envío", False), calls[1][:3])
+        self.assertEqual(("property", "admin-token"), calls[2])
+        self.assertEqual(("owner",), calls[3])
+        self.assertEqual(("property", "owner-token"), calls[4])
+        self.assertEqual(("unit", "owner-token"), calls[5])
+        self.assertEqual(2, len(universities))
+        self.assertEqual("property-admin-token", data.property_id)
+        self.assertEqual("unit-owner-token", data.unit_id)
+        self.assertEqual("unit-admin detalle", data.owner_unit_id)
+        self.assertEqual("photo-owner-token", data.photo_ref)
+        self.assertEqual("exp-admin detalle", data.detail_expediente_id)
+        self.assertEqual("exp-aprobar", data.approve_expediente_id)
+        self.assertEqual("exp-rechazar", data.reject_expediente_id)
+        self.assertEqual("document-token", data.document_access_token)
 
     def test_prepare_escribe_estado_privado_y_reporte_publico(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -246,6 +335,18 @@ class RestlerPrepareTests(unittest.TestCase):
                 self.assertNotIn(
                     "create_once",
                     test_settings["per_resource_settings"].get(endpoint, {}))
+            for endpoint in (
+                "/api/v1/unidades/{unitId}/fotos",
+                "/api/v1/unidades/{unitId}/servicios",
+                "/api/v1/unidades/{unitId}/zona-reglas",
+                "/api/v1/unidades/{unitId}/vista-previa",
+            ):
+                self.assertTrue(
+                    test_settings["per_resource_settings"][endpoint][
+                        "custom_dictionary"
+                    ].endswith("dict-owner-unit.json"),
+                    endpoint,
+                )
 
             public = (artifacts / "prepare-summary.json").read_text(encoding="utf-8")
             self.assertNotIn("register-password", public)

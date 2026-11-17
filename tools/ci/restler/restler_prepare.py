@@ -54,8 +54,10 @@ class SyntheticData:
     refresh_token: str
     delete_password: str
     university_id: str
+    admin_university_id: str
     property_id: str
     unit_id: str
+    owner_unit_id: str
     photo_ref: str
     recovery_email: str
     recovery_request_email: str
@@ -338,11 +340,11 @@ def build_private_dictionaries(data: SyntheticData) -> dict[str, dict[str, Any]]
             "confirmacionPerdidaInformacion": "true",
         }),
         "admin-update": _custom_dictionary({
-            "id": data.university_id,
+            "id": data.admin_university_id,
             "nombreYCampus": "RESTler Universidad Editada",
         }),
         "admin-status": _custom_dictionary({
-            "id": data.university_id,
+            "id": data.admin_university_id,
             "activa": "false",
         }),
         "admin-detail": _custom_dictionary({
@@ -379,6 +381,7 @@ def build_private_dictionaries(data: SyntheticData) -> dict[str, dict[str, Any]]
         "services": _custom_dictionary({"unitId": data.unit_id}),
         "zone": _custom_dictionary({"unitId": data.unit_id}),
         "unit-path": _custom_dictionary({"unitId": data.unit_id}),
+        "owner-unit": _custom_dictionary({"unitId": data.owner_unit_id}),
         "photo": _custom_dictionary({"photoRef": data.photo_ref}),
         "recovery-request": _custom_dictionary({
             "correo": data.recovery_request_email,
@@ -506,25 +509,34 @@ def _provision_synthetic_data(http: HttpClient, admin_access: str) -> SyntheticD
     _confirm(http, login_email, login_code)
     login_tokens = _login(http, login_email, login_password)
 
-    # Los recursos base pertenecen a la cuenta administradora porque el token
-    # provider de Test/Fuzz usa esa misma cuenta. Así las rutas de unidad y
-    # foto conservan la comprobación real de propiedad.
     university_id = _create_university(http, admin_access)
-    property_id = _create_property(http, admin_access, university_id)
-    unit_id = _create_unit(http, admin_access, property_id)
-    _publish_unit_for_exploration(unit_id)
-    photo_ref = _upload_photo_and_read_ref(http, admin_access, unit_id)
+    # Universidad independiente para editar/desactivar sin afectar la
+    # exploración pública ni las unidades del fixture principal.
+    admin_university_id = _create_university(http, admin_access)
 
-    # M06: fixtures reales por HTTP. El administrador conserva un expediente
-    # EnRevision para detalle/documento/mapa privado y otro Borrador listo para
-    # que RESTler ejercite el envío. Dos cuentas normales aportan expedientes
-    # independientes para aprobar y rechazar sin carreras entre operaciones.
-    _, detail_expediente_id = _prepare_expediente(
+    # M06: el primer recurso del administrador debe ser una unidad que pueda
+    # enviarse a revisión. SubmitFirstPublicationService selecciona la unidad
+    # más antigua del titular; si antes se creara la unidad pública ya
+    # Aprobada, el envío respondería 409. Por eso los expedientes M06 se crean
+    # antes del fixture público.
+    owner_unit_id, detail_expediente_id = _prepare_expediente(
         http, admin_access, university_id,
         submit=True, label="admin detalle")
     _, _ = _prepare_expediente(
         http, admin_access, university_id,
         submit=False, label="admin envío")
+
+    # Propiedad del administrador para el alta de unidades de RESTler.
+    property_id = _create_property(http, admin_access, university_id)
+
+    # Fixture público aislado: otra cuenta es dueña de la unidad Aprobada que
+    # usan tarjeta, ficha, exploración, fotos y favoritos. No comparte la
+    # primera publicación del administrador ni depende del orden de creación.
+    public_owner = _create_owner_session(http, _generate_password())
+    public_property_id = _create_property(http, public_owner, university_id)
+    unit_id = _create_unit(http, public_owner, public_property_id)
+    _publish_unit_for_exploration(unit_id)
+    photo_ref = _upload_photo_and_read_ref(http, public_owner, unit_id)
     approve_owner = _create_owner_session(http, _generate_password())
     _, approve_expediente_id = _prepare_expediente(
         http, approve_owner, university_id,
@@ -567,8 +579,10 @@ def _provision_synthetic_data(http: HttpClient, admin_access: str) -> SyntheticD
         refresh_token=str(login_tokens["refreshToken"]),
         delete_password=delete_password,
         university_id=university_id,
+        admin_university_id=admin_university_id,
         property_id=property_id,
         unit_id=unit_id,
+        owner_unit_id=owner_unit_id,
         photo_ref=photo_ref,
         recovery_email=recovery_email,
         recovery_request_email=recovery_request_email,
@@ -656,10 +670,10 @@ def prepare() -> dict[str, Any]:
         "/api/v1/expedientes/documentos/{token}": dictionary_paths["document-token"],
         "/api/v1/propiedades": dictionary_paths["property"],
         "/api/v1/propiedades/{propertyId}/unidades": dictionary_paths["unit"],
-        "/api/v1/unidades/{unitId}/servicios": dictionary_paths["services"],
-        "/api/v1/unidades/{unitId}/zona-reglas": dictionary_paths["zone"],
-        "/api/v1/unidades/{unitId}/fotos": dictionary_paths["unit-path"],
-        "/api/v1/unidades/{unitId}/vista-previa": dictionary_paths["unit-path"],
+        "/api/v1/unidades/{unitId}/servicios": dictionary_paths["owner-unit"],
+        "/api/v1/unidades/{unitId}/zona-reglas": dictionary_paths["owner-unit"],
+        "/api/v1/unidades/{unitId}/fotos": dictionary_paths["owner-unit"],
+        "/api/v1/unidades/{unitId}/vista-previa": dictionary_paths["owner-unit"],
         "/api/v1/unidades/{unitId}/tarjeta": dictionary_paths["unit-path"],
         "/api/v1/unidades/{unitId}/ficha": dictionary_paths["unit-path"],
         "/api/v1/exploracion/mapa": dictionary_paths["exploration-query"],
