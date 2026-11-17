@@ -113,7 +113,7 @@ loopback, pero el cliente DAST añade `X-Forwarded-Proto: https` solo cuando
 el objetivo y el proxy ZAP son loopback; la API confía en esa cabecera
 únicamente desde `Proxy__KnownProxies=127.0.0.1/::1`. Esto simula el ingress
 TLS de Azure y conserva cookies Secure/HttpOnly/SameSite=Strict. Un HTTP
-directo sin el proxy confiable responde 400 y no emite cookies.
+directo sin el proxy confiable redirige a HTTPS y no emite cookies.
 Las alertas que aparezcan en futuras ejecuciones deben revisarse y aceptarse o
 corregirse por separado. RESTler / Pact siguen requiriendo contratos y datos de
 prueba; no se activan para aparentar cobertura.

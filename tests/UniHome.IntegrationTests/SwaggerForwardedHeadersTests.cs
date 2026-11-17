@@ -20,16 +20,21 @@ public sealed class SwaggerForwardedHeadersTests
     }
 
     [Fact]
-    public async Task HttpSinForwardedProto_NoEmiteFormularioNiCookie()
+    public async Task HttpSinForwardedProto_RedirigeSinFormularioNiCookie()
     {
         using var client = CreateHttpClient();
 
         using var response = await client.GetAsync("/swagger/login");
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("HTTPS requerido", body, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("__RequestVerificationToken", body, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.StartsWith(
+            "https://",
+            response.Headers.Location!.OriginalString,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "__RequestVerificationToken",
+            await response.Content.ReadAsStringAsync(),
+            StringComparison.Ordinal);
         Assert.DoesNotContain("__Host-unihome-antiforgery", SetCookie(response), StringComparison.Ordinal);
     }
 
@@ -54,7 +59,7 @@ public sealed class SwaggerForwardedHeadersTests
     }
 
     [Fact]
-    public async Task HttpConForwardedProtoHttp_NoSeConsideraHttps()
+    public async Task HttpConForwardedProtoHttp_RedirigeSinCookie()
     {
         using var client = CreateHttpClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/swagger/login");
@@ -62,7 +67,11 @@ public sealed class SwaggerForwardedHeadersTests
 
         using var response = await client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.StartsWith(
+            "https://",
+            response.Headers.Location!.OriginalString,
+            StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("__Host-unihome-antiforgery", SetCookie(response), StringComparison.Ordinal);
     }
 

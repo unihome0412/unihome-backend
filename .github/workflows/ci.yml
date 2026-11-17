@@ -1537,9 +1537,16 @@ jobs:
             cat "$login_body" || true
             exit 1
           fi
-          if [ "$plain_login_code" != "400" ]; then
-            echo "::error::El login documental HTTP directo no fue rechazado de forma segura."
-            cat "$plain_body" || true
+          case "$plain_login_code" in
+            301|302|307|308) ;;
+            *)
+              echo "::error::El login documental HTTP directo no redirigió a HTTPS."
+              cat "$plain_body" || true
+              exit 1
+              ;;
+          esac
+          if grep -Fi 'set-cookie: __Host-unihome-antiforgery=' "$plain_headers"; then
+            echo "::error::El login HTTP directo emitió una cookie antiforgery."
             exit 1
           fi
           grep -F 'name="__RequestVerificationToken"' "$login_body"

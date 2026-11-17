@@ -18,6 +18,9 @@ namespace UniHome.Api.Controllers;
 [ApiController]
 [Route("swagger")]
 [ApiExplorerSettings(IgnoreApi = true)]
+// La exigencia de HTTPS se delega al filtro estándar de ASP.NET Core. No se
+// usa Request.IsHttps como condición de autenticación o antiforgery.
+[SwaggerRequireHttps]
 public sealed class SwaggerLoginController : ControllerBase
 {
     private const long MaxFormBytes = 8 * 1024;
@@ -57,13 +60,6 @@ public sealed class SwaggerLoginController : ControllerBase
             return NotFound();
         }
 
-        if (!Request.IsHttps)
-        {
-            return Html(
-                SwaggerLoginPage.HttpsRequired(),
-                StatusCodes.Status400BadRequest);
-        }
-
         // Si ya hay una cookie documental válida, no se muestra el formulario.
         if (User.Identity?.IsAuthenticated == true)
         {
@@ -95,13 +91,6 @@ public sealed class SwaggerLoginController : ControllerBase
         if (!_apiOptions.EnableSwagger)
         {
             return NotFound();
-        }
-
-        if (!Request.IsHttps)
-        {
-            return Html(
-                SwaggerLoginPage.HttpsRequired(),
-                StatusCodes.Status400BadRequest);
         }
 
         if (!await ValidateAntiforgeryAsync().ConfigureAwait(false))
@@ -153,13 +142,6 @@ public sealed class SwaggerLoginController : ControllerBase
             return NotFound();
         }
 
-        if (!Request.IsHttps)
-        {
-            return Html(
-                SwaggerLoginPage.HttpsRequired(),
-                StatusCodes.Status400BadRequest);
-        }
-
         var tokens = GetAntiforgeryTokens();
         return Html(SwaggerLoginPage.Logout(tokens.FormFieldName, tokens.RequestToken));
     }
@@ -173,13 +155,6 @@ public sealed class SwaggerLoginController : ControllerBase
         if (!_apiOptions.EnableSwagger)
         {
             return NotFound();
-        }
-
-        if (!Request.IsHttps)
-        {
-            return Html(
-                SwaggerLoginPage.HttpsRequired(),
-                StatusCodes.Status400BadRequest);
         }
 
         if (!await ValidateAntiforgeryAsync().ConfigureAwait(false))

@@ -146,7 +146,7 @@ public sealed class SwaggerBrowserLoginTests : IClassFixture<SwaggerEnabledApiFa
     }
 
     [Fact]
-    public async Task LoginSobreHttp_Devuelve400SinCookieNiToken()
+    public async Task LoginSobreHttp_RedirigeSinCookieNiToken()
     {
         using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -157,10 +157,15 @@ public sealed class SwaggerBrowserLoginTests : IClassFixture<SwaggerEnabledApiFa
 
         using var response = await client.GetAsync("/swagger/login");
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("HTTPS requerido", body, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("__RequestVerificationToken", body, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.StartsWith(
+            "https://",
+            response.Headers.Location!.OriginalString,
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "__RequestVerificationToken",
+            await response.Content.ReadAsStringAsync(),
+            StringComparison.Ordinal);
         var setCookies = response.Headers.TryGetValues("Set-Cookie", out var values)
             ? values
             : [];
@@ -172,7 +177,7 @@ public sealed class SwaggerBrowserLoginTests : IClassFixture<SwaggerEnabledApiFa
     }
 
     [Fact]
-    public async Task LoginSobreHttpConForwardedProtoNoConfiable_Devuelve400()
+    public async Task LoginSobreHttpConForwardedProtoNoConfiable_RedirigeSinCookie()
     {
         using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -185,7 +190,11 @@ public sealed class SwaggerBrowserLoginTests : IClassFixture<SwaggerEnabledApiFa
 
         using var response = await client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.Found, response.StatusCode);
+        Assert.StartsWith(
+            "https://",
+            response.Headers.Location!.OriginalString,
+            StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(
             "__Host-unihome-antiforgery",
             string.Join(

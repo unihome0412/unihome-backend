@@ -237,10 +237,11 @@ La documentación interna se habilita explícitamente con
   `POST /api/v1/auth/swagger-session` y `DELETE /api/v1/auth/swagger-session`.
 - `SwaggerAccess__CookieLifetimeMinutes` se valida entre 1 y 60. No se guardan
   usuarios, contraseñas ni tokens en configuración.
-- El login documental exige HTTPS lógico: un HTTP directo responde `400` sin
-  emitir cookies. Detrás del ingress se acepta `X-Forwarded-Proto: https` solo
-  desde `Proxy__KnownProxies`/`Proxy__KnownNetworks`; el DAST de CI simula ese
-  proxy únicamente en loopback.
+- El login documental exige HTTPS lógico mediante el filtro estándar
+  `RequireHttps`; un HTTP directo redirige a HTTPS sin emitir cookies. Detrás
+  del ingress se acepta `X-Forwarded-Proto: https` solo desde
+  `Proxy__KnownProxies`/`Proxy__KnownNetworks`; el DAST de CI simula ese proxy
+  únicamente en loopback.
 - La interfaz y el JSON envían `Cache-Control: no-store` y
   `X-Robots-Tag: noindex, nofollow`. La CSP de Swagger permite estilos inline
   necesarios para su renderizado y formularios same-origin, pero mantiene

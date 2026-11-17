@@ -37,14 +37,6 @@ internal static class SwaggerLoginPage
                 """);
     }
 
-    public static string HttpsRequired() =>
-        Page(
-            title: "HTTPS requerido",
-            body: """
-                <h1>HTTPS requerido</h1>
-                <p class="muted">La documentación solo inicia sesión mediante HTTPS. No se emitió ninguna cookie.</p>
-                """);
-
     public static string Logout(string formFieldName, string requestToken) =>
         Page(
             title: "Cerrar sesión de documentación",

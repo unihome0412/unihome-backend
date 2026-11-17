@@ -44,7 +44,7 @@ Controlado por `Api__EnableSwagger`, **desactivado por defecto**:
   1–60), y nunca devuelve un JWT al navegador.
 - El logout se realiza desde `/swagger/logout` con CSRF y elimina la cookie. La
   cookie no se acepta en `/api/*`.
-- El login exige HTTPS lógico. Un HTTP directo responde `400` sin cookie; con
+- El login exige HTTPS lógico. Un HTTP directo redirige a HTTPS sin cookie; con
   `Proxy__TrustForwardedHeaders=true`, el ingress reenvía
   `X-Forwarded-Proto: https` y la API solo confía en proxies de
   `Proxy__KnownProxies`/`Proxy__KnownNetworks`.
