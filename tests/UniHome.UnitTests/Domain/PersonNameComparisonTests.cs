@@ -39,6 +39,36 @@ public sealed class PersonNameComparisonTests
             PersonNameComparison.Compare(first, second));
     }
 
+    [Theory]
+    [InlineData("ANA MARIA PEREZ LOPEZ", "ANA MARIA PEREZ GARCIA")]
+    public void NombresParcialmenteEquivalentes_DeberSerCoincidenciaOrientativa(
+        string first,
+        string second)
+    {
+        Assert.Equal(
+            ResultadoComparacionNombres.CoincidenciaOrientativa,
+            PersonNameComparison.Compare(first, second));
+    }
+
+    [Theory]
+    [InlineData("ANA MARIA PEREZ LOPEZ", "ANA MARIA GARCIA")]
+    public void NombresConInterseccionInsuficiente_DeberSerDiferencia(
+        string first,
+        string second)
+    {
+        Assert.Equal(
+            ResultadoComparacionNombres.DiferenciaDetectada,
+            PersonNameComparison.Compare(first, second));
+    }
+
+    [Fact]
+    public void Normalize_DebeEliminarAcentosStopwordsYPuntuacion()
+    {
+        Assert.Equal(
+            "MARIA LUZ GARCIA",
+            PersonNameComparison.Normalize("  María de la Luz, García. "));
+    }
+
     [Fact]
     public void DiferenciaDeNombres_MarcaRiesgoSinCambiarEstado()
     {

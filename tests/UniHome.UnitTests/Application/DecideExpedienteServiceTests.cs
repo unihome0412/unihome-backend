@@ -165,6 +165,111 @@ public sealed class DecideExpedienteServiceTests
     }
 
     [Fact]
+    public async Task TransicionFalsaPeroUnidadYaEstaEnEstadoFinal_DebeSerExitosa()
+    {
+        var context = await CreateContextAsync();
+        var unit = context.Units.Items.Single();
+        context.Units.TransitionResult = false;
+        context.Units.BeforeTransition = (_, next) =>
+            unit.TryApplyPublicationTransition(PublicationState.EnRevision, next);
+
+        var result = await context.Service.ApproveAsync(Guid.NewGuid(), context.Expediente.Id);
+
+        Assert.Equal(OperationStatus.Success, result.Status);
+        Assert.Equal(PublicationState.Aprobada, unit.PublicationState);
+        var stored = await context.Repository.FindByIdAsync(context.Expediente.Id);
+        Assert.Equal(EstadoExpediente.Aprobado, stored!.State);
+        Assert.Contains(context.Audit.Entries, entry =>
+            entry.Action == VerificationAuditActions.ExpedienteApproved);
+    }
+
+    [Fact]
+    public async Task TransicionFalsaYUnidadSigueEnRevision_DebeCompensarYResponderConflict()
+    {
+        var context = await CreateContextAsync();
+        context.Units.TransitionResult = false;
+
+        var result = await context.Service.ApproveAsync(Guid.NewGuid(), context.Expediente.Id);
+
+        Assert.Equal(OperationStatus.Conflict, result.Status);
+        var stored = await context.Repository.FindByIdAsync(context.Expediente.Id);
+        Assert.Equal(EstadoExpediente.EnRevision, stored!.State);
+        Assert.Null(stored.Decision);
+        Assert.Equal(PublicationState.EnRevision, context.Units.Items.Single().PublicationState);
+        Assert.Contains(context.Audit.Entries, entry =>
+            entry.Action == VerificationAuditActions.DecisionCompensated);
+    }
+
+    [Fact]
+    public async Task TransicionFalsaYUnidadEnEstadoInesperado_DebeLanzarStorageUnavailable()
+    {
+        var context = await CreateContextAsync();
+        var unit = context.Units.Items.Single();
+        context.Units.TransitionResult = false;
+        context.Units.BeforeTransition = (_, _) =>
+            unit.TryApplyPublicationTransition(
+                PublicationState.EnRevision,
+                PublicationState.Rechazada);
+
+        await Assert.ThrowsAsync<UniHome.Application.Identity.Exceptions.StorageUnavailableException>(
+            () => context.Service.ApproveAsync(Guid.NewGuid(), context.Expediente.Id));
+    }
+
+    [Fact]
+    public async Task UnidadDeOtroPropietario_DebeResponderConflict()
+    {
+        var context = await CreateContextAsync();
+        var original = context.Units.Items.Single();
+        context.Units.Items.Clear();
+        context.Units.Items.Add(Unit.Restore(
+            original.Id,
+            original.PropertyId,
+            Guid.NewGuid(),
+            original.UniversityId,
+            original.Type,
+            original.Occupancy,
+            original.Places,
+            original.PricePerPlace,
+            original.SizeM2,
+            original.ForWhom,
+            original.Bathroom,
+            original.Furniture,
+            original.FurnitureItems,
+            original.Template,
+            original.ZoneInfo,
+            original.Rules,
+            original.Services,
+            original.Photos,
+            PublicationState.EnRevision,
+            original.CreatedAt));
+
+        var result = await context.Service.ApproveAsync(Guid.NewGuid(), context.Expediente.Id);
+
+        Assert.Equal(OperationStatus.Conflict, result.Status);
+        var stored = await context.Repository.FindByIdAsync(context.Expediente.Id);
+        Assert.Equal(EstadoExpediente.EnRevision, stored!.State);
+    }
+
+    [Fact]
+    public async Task RechazoConMotivoInvalido_DebeFallarValidacion()
+    {
+        var context = await CreateContextAsync();
+
+        foreach (var reason in new[] { "motivo\u0001", new string('x', Expediente.MaxRejectionReasonLength + 1) })
+        {
+            var result = await context.Service.RejectAsync(
+                Guid.NewGuid(),
+                context.Expediente.Id,
+                reason);
+
+            Assert.Equal(OperationStatus.ValidationFailed, result.Status);
+        }
+
+        var stored = await context.Repository.FindByIdAsync(context.Expediente.Id);
+        Assert.Equal(EstadoExpediente.EnRevision, stored!.State);
+    }
+
+    [Fact]
     public async Task EstadoPropio_IncluyeDecisionYNoExponeIndicadoresInternos()
     {
         var context = await CreateContextAsync();

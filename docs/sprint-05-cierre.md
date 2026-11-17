@@ -104,7 +104,7 @@ debe reconciliar validador/índices antes de promover.
 | `dotnet restore --locked-mode` | PASS |
 | `dotnet build -c Release -warnaserror` | PASS, 0 warnings/errores |
 | `dotnet format --verify-no-changes` | PASS |
-| Unitarias | **730/730 PASS** |
+| Unitarias | **744/744 PASS** |
 | Integración | **227/227 ejecutadas PASS**; 9 opt-in Mongo/Cloudinary omitidas explícitamente |
 | OpenAPI | PASS: 41 operaciones, rutas nuevas, Bearer, enums string |
 | Python CI | **163/163 PASS** |
@@ -117,7 +117,7 @@ debe reconciliar validador/índices antes de promover.
 | OCR real PDF escaneado | PASS: Poppler `pdftoppm` + Tesseract `spa+eng` |
 | Miniatura PDF real | PASS: rasterización Poppler → JPEG |
 | Rotación AES | PASS: lectura v1 con clave v2, rechazo de versión incorrecta |
-| Gitleaks local | **PENDING_CI**: el binario no está instalado localmente; no se simula el resultado |
+| Gitleaks local | PASS: historial completo (125 commits) y árbol de trabajo, 0 leaks |
 | Dependencias vulnerables | PASS local (`dotnet list package --vulnerable --include-transitive`: 0 paquetes vulnerables) |
 | Stryker.NET | **PASS informativo**: 59.63 %; 493 evaluados, 294 killed, 158 survived, 41 NoCoverage, 28 CompileError (safe mode), 0 timeout/errores de ejecución |
 | Mongo real | **BLOCKED**: no hay `mongod` local; Docker prohibido |

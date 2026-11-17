@@ -259,6 +259,29 @@ public sealed class DocumentCryptographyTests
     }
 
     [Fact]
+    public void DocumentSecurityOptions_RechazaClavesAnterioresInvalidas()
+    {
+        var newKey = Enumerable.Range(32, 32).Select(value => (byte)value).ToArray();
+        var invalidBase64 = new DocumentSecurityOptions
+        {
+            EncryptionKey = Convert.ToBase64String(newKey),
+            CurrentKeyVersion = 2,
+            PreviousEncryptionKeys = ["no-base64"]
+        };
+        var wrongLength = new DocumentSecurityOptions
+        {
+            EncryptionKey = Convert.ToBase64String(newKey),
+            CurrentKeyVersion = 2,
+            PreviousEncryptionKeys = [Convert.ToBase64String(new byte[16])]
+        };
+
+        Assert.False(invalidBase64.IsValid());
+        Assert.False(wrongLength.IsValid());
+        Assert.Throws<InvalidOperationException>(() => invalidBase64.GetEncryptionKeyBytes(1));
+        Assert.Throws<InvalidOperationException>(() => wrongLength.GetEncryptionKeyBytes(1));
+    }
+
+    [Fact]
     public void UrlFirmada_DebeValidarYRechazarManipulacion()
     {
         var options = new DocumentSecurityOptions

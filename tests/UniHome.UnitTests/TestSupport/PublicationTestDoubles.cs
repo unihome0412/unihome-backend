@@ -47,6 +47,10 @@ internal sealed class FakeUnitRepository : IUnitRepository
 
     public bool SubmitResult { get; set; } = true;
 
+    public bool TransitionResult { get; set; } = true;
+
+    public Action<Guid, PublicationState>? BeforeTransition { get; set; }
+
     public Task AddAsync(Unit unit, CancellationToken cancellationToken = default)
     {
         Items.Add(unit);
@@ -109,6 +113,13 @@ internal sealed class FakeUnitRepository : IUnitRepository
         PublicationState next,
         CancellationToken cancellationToken = default)
     {
+        BeforeTransition?.Invoke(id, next);
+
+        if (!TransitionResult)
+        {
+            return Task.FromResult(false);
+        }
+
         var unit = Items.SingleOrDefault(item =>
             item.Id == id &&
             item.OwnerAccountId == ownerAccountId);

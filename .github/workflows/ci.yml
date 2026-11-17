@@ -421,6 +421,16 @@ jobs:
           else
             test "$GITHUB_REF" = "refs/heads/main" || { echo "::error::Sonar solo analiza main fuera de PR"; exit 1; }
           fi
+      - name: Instalar Tesseract y Poppler para cobertura OCR real
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa poppler-utils fonts-dejavu-core
+          command -v tesseract
+          command -v pdftoppm
+          tesseract --list-langs | grep -qx 'eng'
+          tesseract --list-langs | grep -qx 'spa'
       - name: Analizar con SonarScanner for .NET
         run: |
           dotnet tool install --global dotnet-sonarscanner

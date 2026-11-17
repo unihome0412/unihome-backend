@@ -110,6 +110,58 @@ public sealed class ImageForensicsTests
     }
 
     [Fact]
+    public async Task Miniatura_DeTipoNoSoportado_DebeDevolverOriginal()
+    {
+        var generator = new SkiaDocumentPreviewGenerator(new PdfRasterizer(
+            Options.Create(new DocumentAnalysisOptions
+            {
+                PdftoppmExecutablePath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"sin-pdftoppm-{Guid.NewGuid():N}",
+                    "pdftoppm.exe")
+            }),
+            NullLogger<PdfRasterizer>.Instance));
+        var content = new byte[] { 1, 2, 3, 4 };
+        var document = new VerificationDocumentContent(
+            content,
+            "image/gif",
+            content.LongLength,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
+
+        var preview = await generator.CreateAsync(document, thumbnail: true);
+
+        Assert.False(preview.IsThumbnail);
+        Assert.Equal("image/gif", preview.ContentType);
+        Assert.Equal(content, preview.Content);
+    }
+
+    [Fact]
+    public async Task Miniatura_DePngCorrupto_DebeDevolverOriginalSinLanzar()
+    {
+        var generator = new SkiaDocumentPreviewGenerator(new PdfRasterizer(
+            Options.Create(new DocumentAnalysisOptions
+            {
+                PdftoppmExecutablePath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"sin-pdftoppm-{Guid.NewGuid():N}",
+                    "pdftoppm.exe")
+            }),
+            NullLogger<PdfRasterizer>.Instance));
+        var content = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x00 };
+        var document = new VerificationDocumentContent(
+            content,
+            "image/png",
+            content.LongLength,
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)));
+
+        var preview = await generator.CreateAsync(document, thumbnail: true);
+
+        Assert.False(preview.IsThumbnail);
+        Assert.Equal("image/png", preview.ContentType);
+        Assert.Equal(content, preview.Content);
+    }
+
+    [Fact]
     public void ImagenInvalidaQuedaNoDisponibleSinLanzar()
     {
         var result = ImageForensics.AnalyzeImage([1, 2, 3, 4], new DocumentAnalysisOptions());
