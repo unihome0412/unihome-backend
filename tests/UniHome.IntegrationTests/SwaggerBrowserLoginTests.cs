@@ -146,6 +146,55 @@ public sealed class SwaggerBrowserLoginTests : IClassFixture<SwaggerEnabledApiFa
     }
 
     [Fact]
+    public async Task LoginSobreHttp_Devuelve400SinCookieNiToken()
+    {
+        using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("http://localhost"),
+            HandleCookies = true,
+            AllowAutoRedirect = false
+        });
+
+        using var response = await client.GetAsync("/swagger/login");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("HTTPS requerido", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("__RequestVerificationToken", body, StringComparison.Ordinal);
+        var setCookies = response.Headers.TryGetValues("Set-Cookie", out var values)
+            ? values
+            : [];
+        Assert.DoesNotContain(
+            setCookies,
+            value => value.StartsWith(
+                "__Host-unihome-antiforgery=",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LoginSobreHttpConForwardedProtoNoConfiable_Devuelve400()
+    {
+        using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("http://localhost"),
+            HandleCookies = true,
+            AllowAutoRedirect = false
+        });
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/swagger/login");
+        request.Headers.Add("X-Forwarded-Proto", "https");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain(
+            "__Host-unihome-antiforgery",
+            string.Join(
+                "\n",
+                response.Headers.TryGetValues("Set-Cookie", out var values) ? values : []),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LoginSinTokenCsrf_EsRechazado()
     {
         using var client = CreateHttpsClient();

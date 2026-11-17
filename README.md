@@ -237,6 +237,10 @@ La documentación interna se habilita explícitamente con
   `POST /api/v1/auth/swagger-session` y `DELETE /api/v1/auth/swagger-session`.
 - `SwaggerAccess__CookieLifetimeMinutes` se valida entre 1 y 60. No se guardan
   usuarios, contraseñas ni tokens en configuración.
+- El login documental exige HTTPS lógico: un HTTP directo responde `400` sin
+  emitir cookies. Detrás del ingress se acepta `X-Forwarded-Proto: https` solo
+  desde `Proxy__KnownProxies`/`Proxy__KnownNetworks`; el DAST de CI simula ese
+  proxy únicamente en loopback.
 - La interfaz y el JSON envían `Cache-Control: no-store` y
   `X-Robots-Tag: noindex, nofollow`. La CSP de Swagger permite estilos inline
   necesarios para su renderizado y formularios same-origin, pero mantiene
@@ -532,7 +536,7 @@ y no se declaran aprobadas. El workflow manual
 [`.github/workflows/ocr-documental.yml`](.github/workflows/ocr-documental.yml)
 prepara la ejecución autorizada en CI con ambos motores reales.
 
-Estado local del cierre: **790 unitarias** y **251 integraciones ejecutadas**
+Estado local del cierre: **790 unitarias** y **256 integraciones ejecutadas**
 (9 opt-in de Mongo/Cloudinary omitidas de forma explícita). La matriz de las
 56 HU de Sprints 1–5 está en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md).
 La matriz de aceptación HTTPS de las 41 operaciones y la colección

@@ -13,7 +13,7 @@ namespace UniHome.IntegrationTests;
 /// OpenAPI cuando están explícitamente activados. La cuenta administrativa
 /// sembrada aquí solo existe en el proceso de pruebas.
 /// </summary>
-public sealed class SwaggerEnabledApiFactory : UniHomeApiFactory
+public class SwaggerEnabledApiFactory : UniHomeApiFactory
 {
     public Account AdminAccount { get; private set; } = null!;
 

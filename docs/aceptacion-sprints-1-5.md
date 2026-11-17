@@ -90,6 +90,7 @@ ejecuta el contrato; `HTTPS` queda pendiente hasta la ventana autorizada.
 | Swagger/OpenAPI deshabilitado | `/swagger`, `/swagger/login`, `/openapi/v1.json` y `/` responden 404 | `SwaggerUiTests`, `SwaggerAccessTests` |
 | Swagger/OpenAPI habilitado sin sesión | `/swagger` redirige a `/swagger/login`; OpenAPI y assets no se sirven sin sesión | `SwaggerAccessTests`, `SwaggerBrowserLoginTests` |
 | Login documental en navegador | Formulario público, CSRF, credenciales existentes y cookie HttpOnly; sin JWT en HTML/JS | `SwaggerBrowserLoginTests` |
+| Login documental sobre HTTP directo | `400` sin cookie ni token; solo HTTPS lógico del ingress confiable emite CSRF | `SwaggerBrowserLoginTests`, `SwaggerForwardedHeadersTests` |
 | Usuario normal | 403 en Swagger/OpenAPI; login documental rechazado con error genérico | `SwaggerAccessTests`, `SwaggerBrowserLoginTests` |
 | Lector documental | 200 en Swagger/OpenAPI; 403 en `/api/v1/admin/*` | `SwaggerAccessTests`, `SwaggerBrowserLoginTests` |
 | Administrador con Bearer | 200 en JSON/UI y `Set-Cookie` `__Host-...` con `Secure`, `HttpOnly`, `SameSite=Strict` | `SwaggerAccessTests` |

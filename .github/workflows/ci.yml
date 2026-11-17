@@ -327,7 +327,7 @@ jobs:
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
           -c Release --no-build --no-restore
-          --filter "FullyQualifiedName~OpenApi|FullyQualifiedName~SwaggerUiTests|FullyQualifiedName~SwaggerAccessTests|FullyQualifiedName~SwaggerBrowserLoginTests|FullyQualifiedName~HealthReadinessTests"
+          --filter "FullyQualifiedName~OpenApi|FullyQualifiedName~SwaggerUiTests|FullyQualifiedName~SwaggerAccessTests|FullyQualifiedName~SwaggerBrowserLoginTests|FullyQualifiedName~SwaggerForwardedHeadersTests|FullyQualifiedName~HealthReadinessTests"
           --logger "trx;LogFileName=openapi-contract.trx"
           --results-directory TestResults/contracts
       - name: Guardar contratos verificados
@@ -1432,6 +1432,11 @@ jobs:
           PasswordRecovery__ResetLinkBaseUrl: 'http://127.0.0.1:5088/restablecer'
           DocumentSecurity__UrlLifetimeSeconds: '900'
           Cloudinary__UseEphemeralStorage: 'true'
+          # Simula el ingress TLS de Azure: solo se confía en X-Forwarded-Proto
+          # desde el proxy loopback conocido, nunca desde clientes remotos.
+          Proxy__TrustForwardedHeaders: 'true'
+          Proxy__KnownProxies__0: '127.0.0.1'
+          Proxy__KnownProxies__1: '::1'
           Auth__RateLimit__LoginPermitLimit: '10000'
           Auth__RateLimit__RefreshPermitLimit: '10000'
           Auth__RateLimit__ConfirmEmailPermitLimit: '10000'
@@ -1515,12 +1520,40 @@ jobs:
           start_api
           wait_api
 
+          # El login documental exige HTTPS lógico. El proxy loopback confiable
+          # simula el ingress de Azure; un HTTP directo no debe devolver 200 ni
+          # emitir la cookie antiforgery.
+          login_headers=artifacts/dast-zap/swagger-login-secure.headers
+          login_body=artifacts/dast-zap/swagger-login-secure.html
+          plain_headers=artifacts/dast-zap/swagger-login-http.headers
+          plain_body=artifacts/dast-zap/swagger-login-http.html
+          secure_login_code=$(curl -sS -D "$login_headers" -o "$login_body" \
+            -w '%{http_code}' -H 'X-Forwarded-Proto: https' \
+            "$DAST_TARGET/swagger/login" || true)
+          plain_login_code=$(curl -sS -D "$plain_headers" -o "$plain_body" \
+            -w '%{http_code}' "$DAST_TARGET/swagger/login" || true)
+          if [ "$secure_login_code" != "200" ]; then
+            echo "::error::El login documental no respondió 200 con el ingress HTTPS confiable."
+            cat "$login_body" || true
+            exit 1
+          fi
+          if [ "$plain_login_code" != "400" ]; then
+            echo "::error::El login documental HTTP directo no fue rechazado de forma segura."
+            cat "$plain_body" || true
+            exit 1
+          fi
+          grep -F 'name="__RequestVerificationToken"' "$login_body"
+          grep -Fi 'set-cookie: __Host-unihome-antiforgery=' "$login_headers"
+          grep -Fi 'secure' "$login_headers"
+
           {
             echo "timestamp_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "target=$DAST_TARGET"
             echo "mongo_database=$MONGO_DAST_DATABASE"
             echo "health_live_http=$live_code"
             echo "health_ready_http=$ready_code"
+            echo "swagger_login_forwarded_https=$secure_login_code"
+            echo "swagger_login_plain_http=$plain_login_code"
             echo "api_pid=$(cat "$API_PID_FILE")"
             echo "smtp_capture=127.0.0.1:587"
             echo "admin_synthetic=true"
@@ -1560,6 +1593,22 @@ jobs:
           MONGO_CONTAINER_ID: ${{ job.services.mongo.id }}
         run: |
           set -euo pipefail
+          # Comprueba que ZAP conserva X-Forwarded-Proto al reenviar al ingress
+          # loopback; sin esta condición el login no puede emitir CSRF seguro.
+          proxied_headers=artifacts/dast-zap/swagger-login-proxied.headers
+          proxied_body=artifacts/dast-zap/swagger-login-proxied.html
+          proxied_login_code=$(curl -sS -x http://127.0.0.1:8090 \
+            -D "$proxied_headers" -o "$proxied_body" -w '%{http_code}' \
+            -H 'X-Forwarded-Proto: https' \
+            "$DAST_TARGET/swagger/login" || true)
+          if [ "$proxied_login_code" != "200" ]; then
+            echo "::error::ZAP no reenvió el login documental con HTTPS lógico."
+            cat "$proxied_body" || true
+            exit 1
+          fi
+          grep -F 'name="__RequestVerificationToken"' "$proxied_body"
+          grep -Fi 'set-cookie: __Host-unihome-antiforgery=' "$proxied_headers"
+
           python3 tools/ci/zap_dast.py \
             --target "$DAST_TARGET" \
             --proxy http://127.0.0.1:8090 \

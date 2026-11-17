@@ -566,7 +566,27 @@ class ZapDastTests(unittest.TestCase):
         self.assertEqual(201, status)
         self.assertEqual(b'{"ok":true}', payload)
         self.assertEqual("1", headers["x-test"])
+        self.assertEqual(
+            "https", opener.requests[0].get_header("X-forwarded-proto"))
         self.assertEqual(1, len(client.records))
+
+    def test_http_client_no_agrega_forwarded_proto_fuera_de_loopback(self):
+        client = HttpClient("http://example.test:5088", "http://127.0.0.1:8090")
+        opener = FakeOpener(FakeResponse(200, b"{}"))
+        client._opener = opener
+
+        client.request("GET", "/x", expected={200})
+
+        self.assertIsNone(opener.requests[0].get_header("X-forwarded-proto"))
+
+    def test_http_client_no_agrega_forwarded_proto_sin_proxy(self):
+        client = HttpClient("http://127.0.0.1:5088", None)
+        opener = FakeOpener(FakeResponse(200, b"{}"))
+        client._opener = opener
+
+        client.request("GET", "/x", expected={200})
+
+        self.assertIsNone(opener.requests[0].get_header("X-forwarded-proto"))
 
     def test_http_client_falla_si_estado_no_es_el_esperado(self):
         client = HttpClient("http://127.0.0.1:5088", None)
@@ -599,6 +619,7 @@ class ZapDastTests(unittest.TestCase):
         self.assertIn("multipart/form-data; boundary=", request.get_header("Content-type"))
         self.assertIn(b'name="Fotos"; filename="foto.png"', request.data)
         self.assertIn(b"\x89PNG", request.data)
+        self.assertIsNone(request.get_header("X-forwarded-proto"))
 
     def test_desenvuelve_reportes_de_la_api(self):
         self.assertEqual("<html></html>", zap_dast._unwrap_report(

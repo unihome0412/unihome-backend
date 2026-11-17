@@ -108,8 +108,12 @@ PASS anticipado.
 
 **Alcance pendiente y riesgos:** el análisis pasivo no demuestra lógica de
 negocio ni autorización a nivel de objeto; la cobertura se limita a las rutas
-documentadas y las rutas de soporte enumeradas. El HTTP de loopback es
-intencional y no representa el despliegue; HSTS/HTTPS no aplica a este runner.
+documentadas y las rutas de soporte enumeradas. El runner usa HTTP de
+loopback, pero el cliente DAST añade `X-Forwarded-Proto: https` solo cuando
+el objetivo y el proxy ZAP son loopback; la API confía en esa cabecera
+únicamente desde `Proxy__KnownProxies=127.0.0.1/::1`. Esto simula el ingress
+TLS de Azure y conserva cookies Secure/HttpOnly/SameSite=Strict. Un HTTP
+directo sin el proxy confiable responde 400 y no emite cookies.
 Las alertas que aparezcan en futuras ejecuciones deben revisarse y aceptarse o
 corregirse por separado. RESTler / Pact siguen requiriendo contratos y datos de
 prueba; no se activan para aparentar cobertura.
