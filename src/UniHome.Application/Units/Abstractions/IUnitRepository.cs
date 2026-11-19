@@ -82,4 +82,15 @@ public interface IUnitRepository
         int expectedPhotoCount,
         IReadOnlyList<UnitPhoto> photos,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// EP-M09 (HU-093/HU-094/HU-095): persiste la disponibilidad recalculada por
+    /// los servicios de ocupación (mantenimiento manual o conteo de vínculos
+    /// activos frente a los lugares de la unidad).
+    /// </summary>
+    Task<bool> UpdateAvailabilityAsync(
+        Guid id,
+        Guid propertyId,
+        UnitAvailability availability,
+        CancellationToken cancellationToken = default);
 }

@@ -27,7 +27,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
-    public async Task OpenApi_DebeExponerLas42OperacionesDelCatalogoVigente()
+    public async Task OpenApi_DebeExponerLas47OperacionesDelCatalogoVigente()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");
 
@@ -45,7 +45,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(42, operations.Length);
+        Assert.Equal(47, operations.Length);
     }
 
     [Fact]
@@ -177,6 +177,40 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
 
         Assert.True(paths.TryGetProperty("/api/v1/mis-propiedades", out var misPropiedades));
         Assert.True(misPropiedades.TryGetProperty("get", out _));
+    }
+
+    [Fact]
+    public async Task OpenApi_DebeIncluirLosEndpointsDeOcupacionM09()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/invitacion",
+            out var invitation));
+        Assert.True(invitation.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/unidades/unirse", out var join));
+        Assert.True(join.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/mantenimiento",
+            out var maintenance));
+        Assert.True(maintenance.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/inquilinos/{tenantAccountId}",
+            out var removeTenant));
+        Assert.True(removeTenant.TryGetProperty("delete", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/mi-vinculo",
+            out var leave));
+        Assert.True(leave.TryGetProperty("delete", out _));
     }
 
     [Fact]

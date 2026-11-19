@@ -3,6 +3,7 @@ using MongoDB.Driver;
 using UniHome.Application.Identity.Exceptions;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
 using UniHome.Infrastructure.Persistence.Mongo.Exploration;
+using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
@@ -24,7 +25,8 @@ internal static class MongoIdentitySchemaGuard
         MongoUniversityIndexes.Definition,
         .. MongoPublicationIndexes.Definitions,
         MongoExplorationIndexes.Definition,
-        .. MongoVerificationIndexes.Definitions
+        .. MongoVerificationIndexes.Definitions,
+        .. MongoOccupancyIndexes.Definitions
     ];
 
     public static async Task EnsureAsync<TDocument>(

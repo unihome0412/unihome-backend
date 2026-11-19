@@ -376,6 +376,36 @@ internal sealed class MongoUnitRepository : IUnitRepository
         }
     }
 
+    public async Task<bool> UpdateAvailabilityAsync(
+        Guid id,
+        Guid propertyId,
+        UnitAvailability availability,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UnitDocument>.Filter.And(
+                ByIdFilter(id),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.PropertyId,
+                    propertyId.ToString("N", CultureInfo.InvariantCulture)));
+            var update = Builders<UnitDocument>.Update.Set(
+                document => document.AvailabilityState,
+                availability.ToString());
+
+            var result = await collection
+                .UpdateOneAsync(filter, update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return result.MatchedCount == 1;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<bool> TryAppendPhotosAsync(
         Guid id,
         Guid propertyId,

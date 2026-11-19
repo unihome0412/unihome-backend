@@ -5,6 +5,7 @@ using System.Text.Json;
 using UniHome.Application.Profiles.GetProfile;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Domain.Accounts;
+using UniHome.Domain.OccupancyLinks;
 using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
 using UniHome.Domain.Universities;
@@ -13,7 +14,7 @@ namespace UniHome.IntegrationTests;
 
 /// <summary>
 /// El contrato OpenAPI debe describir exactamente los enums string que acepta y
-/// devuelve el runtime. Cubre los 13 enums públicos usados por request/response.
+/// devuelve el runtime. Cubre los 14 enums públicos usados por request/response.
 /// </summary>
 public sealed class OpenApiEnumContractTests : IClassFixture<SwaggerEnabledApiFactory>
 {
@@ -32,7 +33,8 @@ public sealed class OpenApiEnumContractTests : IClassFixture<SwaggerEnabledApiFa
             ["ServiceName"] = typeof(ServiceName),
             ["ServiceMode"] = typeof(ServiceMode),
             ["AccountLabel"] = typeof(AccountLabel),
-            ["UnitAvailability"] = typeof(UnitAvailability)
+            ["UnitAvailability"] = typeof(UnitAvailability),
+            ["OccupancyStatus"] = typeof(OccupancyStatus)
         };
 
     private readonly UniHomeApiFactory _factory;
@@ -115,6 +117,14 @@ public sealed class OpenApiEnumContractTests : IClassFixture<SwaggerEnabledApiFa
         AssertReferences(schemas, "MiPropiedadResponse", "tipoPropiedad", "PropertyType");
         AssertReferences(schemas, "MiHabitacionResponse", "tipoUnidad", "UnitType");
         AssertReferences(schemas, "MiHabitacionResponse", "estado", "UnitAvailability");
+
+        AssertReferences(schemas, "UnidadResponse", "estadoOcupacion", "UnitAvailability");
+        AssertReferences(
+            schemas,
+            "UnidadVistaPreviaResponse",
+            "estadoOcupacion",
+            "UnitAvailability");
+        AssertReferences(schemas, "VinculoOcupacionResponse", "estado", "OccupancyStatus");
     }
 
     [Fact]

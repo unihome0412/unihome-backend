@@ -17,4 +17,5 @@ public sealed record UnitPreviewView(
     ForWhom ParaQuien,
     bool ArrendadorVerificado,
     bool? EsFavorito,
-    PublicationState EstadoPublicacion);
+    PublicationState EstadoPublicacion,
+    UnitAvailability EstadoOcupacion);

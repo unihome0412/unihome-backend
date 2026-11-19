@@ -2,6 +2,7 @@ using MongoDB.Bson;
 using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
 using UniHome.Infrastructure.Persistence.Mongo.Exploration;
+using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
@@ -12,7 +13,7 @@ namespace UniHome.UnitTests.Infrastructure;
 public sealed class MongoMigrationRegistryTests
 {
     [Fact]
-    public void RegistroPorDefecto_DebeContenerM01M01_002M03M05M06YM07EnOrden()
+    public void RegistroPorDefecto_DebeContenerM01M01_002M03M05M06M07YM09EnOrden()
     {
         var registry = MongoMigrationRegistry.Default;
 
@@ -23,7 +24,8 @@ public sealed class MongoMigrationRegistryTests
                 MongoUniversityMigration.Version,
                 MongoPublicationMigration.Version,
                 MongoVerificationMigration.Version,
-                MongoExplorationMigration.Version
+                MongoExplorationMigration.Version,
+                MongoOccupancyMigration.Version
             ],
             registry.Migrations.Select(migration => migration.Version));
         Assert.Equal(MongoIdentityMigration.Definition.Checksum, registry.Migrations[0].Checksum);
@@ -32,6 +34,7 @@ public sealed class MongoMigrationRegistryTests
         Assert.Equal(MongoPublicationMigration.Definition.Checksum, registry.Migrations[3].Checksum);
         Assert.Equal(MongoVerificationMigration.Definition.Checksum, registry.Migrations[4].Checksum);
         Assert.Equal(MongoExplorationMigration.Definition.Checksum, registry.Migrations[5].Checksum);
+        Assert.Equal(MongoOccupancyMigration.Definition.Checksum, registry.Migrations[6].Checksum);
         Assert.Contains(MongoIdentitySchema.AccountsCollection, registry.ManagedCollections);
         Assert.Contains(MongoIdentitySchema.AccountRecoveryCollection, registry.ManagedCollections);
         Assert.Contains(MongoUniversitySchema.Collection, registry.ManagedCollections);
@@ -42,6 +45,8 @@ public sealed class MongoMigrationRegistryTests
         Assert.Contains(MongoVerificationSchema.DocumentsCollection, registry.ManagedCollections);
         Assert.Contains(MongoVerificationSchema.AuditCollection, registry.ManagedCollections);
         Assert.Contains(MongoExplorationSchema.FavoritesCollection, registry.ManagedCollections);
+        Assert.Contains(MongoOccupancySchema.LinksCollection, registry.ManagedCollections);
+        Assert.Contains(MongoOccupancySchema.InvitationsCollection, registry.ManagedCollections);
     }
 
     [Fact]
@@ -58,7 +63,8 @@ public sealed class MongoMigrationRegistryTests
             ["M03-001"] = "559FC5D2CB1F4307C5A12CE7A753DEEAE147C456C02C186A16DFF547D979CD44",
             ["M05-001"] = "190A17E494DE79980C9A7819E0B0A1145CD44177B8B99A9093368125889356D5",
             ["M06-001"] = "A4C76265FC753CAEF0EA0EE971063F1B8483696339A58FC53E8111665C35A33A",
-            ["M07-001"] = "003D4CC39CCB6ACC6E44C8762AEEBD60C417A08C03ABA35B2AE585392F38887E"
+            ["M07-001"] = "003D4CC39CCB6ACC6E44C8762AEEBD60C417A08C03ABA35B2AE585392F38887E",
+            ["M09-001"] = "097B741234F5DF9DF0F53E611BDF3C1D0D41F23197CF6466FEE6825707DCA237"
         };
 
         Assert.Equal(

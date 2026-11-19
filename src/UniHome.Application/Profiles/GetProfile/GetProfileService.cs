@@ -1,4 +1,5 @@
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.OccupancyLinks.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Domain.Accounts;
 using UniHome.Domain.Properties;
@@ -14,15 +15,18 @@ public sealed class GetProfileService
 {
     private readonly IAccountRepository _accounts;
     private readonly IUnitRepository _units;
+    private readonly IOccupancyLinkRepository _occupancyLinks;
     private readonly ISystemClock _clock;
 
     public GetProfileService(
         IAccountRepository accounts,
         IUnitRepository units,
+        IOccupancyLinkRepository occupancyLinks,
         ISystemClock clock)
     {
         _accounts = accounts;
         _units = units;
+        _occupancyLinks = occupancyLinks;
         _clock = clock;
     }
 
@@ -49,11 +53,14 @@ public sealed class GetProfileService
             : units.Any(unit => unit.PublicationState == PublicationState.EnRevision)
                 ? AccountLabel.PublicacionEnRevision
                 : AccountLabel.UsuarioUniHome;
+        var isLinkedToUnit = await _occupancyLinks
+            .HasActiveLinkAsync(accountId, cancellationToken)
+            .ConfigureAwait(false);
 
         return new ProfileView(
             account,
             label,
-            IsLinkedToUnit: false,
+            IsLinkedToUnit: isLinkedToUnit,
             CanPublish: units.Count == 0 &&
                         AgeEligibility.IsAdult(account.BirthDate, _clock.UtcNow),
             FirstPublicationState: units.FirstOrDefault()?.PublicationState);

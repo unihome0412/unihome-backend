@@ -1,4 +1,5 @@
 using UniHome.Application.Profiles.GetProfile;
+using UniHome.Domain.OccupancyLinks;
 using UniHome.Domain.Properties;
 using UniHome.UnitTests.TestSupport;
 
@@ -15,7 +16,8 @@ public sealed class GetProfileServiceTests
         var accounts = new InMemoryAccountRepository();
         var account = AccountTestData.Create("ana@uni.edu");
         await accounts.AddAsync(account);
-        var service = new GetProfileService(accounts, new FakeUnitRepository(), new FixedClock(Now));
+        var service = new GetProfileService(
+            accounts, new FakeUnitRepository(), new FakeOccupancyLinkRepository(), new FixedClock(Now));
 
         var profile = await service.GetAsync(account.Id);
 
@@ -28,6 +30,23 @@ public sealed class GetProfileServiceTests
     }
 
     [Fact]
+    public async Task Get_ConVinculoActivo_DebeMarcarVinculadoAUnidad()
+    {
+        var accounts = new InMemoryAccountRepository();
+        var account = AccountTestData.Create("inquilino@uni.edu");
+        await accounts.AddAsync(account);
+        var occupancyLinks = new FakeOccupancyLinkRepository();
+        occupancyLinks.Items.Add(OccupancyLink.CreateActive(account.Id, Guid.NewGuid(), Now));
+        var service = new GetProfileService(
+            accounts, new FakeUnitRepository(), occupancyLinks, new FixedClock(Now));
+
+        var profile = await service.GetAsync(account.Id);
+
+        Assert.NotNull(profile);
+        Assert.True(profile.IsLinkedToUnit);
+    }
+
+    [Fact]
     public async Task Get_MenorDeEdad_NoPuedePublicar()
     {
         var accounts = new InMemoryAccountRepository();
@@ -35,7 +54,7 @@ public sealed class GetProfileServiceTests
             "menor@uni.edu",
             birthDate: new DateOnly(2010, 1, 1));
         await accounts.AddAsync(account);
-        var service = new GetProfileService(accounts, new FakeUnitRepository(), new FixedClock(Now));
+        var service = new GetProfileService(accounts, new FakeUnitRepository(), new FakeOccupancyLinkRepository(), new FixedClock(Now));
 
         var profile = await service.GetAsync(account.Id);
 
@@ -49,6 +68,7 @@ public sealed class GetProfileServiceTests
         var service = new GetProfileService(
             new InMemoryAccountRepository(),
             new FakeUnitRepository(),
+            new FakeOccupancyLinkRepository(),
             new FixedClock(Now));
 
         Assert.Null(await service.GetAsync(Guid.NewGuid()));
@@ -66,7 +86,7 @@ public sealed class GetProfileServiceTests
             Guid.NewGuid(),
             3000,
             state: PublicationState.EnRevision));
-        var service = new GetProfileService(accounts, units, new FixedClock(Now));
+        var service = new GetProfileService(accounts, units, new FakeOccupancyLinkRepository(), new FixedClock(Now));
 
         var profile = await service.GetAsync(account.Id);
 
@@ -87,7 +107,7 @@ public sealed class GetProfileServiceTests
             Guid.NewGuid(),
             3000,
             state: PublicationState.Rechazada));
-        var service = new GetProfileService(accounts, units, new FixedClock(Now));
+        var service = new GetProfileService(accounts, units, new FakeOccupancyLinkRepository(), new FixedClock(Now));
 
         var profile = await service.GetAsync(account.Id);
 
@@ -109,7 +129,7 @@ public sealed class GetProfileServiceTests
             Guid.NewGuid(),
             3000,
             state: PublicationState.Aprobada));
-        var service = new GetProfileService(accounts, units, new FixedClock(Now));
+        var service = new GetProfileService(accounts, units, new FakeOccupancyLinkRepository(), new FixedClock(Now));
 
         var profile = await service.GetAsync(account.Id);
 

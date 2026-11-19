@@ -1,5 +1,6 @@
 using UniHome.Application.Profiles.GetProfile;
 using UniHome.Domain.Accounts;
+using UniHome.Domain.OccupancyLinks;
 using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
 using UniHome.Domain.Verification;
@@ -32,6 +33,7 @@ internal static class PublicApiEnums
             ["EstadoExpediente"] = typeof(EstadoExpediente),
             ["TipoDocumentoVerificacion"] = typeof(TipoDocumentoVerificacion),
             ["ResultadoComparacionNombres"] = typeof(ResultadoComparacionNombres),
-            ["UnitAvailability"] = typeof(UnitAvailability)
+            ["UnitAvailability"] = typeof(UnitAvailability),
+            ["OccupancyStatus"] = typeof(OccupancyStatus)
         };
 }

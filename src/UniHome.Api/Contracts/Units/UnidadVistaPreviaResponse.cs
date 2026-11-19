@@ -14,7 +14,8 @@ public sealed record UnidadVistaPreviaResponse(
     ForWhom ParaQuien,
     bool ArrendadorVerificado,
     bool? EsFavorito,
-    PublicationState EstadoPublicacion)
+    PublicationState EstadoPublicacion,
+    UnitAvailability EstadoOcupacion)
 {
     public static UnidadVistaPreviaResponse FromView(UnitPreviewView view) =>
         new(
@@ -27,5 +28,6 @@ public sealed record UnidadVistaPreviaResponse(
             view.ParaQuien,
             view.ArrendadorVerificado,
             view.EsFavorito,
-            view.EstadoPublicacion);
+            view.EstadoPublicacion,
+            view.EstadoOcupacion);
 }

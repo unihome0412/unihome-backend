@@ -13,6 +13,16 @@ internal sealed class FixedClock : ISystemClock
     public DateTimeOffset UtcNow { get; }
 }
 
+internal sealed class MutableClock : ISystemClock
+{
+    public MutableClock(DateTimeOffset utcNow)
+    {
+        UtcNow = utcNow;
+    }
+
+    public DateTimeOffset UtcNow { get; set; }
+}
+
 internal sealed class RecordingPasswordHasher : IPasswordHasher
 {
     public int HashCalls { get; private set; }

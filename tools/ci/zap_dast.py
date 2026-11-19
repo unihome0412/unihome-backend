@@ -1005,6 +1005,21 @@ def _response_id(payload: bytes, operation: str) -> str:
     return identifier
 
 
+def _account_id_from_token(token: str) -> str:
+    """Decodifica el claim `sub` del JWT para rutas que exigen el id del
+    inquilino (HU-094); no valida la firma, solo lee el payload público."""
+    segments = token.split(".")
+    if len(segments) < 2:
+        raise DastError("El access token no tiene el formato JWT esperado.")
+    payload_segment = segments[1]
+    padded = payload_segment + "=" * (-len(payload_segment) % 4)
+    payload = json.loads(base64.urlsafe_b64decode(padded))
+    subject = str(payload.get("sub") or "")
+    if not subject:
+        raise DastError("El access token no contiene el claim sub.")
+    return subject
+
+
 def _publish_unit_for_exploration(unit_id: str) -> None:
     """Publica el fixture M04/M07 directamente en la base efímera.
 
@@ -1434,6 +1449,40 @@ def run_scan(args: argparse.Namespace) -> int:
     http.request(
         "DELETE", f"/api/v1/favoritos/{unit_id}",
         token=access_a, expected={204}, auth=True, note="baja favorito")
+
+    # M09: invitación, vínculo con código, mantenimiento y baja/abandono.
+    # B se une a la unidad aprobada de A como inquilino.
+    _, invitation_payload, _ = http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/invitacion",
+        token=access_a, expected={200}, auth=True, note="invitación unidad A")
+    invitation_code = str(_json_body(invitation_payload).get("codigo") or "")
+    if not invitation_code:
+        raise DastError("La invitación de la unidad A no devolvió un código.")
+    http.request(
+        "POST", "/api/v1/unidades/unirse",
+        body={"codigo": invitation_code},
+        token=access_b, expected={200}, auth=True, note="unirse con código B")
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/mantenimiento",
+        body={"enMantenimiento": True},
+        token=access_a, expected={200}, auth=True, note="activar mantenimiento")
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/mantenimiento",
+        body={"enMantenimiento": False},
+        token=access_a, expected={200}, auth=True, note="desactivar mantenimiento")
+    tenant_b_id = _account_id_from_token(access_b)
+    http.request(
+        "DELETE", f"/api/v1/unidades/{unit_id}/inquilinos/{tenant_b_id}",
+        body={"confirmacion": True},
+        token=access_a, expected={204}, auth=True, note="baja de inquilino B")
+    http.request(
+        "POST", "/api/v1/unidades/unirse",
+        body={"codigo": invitation_code},
+        token=access_b, expected={200}, auth=True, note="reingreso con código B")
+    http.request(
+        "DELETE", f"/api/v1/unidades/{unit_id}/mi-vinculo",
+        body={"confirmacion": True},
+        token=access_b, expected={204}, auth=True, note="abandono B")
 
     # M01: recuperación de contraseña con token real capturado por SMTP.
     http.request(

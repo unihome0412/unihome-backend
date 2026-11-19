@@ -192,6 +192,28 @@ internal sealed class FakeUnitRepository : IUnitRepository
         return Task.FromResult(UpdateResult);
     }
 
+    public Task<bool> UpdateAvailabilityAsync(
+        Guid id,
+        Guid propertyId,
+        UnitAvailability availability,
+        CancellationToken cancellationToken = default)
+    {
+        if (!UpdateResult)
+        {
+            return Task.FromResult(false);
+        }
+
+        var unit = Items.SingleOrDefault(item => item.Id == id && item.PropertyId == propertyId);
+
+        if (unit is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        unit.SetAvailability(availability);
+        return Task.FromResult(true);
+    }
+
     public Task<bool> TryAppendPhotosAsync(
         Guid id,
         Guid propertyId,

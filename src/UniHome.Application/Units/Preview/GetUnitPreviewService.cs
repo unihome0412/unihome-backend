@@ -115,7 +115,8 @@ public sealed class GetUnitPreviewService
             ArrendadorVerificado: await IsVerifiedAsync(unit.OwnerAccountId, cancellationToken)
                 .ConfigureAwait(false),
             EsFavorito: null,
-            unit.PublicationState));
+            unit.PublicationState,
+            unit.Availability));
     }
 
     private async Task<bool> IsVerifiedAsync(

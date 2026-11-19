@@ -222,4 +222,22 @@ public sealed class InMemoryUnitRepository : IUnitRepository
             return Task.FromResult(true);
         }
     }
+
+    public Task<bool> UpdateAvailabilityAsync(
+        Guid id,
+        Guid propertyId,
+        UnitAvailability availability,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (!_units.TryGetValue(id, out var unit) || unit.PropertyId != propertyId)
+            {
+                return Task.FromResult(false);
+            }
+
+            unit.SetAvailability(availability);
+            return Task.FromResult(true);
+        }
+    }
 }

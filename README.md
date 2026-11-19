@@ -212,7 +212,7 @@ Reglas principales:
 Detalle en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md), incluida la
 matriz de las 56 HU de Sprints 1–5.
 
-## Sprint 6 / M05: mis propiedades (en curso)
+## Sprint 6 / M05: mis propiedades
 
 El Sprint 6 añade, por ahora, la vista agregada de propiedades del titular:
 
@@ -243,8 +243,55 @@ Reglas principales:
 - La respuesta añade `Cache-Control: no-store` por ser datos propios del
   arrendador.
 
-HU-033/036/092 pertenecen a M05; M08 (mensajería) y M09 (ocupación, incluidas
-HU-048/049/093/094/095) del Sprint 6 se documentan al cerrarse.
+HU-033/036/092 pertenecen a M05; M08 (mensajería) del Sprint 6 se documenta al
+cerrarse.
+
+## Sprint 6 / M09: ocupación
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/unidades/{unitId}/invitacion` | Código de invitación vigente de una unidad propia, con su fecha de vigencia (HU-048). |
+| `POST` | `/api/v1/unidades/unirse` | Vincula al solicitante como inquilino con un código de invitación (HU-049). |
+| `PUT` | `/api/v1/unidades/{unitId}/mantenimiento` | Marca o desmarca el mantenimiento de una unidad propia (HU-093). |
+| `DELETE` | `/api/v1/unidades/{unitId}/inquilinos/{tenantAccountId}` | Da de baja a un inquilino de una unidad propia, con confirmación (HU-094). |
+| `DELETE` | `/api/v1/unidades/{unitId}/mi-vinculo` | El propio inquilino deja la unidad, con confirmación (HU-095). |
+
+Reglas principales:
+
+- El código de invitación es de la unidad, no de un inquilino concreto: se
+  reutiliza mientras no venza y no se consume al unirse, así que varias
+  personas pueden unirse a una unidad compartida con el mismo código mientras
+  haya lugares. `GET /invitacion` es idempotente: devuelve el código vigente si
+  existe, o genera uno nuevo (8 caracteres, sin `0`/`O`/`1`/`I`) si no hay uno o
+  venció. La vigencia es de 7 días, un umbral provisional sin aprobación de
+  producto. Los códigos anteriores no se borran, quedan vencidos.
+- `POST /unidades/unirse` exige `codigo` en el cuerpo; un código inexistente o
+  mal formado responde `400`, uno vencido responde `410`, el propietario no
+  puede unirse a su propia unidad (`403`) y una unidad sin lugares responde
+  `409`. Un inquilino ya vinculado recibe `200` de forma idempotente; uno que
+  había dejado la unidad reactiva el mismo vínculo al volver a unirse.
+- `vinculos_ocupacion` guarda un único documento por par inquilino/unidad
+  (`_id` determinista `inquilino:unidad`, igual que `favoritos`): salir y
+  volver a unirse reactiva el documento existente en vez de crear uno nuevo.
+- La disponibilidad de la unidad (`estadoOcupacion` en `UnidadResponse` y
+  `UnidadVistaPreviaResponse`) se recalcula tras unirse, dar de baja o
+  abandonar: `Ocupado` si los vínculos activos alcanzan los lugares de la
+  unidad, `Disponible` en otro caso. `Mantenimiento` es un estado manual del
+  propietario que no se sobreescribe automáticamente mientras esté activo;
+  al desactivarlo se recalcula desde los vínculos.
+- HU-094 y HU-095 exigen `confirmacion: true` en el cuerpo, igual que
+  `confirmacionPerdidaInformacion` en la eliminación de cuenta: la UI puede
+  pedir confirmación, pero el backend también la exige. Sin ella responden
+  `400`. HU-095 usa el claim `sub` de la sesión, nunca un id enviado por el
+  cliente.
+- `PerfilResponse.vinculadoAUnidad` (HU-008/HU-009) ahora es real: `true`
+  cuando la cuenta tiene al menos un vínculo de ocupación activo como
+  inquilino.
+- Migración `M09-001`: crea `vinculos_ocupacion` (con
+  `ix_ocupacion_inquilino_estado` e `ix_ocupacion_unidad_estado`, sin índice
+  único declarado) e `invitaciones_unidad` (con `ix_invitaciones_unidad` y
+  `ux_invitaciones_codigo` único). No modifica `M05-001`; `unidades` reutiliza
+  el campo flexible `estadoOcupacion` ya usado por M07.
 
 ## Swagger/OpenAPI protegido
 
@@ -423,6 +470,12 @@ AES-256-GCM antes de persistirse; el binario en claro no se guarda. El detalle d
 colecciones, campos, índices, cifrado y límites está en
 [`docs/mongodb-m06.md`](docs/mongodb-m06.md).
 
+M09 usa `vinculos_ocupacion` (`inquilinoAccountId`, `unitId`, `estado`,
+`fechaVinculo`, `fechaFin`, `motivoFin`; `_id` determinista
+`inquilino:unidad`) e `invitaciones_unidad` (`unitId`, `codigo`, `createdAt`,
+`vigenciaHasta`) con la migración `M09-001`. No modifica `M05-001`. Detalle en
+la sección "Sprint 6 / M09: ocupación".
+
 Sprint 3 / M04-M07: `GET /api/v1/exploracion/mapa`, `GET /api/v1/exploracion/lista`,
 `GET /api/v1/unidades/{id}/tarjeta`, `GET /api/v1/unidades/{id}/ficha`,
 `PUT/DELETE /api/v1/favoritos/{id}` y `GET /api/v1/favoritos`. Mapa, lista y tarjeta
@@ -434,7 +487,7 @@ usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
 [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
 
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001`, `M03-001`, `M05-001`, `M06-001` y `M07-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001`, `M05-001`, `M06-001`, `M07-001` y `M09-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -449,6 +502,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M06-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M07-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M07-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M09-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M09-001
 ```
 
 La migración ordinaria solo escribe en `unihome_modelo_pruebas` o en una base incluida
@@ -475,8 +530,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
 No ejecutar ese comando sin completar las puertas de conectividad TLS/SSPI, usuario
 técnico separado, respaldo/restauración verificado y autorización humana. Cada
 promoción selecciona una versión; hoy existen `M01-001`, `M01-002`, `M03-001`,
-`M05-001`, `M06-001` y `M07-001`. Las demás colecciones externas aún no tienen
-migración versionada ni contratos BSON/DTO aprobados.
+`M05-001`, `M06-001`, `M07-001` y `M09-001`. Las demás colecciones externas aún
+no tienen migración versionada ni contratos BSON/DTO aprobados.
 
 Matriz de cierre, endpoints y responsabilidades Android del Sprint 1:
 [`docs/sprint-01-cierre.md`](docs/sprint-01-cierre.md).
@@ -517,10 +572,11 @@ o diverge, HU-006 responde `503` y no se declara operativa.
   sesión administrativa: `GET /openapi/v1.json`. Incluye el esquema Bearer y
   marca `logout` como operación autenticada. La interfaz `/swagger` usa la misma
   policy; ver “Swagger/OpenAPI protegido”.
-- Los 16 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
+- Los 17 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
   `Occupancy`, `ForWhom`, `BathroomType`, `FurnitureType`, `UnitTemplate`,
   `ServiceName`, `ServiceMode`, `AccountLabel`, `EstadoExpediente`,
-  `TipoDocumentoVerificacion`, `ResultadoComparacionNombres`, `UnitAvailability`)
+  `TipoDocumentoVerificacion`, `ResultadoComparacionNombres`, `UnitAvailability`,
+  `OccupancyStatus`)
   se documentan como string con sus
   valores reales; los enteros se rechazan en runtime. `tipoPropiedad` y
   `estadoHabitacion` en `GET /api/v1/mis-propiedades` siguen el mismo criterio:
@@ -549,6 +605,19 @@ o diverge, HU-006 responde `503` y no se declara operativa.
 - Mis propiedades: `200` siempre que la sesión sea válida (lista vacía si no hay
   propiedades), `400` por `tipoPropiedad`/`estadoHabitacion` inválidos, `401` sin
   sesión y `503` si MongoDB no está disponible.
+- Invitación de unidad: `200`, `401` sin sesión, `403` si la unidad no es propia,
+  `404` si no existe, `409` si no se pudo generar un código tras reintentar y
+  `503`.
+- Unirse con código: `200` (incluido el reingreso idempotente), `400` por código
+  vacío/inexistente, `401` sin sesión, `403` si el propietario intenta unirse a su
+  propia unidad, `409` sin lugares disponibles, `410` por código vencido, `413` y
+  `503`.
+- Mantenimiento: `200`, `401` sin sesión, `403` si la unidad no es propia, `404`
+  si no existe, `413` y `503`.
+- Baja de inquilino y abandono de unidad: `204`, `400` sin
+  `confirmacion: true`, `401` sin sesión, `403` si la unidad no es propia (solo
+  baja de inquilino), `404` si la unidad o el vínculo activo no existen, `413` y
+  `503`.
 
 ## Pruebas
 
