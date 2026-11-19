@@ -212,6 +212,40 @@ Reglas principales:
 Detalle en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md), incluida la
 matriz de las 56 HU de Sprints 1–5.
 
+## Sprint 6 / M05: mis propiedades (en curso)
+
+El Sprint 6 añade, por ahora, la vista agregada de propiedades del titular:
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/mis-propiedades` | Propiedades del titular con tipo, total de habitaciones, cuántas están disponibles y el estado de cada una (HU-033). |
+
+Reglas principales:
+
+- `HU-036` (dar de alta una propiedad desde el Resumen o desde Mis propiedades)
+  y `HU-092` (agregar otra habitación a una propiedad ya registrada, sin volver a
+  capturar su dirección) no requieren endpoints nuevos: reutilizan
+  `POST /api/v1/propiedades` y `POST /api/v1/propiedades/{propertyId}/unidades`
+  de M05 (Sprint 2), que ya permiten varias unidades sobre la misma propiedad sin
+  reenviar domicilio. El origen del botón (Resumen o Mis propiedades) es
+  responsabilidad de Android.
+- `GET /api/v1/mis-propiedades` exige `Authorization: Bearer` y solo devuelve
+  propiedades del titular autenticado; `tipoPropiedad` filtra por el tipo de la
+  propiedad y `estadoHabitacion` incluye una propiedad si al menos una de sus
+  habitaciones está en ese estado. Ambos filtros son opcionales y se combinan con
+  `AND`. Un valor fuera del enum (incluido un entero) responde `400`.
+  Una propiedad sin habitaciones aparece con `totalHabitaciones: 0`,
+  `habitacionesDisponibles: 0` y `habitaciones: []`.
+- No se añadió una migración nueva: la propiedad reutiliza el índice existente
+  `ix_propiedades_propietario` de `M05-001` para listar por titular; las
+  habitaciones de cada propiedad se obtienen con `ListByOwnerAsync` (ya usado por
+  HU-028) y se agrupan en memoria por `propertyId`.
+- La respuesta añade `Cache-Control: no-store` por ser datos propios del
+  arrendador.
+
+HU-033/036/092 pertenecen a M05; M08 (mensajería) y M09 (ocupación, incluidas
+HU-048/049/093/094/095) del Sprint 6 se documentan al cerrarse.
+
 ## Swagger/OpenAPI protegido
 
 La documentación interna se habilita explícitamente con
@@ -483,11 +517,14 @@ o diverge, HU-006 responde `503` y no se declara operativa.
   sesión administrativa: `GET /openapi/v1.json`. Incluye el esquema Bearer y
   marca `logout` como operación autenticada. La interfaz `/swagger` usa la misma
   policy; ver “Swagger/OpenAPI protegido”.
-- Los 15 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
+- Los 16 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
   `Occupancy`, `ForWhom`, `BathroomType`, `FurnitureType`, `UnitTemplate`,
   `ServiceName`, `ServiceMode`, `AccountLabel`, `EstadoExpediente`,
-  `TipoDocumentoVerificacion`, `ResultadoComparacionNombres`) se documentan como string con sus
-  valores reales; los enteros se rechazan en runtime. `POST
+  `TipoDocumentoVerificacion`, `ResultadoComparacionNombres`, `UnitAvailability`)
+  se documentan como string con sus
+  valores reales; los enteros se rechazan en runtime. `tipoPropiedad` y
+  `estadoHabitacion` en `GET /api/v1/mis-propiedades` siguen el mismo criterio:
+  un entero o un valor fuera del enum responde `400`. `POST
   /api/v1/unidades/{unitId}/fotos` se documenta como `multipart/form-data` con
   `Fotos` repetible, array de binarios, JPEG/PNG, 10 fotos, 5 MB por archivo y
   52 MB por solicitud.
@@ -509,6 +546,9 @@ o diverge, HU-006 responde `503` y no se declara operativa.
   intentos agotados, `413`, `429` y `503`.
 - Eliminación de cuenta: `204`, `400` sin confirmar la pérdida de información, `401`
   por contraseña incorrecta o sesión inválida, `413` y `503`.
+- Mis propiedades: `200` siempre que la sesión sea válida (lista vacía si no hay
+  propiedades), `400` por `tipoPropiedad`/`estadoHabitacion` inválidos, `401` sin
+  sesión y `503` si MongoDB no está disponible.
 
 ## Pruebas
 

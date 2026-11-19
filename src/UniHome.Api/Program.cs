@@ -39,6 +39,7 @@ using UniHome.Application.Identity.RegisterAccount;
 using UniHome.Application.Profiles;
 using UniHome.Application.Profiles.GetProfile;
 using UniHome.Application.Properties.CreateProperty;
+using UniHome.Application.Properties.MyProperties;
 using UniHome.Application.Publications.AcceptTerms;
 using UniHome.Application.Publications.MyPublicationMap;
 using UniHome.Application.Publications.SubmitFirstPublication;
@@ -162,6 +163,7 @@ builder.Services.AddScoped<ConfirmPasswordResetService>();
 builder.Services.AddScoped<GetProfileService>();
 builder.Services.AddScoped<PublishingEligibilityService>();
 builder.Services.AddScoped<CreatePropertyService>();
+builder.Services.AddScoped<GetMyPropertiesService>();
 builder.Services.AddScoped<CreateUnitService>();
 builder.Services.AddScoped<AddUnitPhotosService>();
 builder.Services.AddScoped<ConfigureUnitServicesService>();
@@ -763,7 +765,8 @@ app.Use(async (context, next) =>
             path.StartsWithSegments("/api/v1/perfil") ||
             path.StartsWithSegments("/api/v1/expedientes") ||
             path.StartsWithSegments("/api/v1/admin/expedientes") ||
-            path.StartsWithSegments("/api/v1/publicaciones"))
+            path.StartsWithSegments("/api/v1/publicaciones") ||
+            path.StartsWithSegments("/api/v1/mis-propiedades"))
         {
             headers.CacheControl = "no-store";
         }

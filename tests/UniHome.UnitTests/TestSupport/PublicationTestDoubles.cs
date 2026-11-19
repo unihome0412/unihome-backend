@@ -35,6 +35,15 @@ internal sealed class FakePropertyRepository : IPropertyRepository
         CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Property>>(
             Items.Where(property => ids.Contains(property.Id)).ToArray());
+
+    public Task<IReadOnlyList<Property>> ListByOwnerAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Property>>(Items
+            .Where(property => property.OwnerAccountId == ownerAccountId)
+            .OrderByDescending(property => property.CreatedAt)
+            .ThenBy(property => property.Id)
+            .ToArray());
 }
 
 internal sealed class FakeUnitRepository : IUnitRepository

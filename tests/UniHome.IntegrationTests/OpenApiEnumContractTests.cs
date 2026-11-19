@@ -13,7 +13,7 @@ namespace UniHome.IntegrationTests;
 
 /// <summary>
 /// El contrato OpenAPI debe describir exactamente los enums string que acepta y
-/// devuelve el runtime. Cubre los 12 enums públicos usados por request/response.
+/// devuelve el runtime. Cubre los 13 enums públicos usados por request/response.
 /// </summary>
 public sealed class OpenApiEnumContractTests : IClassFixture<SwaggerEnabledApiFactory>
 {
@@ -31,7 +31,8 @@ public sealed class OpenApiEnumContractTests : IClassFixture<SwaggerEnabledApiFa
             ["UnitTemplate"] = typeof(UnitTemplate),
             ["ServiceName"] = typeof(ServiceName),
             ["ServiceMode"] = typeof(ServiceMode),
-            ["AccountLabel"] = typeof(AccountLabel)
+            ["AccountLabel"] = typeof(AccountLabel),
+            ["UnitAvailability"] = typeof(UnitAvailability)
         };
 
     private readonly UniHomeApiFactory _factory;
@@ -110,6 +111,10 @@ public sealed class OpenApiEnumContractTests : IClassFixture<SwaggerEnabledApiFa
         AssertReferences(schemas, "UnidadVistaPreviaResponse", "tipoUnidad", "UnitType");
         AssertReferences(schemas, "UnidadVistaPreviaResponse", "paraQuien", "ForWhom");
         AssertReferences(schemas, "UnidadVistaPreviaResponse", "estadoPublicacion", "PublicationState");
+
+        AssertReferences(schemas, "MiPropiedadResponse", "tipoPropiedad", "PropertyType");
+        AssertReferences(schemas, "MiHabitacionResponse", "tipoUnidad", "UnitType");
+        AssertReferences(schemas, "MiHabitacionResponse", "estado", "UnitAvailability");
     }
 
     [Fact]

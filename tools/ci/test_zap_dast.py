@@ -46,6 +46,7 @@ OPERATIONS = [
     ("GET", "/api/v1/perfil/mi-perfil", True),
     ("POST", "/api/v1/propiedades", True),
     ("POST", "/api/v1/propiedades/{propertyId}/unidades", True),
+    ("GET", "/api/v1/mis-propiedades", True),
     ("POST", "/api/v1/publicaciones/primera/terminos", True),
     ("POST", "/api/v1/publicaciones/primera/enviar", True),
     ("POST", "/api/v1/expedientes/mi-expediente/ine", True),
@@ -248,6 +249,19 @@ class FakeHttpClient:
             return 201, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
         if base.startswith("/api/v1/propiedades/") and base.endswith("/unidades"):
             return 201, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+        if base == "/api/v1/mis-propiedades":
+            return 200, json.dumps([{
+                "id": str(uuid.uuid4()),
+                "nombre": "DAST Propiedad",
+                "tipoPropiedad": "Casa",
+                "totalHabitaciones": 1,
+                "habitacionesDisponibles": 1,
+                "habitaciones": [{
+                    "id": str(uuid.uuid4()),
+                    "tipoUnidad": "Habitacion",
+                    "estado": "Disponible",
+                }],
+            }]).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/servicios"):
             return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/zona-reglas"):
@@ -372,9 +386,9 @@ class ZapDastTests(unittest.TestCase):
         self.assertIn("estadoPublicacion", command[-1])
         self.assertIn("estadoOcupacion", command[-1])
 
-    def test_openapi_operations_incluyen_41_operaciones_y_auth(self):
+    def test_openapi_operations_incluyen_42_operaciones_y_auth(self):
         operations = parse_openapi_operations(SPEC)
-        self.assertEqual(41, len(operations))
+        self.assertEqual(42, len(operations))
         auth = {(item["method"], item["path"]) for item in operations if item["auth"]}
         self.assertIn(("POST", "/api/v1/auth/logout"), auth)
         self.assertIn(("DELETE", "/api/v1/cuentas/mi-cuenta"), auth)
@@ -399,7 +413,7 @@ class ZapDastTests(unittest.TestCase):
         ]
         coverage = build_coverage(operations, records)
         self.assertEqual(3, coverage["openapi_visited"])
-        self.assertEqual(38, len(coverage["missing"]))
+        self.assertEqual(39, len(coverage["missing"]))
         self.assertEqual(0, len(coverage["support_routes"]))
 
     def test_cobertura_detecta_ruta_no_visitada(self):
@@ -729,13 +743,13 @@ class ZapDastTests(unittest.TestCase):
             result = zap_dast.run_scan(args)
         return result, output
 
-    def test_run_scan_genera_evidencia_y_cobertura_41_de_41(self):
+    def test_run_scan_genera_evidencia_y_cobertura_42_de_42(self):
         result, output = self._run_scan()
         self.assertEqual(0, result)
         summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
         self.assertEqual("PASS", summary["status"])
-        self.assertEqual(41, summary["coverage"]["openapi_operations"])
-        self.assertEqual(41, summary["coverage"]["openapi_visited"])
+        self.assertEqual(42, summary["coverage"]["openapi_operations"])
+        self.assertEqual(42, summary["coverage"]["openapi_visited"])
         self.assertEqual([], summary["coverage"]["missing"])
         self.assertTrue((output / "dast-report.md").exists())
         self.assertTrue((output / "zap-report.html").exists())

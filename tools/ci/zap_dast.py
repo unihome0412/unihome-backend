@@ -1251,6 +1251,17 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", photo_path, token=access_a,
         expected={200}, auth=True, note="lectura foto")
 
+    # Sprint 6 / HU-033: "Mis propiedades" agrupa la propiedad y su habitación.
+    _, my_properties_payload, _ = http.request(
+        "GET", "/api/v1/mis-propiedades",
+        token=access_a, expected={200}, auth=True, note="mis propiedades")
+    try:
+        my_properties = json.loads(my_properties_payload)
+    except json.JSONDecodeError as error:
+        raise DastError("Mis propiedades no devolvió un cuerpo JSON.") from error
+    if not isinstance(my_properties, list) or not my_properties:
+        raise DastError("Mis propiedades no devolvió ninguna propiedad.")
+
     http.request(
         "POST", "/api/v1/publicaciones/primera/terminos",
         body={"versionTerminos": TERMS_VERSION},

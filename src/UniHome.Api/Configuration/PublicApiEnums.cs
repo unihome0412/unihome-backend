@@ -31,6 +31,7 @@ internal static class PublicApiEnums
             ["AccountLabel"] = typeof(AccountLabel),
             ["EstadoExpediente"] = typeof(EstadoExpediente),
             ["TipoDocumentoVerificacion"] = typeof(TipoDocumentoVerificacion),
-            ["ResultadoComparacionNombres"] = typeof(ResultadoComparacionNombres)
+            ["ResultadoComparacionNombres"] = typeof(ResultadoComparacionNombres),
+            ["UnitAvailability"] = typeof(UnitAvailability)
         };
 }

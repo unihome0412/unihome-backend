@@ -27,7 +27,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
-    public async Task OpenApi_DebeExponerLas41OperacionesDelCatalogoVigente()
+    public async Task OpenApi_DebeExponerLas42OperacionesDelCatalogoVigente()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");
 
@@ -45,7 +45,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(41, operations.Length);
+        Assert.Equal(42, operations.Length);
     }
 
     [Fact]
@@ -163,6 +163,20 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             "/api/v1/fotos/{photoRef}",
             out var photo));
         Assert.True(photo.TryGetProperty("get", out _));
+    }
+
+    [Fact]
+    public async Task OpenApi_DebeIncluirMisPropiedadesDeSprint06()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty("/api/v1/mis-propiedades", out var misPropiedades));
+        Assert.True(misPropiedades.TryGetProperty("get", out _));
     }
 
     [Fact]
