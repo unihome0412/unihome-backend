@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using UniHome.Application.Identity.Exceptions;
 using UniHome.Application.Units.Abstractions;
@@ -406,6 +407,85 @@ internal sealed class MongoUnitRepository : IUnitRepository
         }
     }
 
+    public async Task<int?> TryReserveSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UnitDocument>.Filter.And(
+                ByIdFilter(id),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.PropertyId,
+                    propertyId.ToString("N", CultureInfo.InvariantCulture)),
+                new BsonDocument("$expr", new BsonDocument("$lt", new BsonArray
+                {
+                    $"${MongoPublicationSchema.UnitOccupiedPlacesField}",
+                    $"${MongoPublicationSchema.UnitPlacesField}"
+                })));
+            var update = Builders<UnitDocument>.Update.Inc(document => document.OccupiedPlaces, 1);
+
+            // CAS de un solo documento: MongoDB evalúa el filtro y aplica el
+            // $inc de forma atómica, así que dos solicitudes simultáneas con un
+            // solo lugar libre nunca incrementan ambas lugaresOcupados.
+            var updated = await collection
+                .FindOneAndUpdateAsync(
+                    filter,
+                    update,
+                    new FindOneAndUpdateOptions<UnitDocument>
+                    {
+                        ReturnDocument = ReturnDocument.After
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return updated?.OccupiedPlaces;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<int> ReleaseSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UnitDocument>.Filter.And(
+                ByIdFilter(id),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.PropertyId,
+                    propertyId.ToString("N", CultureInfo.InvariantCulture)),
+                Builders<UnitDocument>.Filter.Gt(document => document.OccupiedPlaces, 0));
+            var update = Builders<UnitDocument>.Update.Inc(document => document.OccupiedPlaces, -1);
+
+            var updated = await collection
+                .FindOneAndUpdateAsync(
+                    filter,
+                    update,
+                    new FindOneAndUpdateOptions<UnitDocument>
+                    {
+                        ReturnDocument = ReturnDocument.After
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return updated?.OccupiedPlaces ?? 0;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<bool> TryAppendPhotosAsync(
         Guid id,
         Guid propertyId,
@@ -486,6 +566,7 @@ internal sealed class MongoUnitRepository : IUnitRepository
             Photos = unit.Photos.Select(ToDocument).ToList(),
             PublicationState = unit.PublicationState.ToString(),
             AvailabilityState = unit.Availability.ToString(),
+            OccupiedPlaces = unit.OccupiedPlaces,
             CreatedAt = unit.CreatedAt.UtcDateTime
         };
 
@@ -536,7 +617,8 @@ internal sealed class MongoUnitRepository : IUnitRepository
                 DateTime.SpecifyKind(document.CreatedAt, DateTimeKind.Utc)),
             string.IsNullOrWhiteSpace(document.AvailabilityState)
                 ? UnitAvailability.Disponible
-                : Enum.Parse<UnitAvailability>(document.AvailabilityState));
+                : Enum.Parse<UnitAvailability>(document.AvailabilityState),
+            document.OccupiedPlaces);
 
     private static ServiceCharge ToDomain(ServiceChargeDocument document) =>
         ServiceCharge.Create(

@@ -20,13 +20,14 @@ public sealed class RemoveTenantServiceTests
         var tenant = Guid.NewGuid();
         var property = PublicationServiceTestData.CreateProperty(owner.Id, Guid.NewGuid());
         var unit = PublicationServiceTestData.UnitFor(property.Id, owner.Id, property.UniversityId);
-        unit.SetAvailability(UnitAvailability.Ocupado);
         var units = new FakeUnitRepository();
         units.Items.Add(unit);
+        Assert.NotNull(await units.TryReserveSlotAsync(unit.Id, unit.PropertyId));
+        unit.SetAvailability(UnitAvailability.Ocupado);
         var links = new FakeOccupancyLinkRepository();
         links.Items.Add(OccupancyLink.CreateActive(tenant, unit.Id, Now));
         var service = new RemoveTenantService(
-            units, links, new UnitAvailabilityRecalculator(units, links), eligibility, new FixedClock(Now));
+            units, links, new UnitAvailabilityRecalculator(units), eligibility, new FixedClock(Now));
 
         var result = await service.RemoveAsync(owner.Id, unit.Id, tenant, confirmacion: true);
 
@@ -34,6 +35,7 @@ public sealed class RemoveTenantServiceTests
         var link = await links.FindAsync(tenant, unit.Id);
         Assert.Equal(OccupancyStatus.Finalizado, link!.Status);
         Assert.Equal(OccupancyEndReason.BajaPorPropietario, link.EndedReason);
+        Assert.Equal(0, unit.OccupiedPlaces);
         Assert.Equal(UnitAvailability.Disponible, unit.Availability);
     }
 
@@ -46,7 +48,7 @@ public sealed class RemoveTenantServiceTests
         var units = new FakeUnitRepository();
         var links = new FakeOccupancyLinkRepository();
         var service = new RemoveTenantService(
-            units, links, new UnitAvailabilityRecalculator(units, links), eligibility, new FixedClock(Now));
+            units, links, new UnitAvailabilityRecalculator(units), eligibility, new FixedClock(Now));
 
         var result = await service.RemoveAsync(owner.Id, Guid.NewGuid(), Guid.NewGuid(), confirmacion: false);
 
@@ -67,7 +69,7 @@ public sealed class RemoveTenantServiceTests
         units.Items.Add(unit);
         var links = new FakeOccupancyLinkRepository();
         var service = new RemoveTenantService(
-            units, links, new UnitAvailabilityRecalculator(units, links), eligibility, new FixedClock(Now));
+            units, links, new UnitAvailabilityRecalculator(units), eligibility, new FixedClock(Now));
 
         var result = await service.RemoveAsync(caller.Id, unit.Id, Guid.NewGuid(), confirmacion: true);
 
@@ -86,7 +88,7 @@ public sealed class RemoveTenantServiceTests
         units.Items.Add(unit);
         var links = new FakeOccupancyLinkRepository();
         var service = new RemoveTenantService(
-            units, links, new UnitAvailabilityRecalculator(units, links), eligibility, new FixedClock(Now));
+            units, links, new UnitAvailabilityRecalculator(units), eligibility, new FixedClock(Now));
 
         var result = await service.RemoveAsync(owner.Id, unit.Id, Guid.NewGuid(), confirmacion: true);
 
@@ -102,13 +104,14 @@ public sealed class RemoveTenantServiceTests
         var tenant = Guid.NewGuid();
         var property = PublicationServiceTestData.CreateProperty(owner.Id, Guid.NewGuid());
         var unit = PublicationServiceTestData.UnitFor(property.Id, owner.Id, property.UniversityId);
-        unit.SetAvailability(UnitAvailability.Mantenimiento);
         var units = new FakeUnitRepository();
         units.Items.Add(unit);
+        Assert.NotNull(await units.TryReserveSlotAsync(unit.Id, unit.PropertyId));
+        unit.SetAvailability(UnitAvailability.Mantenimiento);
         var links = new FakeOccupancyLinkRepository();
         links.Items.Add(OccupancyLink.CreateActive(tenant, unit.Id, Now));
         var service = new RemoveTenantService(
-            units, links, new UnitAvailabilityRecalculator(units, links), eligibility, new FixedClock(Now));
+            units, links, new UnitAvailabilityRecalculator(units), eligibility, new FixedClock(Now));
 
         await service.RemoveAsync(owner.Id, unit.Id, tenant, confirmacion: true);
 

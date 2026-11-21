@@ -1005,21 +1005,6 @@ def _response_id(payload: bytes, operation: str) -> str:
     return identifier
 
 
-def _account_id_from_token(token: str) -> str:
-    """Decodifica el claim `sub` del JWT para rutas que exigen el id del
-    inquilino (HU-094); no valida la firma, solo lee el payload público."""
-    segments = token.split(".")
-    if len(segments) < 2:
-        raise DastError("El access token no tiene el formato JWT esperado.")
-    payload_segment = segments[1]
-    padded = payload_segment + "=" * (-len(payload_segment) % 4)
-    payload = json.loads(base64.urlsafe_b64decode(padded))
-    subject = str(payload.get("sub") or "")
-    if not subject:
-        raise DastError("El access token no contiene el claim sub.")
-    return subject
-
-
 def _publish_unit_for_exploration(unit_id: str) -> None:
     """Publica el fixture M04/M07 directamente en la base efímera.
 
@@ -1470,7 +1455,17 @@ def run_scan(args: argparse.Namespace) -> int:
         "PUT", f"/api/v1/unidades/{unit_id}/mantenimiento",
         body={"enMantenimiento": False},
         token=access_a, expected={200}, auth=True, note="desactivar mantenimiento")
-    tenant_b_id = _account_id_from_token(access_b)
+    # HU-094: el propietario obtiene el accountId del inquilino desde el
+    # endpoint real, igual que lo haría Android; nunca se decodifica el token.
+    _, tenants_payload, _ = http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/inquilinos",
+        token=access_a, expected={200}, auth=True, note="inquilinos activos unidad A")
+    tenants = json.loads(tenants_payload)
+    if not isinstance(tenants, list) or not tenants:
+        raise DastError("La unidad A no devolvió inquilinos activos.")
+    tenant_b_id = str(tenants[0].get("accountId") or "")
+    if not tenant_b_id:
+        raise DastError("El inquilino activo no devolvió accountId.")
     http.request(
         "DELETE", f"/api/v1/unidades/{unit_id}/inquilinos/{tenant_b_id}",
         body={"confirmacion": True},

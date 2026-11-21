@@ -76,7 +76,11 @@ public sealed class RemoveTenantService
 
         link.End(OccupancyEndReason.BajaPorPropietario, _clock.UtcNow);
         await _links.SaveAsync(link, cancellationToken).ConfigureAwait(false);
-        await _recalculator.RecomputeAsync(unit, cancellationToken).ConfigureAwait(false);
+
+        var remaining = await _units
+            .ReleaseSlotAsync(unit.Id, unit.PropertyId, cancellationToken)
+            .ConfigureAwait(false);
+        await _recalculator.RecomputeAsync(unit, remaining, cancellationToken).ConfigureAwait(false);
 
         return OperationResult<Guid>.Success(tenantAccountId);
     }

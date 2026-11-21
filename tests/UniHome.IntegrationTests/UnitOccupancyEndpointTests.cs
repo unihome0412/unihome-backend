@@ -100,7 +100,16 @@ public sealed class UnitOccupancyEndpointTests : IClassFixture<UniHomeApiFactory
             "Ocupado",
             maintenanceOffJson.RootElement.GetProperty("estadoOcupacion").GetString());
 
-        var tenantAccountId = await GetAccountIdAsync(TenantEmail);
+        using var tenants = await _client.GetAsync($"/api/v1/unidades/{unitId}/inquilinos");
+        Assert.Equal(HttpStatusCode.OK, tenants.StatusCode);
+        using var tenantsJson = JsonDocument.Parse(await tenants.Content.ReadAsStringAsync());
+        var tenantsArray = tenantsJson.RootElement.EnumerateArray().ToArray();
+        var tenantEntry = Assert.Single(tenantsArray);
+        Assert.Equal("Ana López", tenantEntry.GetProperty("nombreCompleto").GetString());
+        var tenantAccountId = tenantEntry.GetProperty("accountId").GetGuid();
+        var tenantsBody = await tenants.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(TenantEmail, tenantsBody, StringComparison.OrdinalIgnoreCase);
+
         using var remove = await _client.SendAsync(
             BuildDeleteRequest(
                 $"/api/v1/unidades/{unitId}/inquilinos/{tenantAccountId}",
@@ -255,6 +264,134 @@ public sealed class UnitOccupancyEndpointTests : IClassFixture<UniHomeApiFactory
     }
 
     [Fact]
+    public async Task ListarInquilinos_SinInquilinos_DevuelveListaVacia()
+    {
+        var ownerToken = await AuthenticateAsync(OwnerEmail);
+        var universityId = await SeedUniversityAsync();
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", ownerToken);
+        var propertyId = await CreatePropertyAsync(
+            universityId, $"Casa {Guid.NewGuid():N}", "SinInquilinos");
+        var unitId = await CreateUnitAsync(propertyId, "Individual", 1);
+
+        using var response = await _client.GetAsync($"/api/v1/unidades/{unitId}/inquilinos");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Empty(json.RootElement.EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ListarInquilinos_SoloIncluyeVinculosActivos()
+    {
+        var ownerToken = await AuthenticateAsync(OwnerEmail);
+        var tenantToken = await AuthenticateAsync(TenantEmail);
+        var universityId = await SeedUniversityAsync();
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", ownerToken);
+        var propertyId = await CreatePropertyAsync(
+            universityId, $"Casa {Guid.NewGuid():N}", "VinculoFinalizado");
+        var unitId = await CreateUnitAsync(propertyId, "Individual", 1);
+        using var invitation = await _client.GetAsync($"/api/v1/unidades/{unitId}/invitacion");
+        using var invitationJson = JsonDocument.Parse(await invitation.Content.ReadAsStringAsync());
+        var code = invitationJson.RootElement.GetProperty("codigo").GetString();
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tenantToken);
+        await _client.PostAsJsonAsync("/api/v1/unidades/unirse", new { codigo = code });
+        await _client.SendAsync(
+            BuildDeleteRequest($"/api/v1/unidades/{unitId}/mi-vinculo", new { confirmacion = true }));
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", ownerToken);
+        using var response = await _client.GetAsync($"/api/v1/unidades/{unitId}/inquilinos");
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Empty(json.RootElement.EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ListarInquilinos_UnidadAjena_DebeResponder403()
+    {
+        var ownerToken = await AuthenticateAsync(OwnerEmail);
+        var otherToken = await AuthenticateAsync(TenantEmail);
+        var universityId = await SeedUniversityAsync();
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", ownerToken);
+        var propertyId = await CreatePropertyAsync(
+            universityId, $"Casa {Guid.NewGuid():N}", "ListaAjena");
+        var unitId = await CreateUnitAsync(propertyId, "Individual", 1);
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", otherToken);
+        using var response = await _client.GetAsync($"/api/v1/unidades/{unitId}/inquilinos");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ListarInquilinos_SinSesion_DebeResponder401()
+    {
+        using var response = await _client.GetAsync(
+            $"/api/v1/unidades/{Guid.NewGuid()}/inquilinos");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task UnirseConCodigo_DosSolicitudesSimultaneasConUnLugar_SoloUnaDebeVincularse()
+    {
+        var ownerToken = await AuthenticateAsync(OwnerEmail);
+        var tenantAToken = await AuthenticateAsync(TenantEmail);
+        var tenantBToken = await AuthenticateAsync(OtherTenantEmail);
+        var universityId = await SeedUniversityAsync();
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", ownerToken);
+        var propertyId = await CreatePropertyAsync(
+            universityId, $"Casa {Guid.NewGuid():N}", "Concurrencia");
+        var unitId = await CreateUnitAsync(propertyId, "Individual", 1);
+        using var invitation = await _client.GetAsync($"/api/v1/unidades/{unitId}/invitacion");
+        using var invitationJson = JsonDocument.Parse(await invitation.Content.ReadAsStringAsync());
+        var code = invitationJson.RootElement.GetProperty("codigo").GetString();
+
+        // Dos HttpClient independientes (uno por inquilino) para que el
+        // TestServer procese ambas solicitudes de verdad en paralelo contra el
+        // mismo InMemoryUnitRepository con lock, igual que MongoDB serializa el
+        // findOneAndUpdate sobre el mismo documento.
+        using var clientA = _factory.CreateClient();
+        clientA.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tenantAToken);
+        using var clientB = _factory.CreateClient();
+        clientB.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", tenantBToken);
+
+        var responses = await Task.WhenAll(
+            clientA.PostAsJsonAsync("/api/v1/unidades/unirse", new { codigo = code }),
+            clientB.PostAsJsonAsync("/api/v1/unidades/unirse", new { codigo = code }));
+
+        try
+        {
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.OK);
+            Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
+
+            using var tenants = await _client.GetAsync($"/api/v1/unidades/{unitId}/inquilinos");
+            using var tenantsJson = JsonDocument.Parse(await tenants.Content.ReadAsStringAsync());
+            Assert.Single(tenantsJson.RootElement.EnumerateArray());
+        }
+        finally
+        {
+            foreach (var response in responses)
+            {
+                response.Dispose();
+            }
+        }
+    }
+
+    [Fact]
     public async Task BajaInquilino_SinConfirmacion_DebeResponder400()
     {
         var ownerToken = await AuthenticateAsync(OwnerEmail);
@@ -352,13 +489,6 @@ public sealed class UnitOccupancyEndpointTests : IClassFixture<UniHomeApiFactory
         using var login = await AuthTestHelpers.LoginAsync(_client, email);
         var tokens = await AuthTestHelpers.ReadTokensAsync(login);
         return tokens.AccessToken;
-    }
-
-    private async Task<Guid> GetAccountIdAsync(string email)
-    {
-        var account = await _factory.Accounts.FindByEmailAsync(
-            UniHome.Domain.Accounts.EmailAddress.Create(email));
-        return account!.Id;
     }
 
     private async Task<Guid> SeedUniversityAsync()

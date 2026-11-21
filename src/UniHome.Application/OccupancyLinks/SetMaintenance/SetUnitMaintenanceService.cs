@@ -70,11 +70,12 @@ public sealed class SetUnitMaintenanceService
         }
         else if (unit.Availability == UnitAvailability.Mantenimiento)
         {
-            // Sale de mantenimiento: se recalcula desde los vínculos activos.
-            // ignoreMaintenanceGuard=true porque el estado en memoria todavía es
-            // Mantenimiento y, sin el flag, el recalculador no haría nada.
+            // Sale de mantenimiento: se recalcula desde lugaresOcupados, que no
+            // cambió al activar/desactivar mantenimiento. ignoreMaintenanceGuard=true
+            // porque el estado en memoria todavía es Mantenimiento y, sin el
+            // flag, el recalculador no haría nada.
             await _recalculator
-                .RecomputeAsync(unit, cancellationToken, ignoreMaintenanceGuard: true)
+                .RecomputeAsync(unit, unit.OccupiedPlaces, cancellationToken, ignoreMaintenanceGuard: true)
                 .ConfigureAwait(false);
         }
 

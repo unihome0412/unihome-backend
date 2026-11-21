@@ -48,6 +48,8 @@ internal sealed class FakePropertyRepository : IPropertyRepository
 
 internal sealed class FakeUnitRepository : IUnitRepository
 {
+    private readonly object _gate = new();
+
     public List<Unit> Items { get; } = [];
 
     public bool UpdateResult { get; set; } = true;
@@ -212,6 +214,44 @@ internal sealed class FakeUnitRepository : IUnitRepository
 
         unit.SetAvailability(availability);
         return Task.FromResult(true);
+    }
+
+    public Task<int?> TryReserveSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            var unit = Items.SingleOrDefault(item => item.Id == id && item.PropertyId == propertyId);
+
+            if (unit is null || unit.OccupiedPlaces >= unit.Places)
+            {
+                return Task.FromResult<int?>(null);
+            }
+
+            unit.SetOccupiedPlaces(unit.OccupiedPlaces + 1);
+            return Task.FromResult<int?>(unit.OccupiedPlaces);
+        }
+    }
+
+    public Task<int> ReleaseSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            var unit = Items.SingleOrDefault(item => item.Id == id && item.PropertyId == propertyId);
+
+            if (unit is null || unit.OccupiedPlaces <= 0)
+            {
+                return Task.FromResult(unit?.OccupiedPlaces ?? 0);
+            }
+
+            unit.SetOccupiedPlaces(unit.OccupiedPlaces - 1);
+            return Task.FromResult(unit.OccupiedPlaces);
+        }
     }
 
     public Task<bool> TryAppendPhotosAsync(

@@ -30,15 +30,6 @@ public sealed class InMemoryOccupancyLinkRepository : IOccupancyLinkRepository
         return Task.CompletedTask;
     }
 
-    public Task<int> CountActiveAsync(Guid unitId, CancellationToken cancellationToken = default)
-    {
-        lock (_gate)
-        {
-            return Task.FromResult(_links.Values.Count(
-                link => link.UnitId == unitId && link.Status == OccupancyStatus.Activo));
-        }
-    }
-
     public Task<bool> HasActiveLinkAsync(
         Guid tenantAccountId,
         CancellationToken cancellationToken = default)
@@ -48,6 +39,20 @@ public sealed class InMemoryOccupancyLinkRepository : IOccupancyLinkRepository
             return Task.FromResult(_links.Values.Any(
                 link => link.TenantAccountId == tenantAccountId &&
                         link.Status == OccupancyStatus.Activo));
+        }
+    }
+
+    public Task<IReadOnlyList<OccupancyLink>> ListActiveByUnitAsync(
+        Guid unitId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<OccupancyLink> items = _links.Values
+                .Where(link => link.UnitId == unitId && link.Status == OccupancyStatus.Activo)
+                .OrderBy(link => link.JoinedAt)
+                .ToArray();
+            return Task.FromResult(items);
         }
     }
 }

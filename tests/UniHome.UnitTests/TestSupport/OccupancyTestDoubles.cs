@@ -22,15 +22,19 @@ internal sealed class FakeOccupancyLinkRepository : IOccupancyLinkRepository
         return Task.CompletedTask;
     }
 
-    public Task<int> CountActiveAsync(Guid unitId, CancellationToken cancellationToken = default) =>
-        Task.FromResult(Items.Count(
-            link => link.UnitId == unitId && link.Status == OccupancyStatus.Activo));
-
     public Task<bool> HasActiveLinkAsync(
         Guid tenantAccountId,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(Items.Any(
             link => link.TenantAccountId == tenantAccountId && link.Status == OccupancyStatus.Activo));
+
+    public Task<IReadOnlyList<OccupancyLink>> ListActiveByUnitAsync(
+        Guid unitId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<OccupancyLink>>(Items
+            .Where(link => link.UnitId == unitId && link.Status == OccupancyStatus.Activo)
+            .OrderBy(link => link.JoinedAt)
+            .ToArray());
 }
 
 internal sealed class FakeUnitInvitationRepository : IUnitInvitationRepository

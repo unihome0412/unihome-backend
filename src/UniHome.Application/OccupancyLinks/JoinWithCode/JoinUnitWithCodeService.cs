@@ -78,13 +78,21 @@ public sealed class JoinUnitWithCodeService
 
         if (existing is not null && existing.Status == OccupancyStatus.Activo)
         {
+            // Idempotente: el inquilino ya está contado en lugaresOcupados, no se
+            // reserva un lugar adicional.
             return JoinUnitWithCodeResult.Linked(
                 new OccupancyLinkView(unit.Id, existing.Status, existing.JoinedAt));
         }
 
-        var activeCount = await _links.CountActiveAsync(unit.Id, cancellationToken).ConfigureAwait(false);
+        // CAS de un solo documento sobre la propia unidad: dos solicitudes con un
+        // solo lugar libre no pueden reservar ambas, a diferencia de contar los
+        // vínculos de ocupación (sujeto a condición de carrera entre el conteo y
+        // la inserción).
+        var reserved = await _units
+            .TryReserveSlotAsync(unit.Id, unit.PropertyId, cancellationToken)
+            .ConfigureAwait(false);
 
-        if (activeCount >= unit.Places)
+        if (reserved is null)
         {
             return JoinUnitWithCodeResult.UnitFull();
         }
@@ -96,8 +104,21 @@ public sealed class JoinUnitWithCodeService
             link.Reactivate(now);
         }
 
-        await _links.SaveAsync(link, cancellationToken).ConfigureAwait(false);
-        await _recalculator.RecomputeAsync(unit, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _links.SaveAsync(link, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Compensación: el lugar se reservó pero el vínculo no se pudo
+            // persistir; se libera para no perder el cupo definitivamente.
+            await _units.ReleaseSlotAsync(unit.Id, unit.PropertyId, cancellationToken).ConfigureAwait(false);
+            throw;
+        }
+
+        await _recalculator
+            .RecomputeAsync(unit, reserved.Value, cancellationToken)
+            .ConfigureAwait(false);
 
         return JoinUnitWithCodeResult.Linked(new OccupancyLinkView(unit.Id, link.Status, link.JoinedAt));
     }

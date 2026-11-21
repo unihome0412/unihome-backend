@@ -71,20 +71,22 @@ internal sealed class MongoOccupancyLinkRepository : IOccupancyLinkRepository
         }
     }
 
-    public async Task<int> CountActiveAsync(Guid unitId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<OccupancyLink>> ListActiveByUnitAsync(
+        Guid unitId,
+        CancellationToken cancellationToken = default)
     {
         try
         {
             var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
-            var count = await collection
-                .CountDocumentsAsync(
-                    ActiveFilter(Builders<OccupancyLinkDocument>.Filter.Eq(
-                        item => item.UnitId,
-                        unitId.ToString("N", CultureInfo.InvariantCulture))),
-                    cancellationToken: cancellationToken)
+            var documents = await collection
+                .Find(ActiveFilter(Builders<OccupancyLinkDocument>.Filter.Eq(
+                    item => item.UnitId,
+                    unitId.ToString("N", CultureInfo.InvariantCulture))))
+                .Sort(Builders<OccupancyLinkDocument>.Sort.Ascending(item => item.JoinedAt))
+                .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return (int)count;
+            return documents.Select(ToDomain).ToArray();
         }
         catch (MongoException exception)
         {

@@ -43,6 +43,12 @@ public static class MongoPublicationSchema
     public const string UnitStateField = "estadoPublicacion";
     public const string UnitCreatedAtField = "createdAt";
 
+    /// <summary>
+    /// EP-M09: contador atómico de lugares ocupados (CAS de un solo documento).
+    /// Campo flexible añadido sobre M05-001; no requiere una migración nueva.
+    /// </summary>
+    public const string UnitOccupiedPlacesField = "lugaresOcupados";
+
     public const string TermsAccountField = "accountId";
     public const string TermsVersionField = "versionTerminos";
     public const string TermsAcceptedAtField = "acceptedAt";

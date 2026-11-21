@@ -240,4 +240,42 @@ public sealed class InMemoryUnitRepository : IUnitRepository
             return Task.FromResult(true);
         }
     }
+
+    public Task<int?> TryReserveSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (!_units.TryGetValue(id, out var unit) ||
+                unit.PropertyId != propertyId ||
+                unit.OccupiedPlaces >= unit.Places)
+            {
+                return Task.FromResult<int?>(null);
+            }
+
+            unit.SetOccupiedPlaces(unit.OccupiedPlaces + 1);
+            return Task.FromResult<int?>(unit.OccupiedPlaces);
+        }
+    }
+
+    public Task<int> ReleaseSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            if (!_units.TryGetValue(id, out var unit) ||
+                unit.PropertyId != propertyId ||
+                unit.OccupiedPlaces <= 0)
+            {
+                return Task.FromResult(_units.TryGetValue(id, out var current) ? current.OccupiedPlaces : 0);
+            }
+
+            unit.SetOccupiedPlaces(unit.OccupiedPlaces - 1);
+            return Task.FromResult(unit.OccupiedPlaces);
+        }
+    }
 }

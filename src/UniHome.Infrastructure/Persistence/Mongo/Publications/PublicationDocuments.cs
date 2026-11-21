@@ -129,6 +129,9 @@ public sealed class UnitDocument
     [BsonIgnoreIfNull]
     public string? AvailabilityState { get; set; }
 
+    [BsonElement(MongoPublicationSchema.UnitOccupiedPlacesField)]
+    public int OccupiedPlaces { get; set; }
+
     [BsonElement(MongoPublicationSchema.UnitCreatedAtField)]
     public DateTime CreatedAt { get; set; }
 }

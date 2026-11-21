@@ -6,6 +6,7 @@ using UniHome.Api.Contracts.Units;
 using UniHome.Application.OccupancyLinks.GetInvitation;
 using UniHome.Application.OccupancyLinks.JoinWithCode;
 using UniHome.Application.OccupancyLinks.LeaveUnit;
+using UniHome.Application.OccupancyLinks.ListTenants;
 using UniHome.Application.OccupancyLinks.RemoveTenant;
 using UniHome.Application.OccupancyLinks.SetMaintenance;
 
@@ -26,19 +27,55 @@ public sealed class UnitOccupancyController : AuthenticatedControllerBase
     private readonly SetUnitMaintenanceService _setMaintenance;
     private readonly RemoveTenantService _removeTenant;
     private readonly LeaveUnitService _leaveUnit;
+    private readonly ListUnitTenantsService _listTenants;
 
     public UnitOccupancyController(
         GetUnitInvitationService getInvitation,
         JoinUnitWithCodeService joinWithCode,
         SetUnitMaintenanceService setMaintenance,
         RemoveTenantService removeTenant,
-        LeaveUnitService leaveUnit)
+        LeaveUnitService leaveUnit,
+        ListUnitTenantsService listTenants)
     {
         _getInvitation = getInvitation;
         _joinWithCode = joinWithCode;
         _setMaintenance = setMaintenance;
         _removeTenant = removeTenant;
         _leaveUnit = leaveUnit;
+        _listTenants = listTenants;
+    }
+
+    /// <summary>
+    /// EP-M09-06 (HU-094): inquilinos activos de una unidad propia, con nombre y
+    /// fecha de vínculo; nunca correo ni teléfono. Permite obtener el
+    /// <c>tenantAccountId</c> antes de dar de baja a alguien.
+    /// </summary>
+    [HttpGet("unidades/{unitId:guid}/inquilinos")]
+    [Authorize]
+    [ProducesResponseType(typeof(IReadOnlyList<InquilinoResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> ListTenants(Guid unitId, CancellationToken cancellationToken)
+    {
+        if (!TryGetAccountId(out var accountId))
+        {
+            return CreateProblemResult(StatusCodes.Status401Unauthorized, "La sesión no es válida.");
+        }
+
+        Response.Headers.CacheControl = "no-store";
+
+        var result = await _listTenants
+            .ListAsync(accountId, unitId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ToActionResult(
+            result,
+            value => Ok(value.Select(InquilinoResponse.FromView).ToArray()),
+            notFoundDetail: "La unidad no existe.",
+            forbiddenDetail: "La cuenta no está autorizada para esta operación.",
+            conflictDetail: "No se pudo completar la operación.");
     }
 
     /// <summary>EP-M09-01 (HU-048): código de invitación vigente de una unidad propia.</summary>

@@ -22,7 +22,7 @@ public sealed class JoinUnitWithCodeServiceTests
         var links = new FakeOccupancyLinkRepository();
         var invitations = new FakeUnitInvitationRepository();
         invitations.Items.Add(UnitInvitation.Create(unit.Id, "ABCD2345", Now));
-        var recalculator = new UnitAvailabilityRecalculator(units, links);
+        var recalculator = new UnitAvailabilityRecalculator(units);
         var service = new JoinUnitWithCodeService(
             invitations, units, links, recalculator, new FixedClock(Now));
 
@@ -31,6 +31,7 @@ public sealed class JoinUnitWithCodeServiceTests
         Assert.Equal(JoinUnitWithCodeStatus.Linked, result.Status);
         Assert.Equal(unit.Id, result.Value!.UnidadId);
         Assert.Equal(OccupancyStatus.Activo, result.Value.Estado);
+        Assert.Equal(1, unit.OccupiedPlaces);
         Assert.Equal(UnitAvailability.Ocupado, unit.Availability);
     }
 
@@ -48,17 +49,19 @@ public sealed class JoinUnitWithCodeServiceTests
         var links = new FakeOccupancyLinkRepository();
         var invitations = new FakeUnitInvitationRepository();
         invitations.Items.Add(UnitInvitation.Create(unit.Id, "ABCD2345", Now));
-        var recalculator = new UnitAvailabilityRecalculator(units, links);
+        var recalculator = new UnitAvailabilityRecalculator(units);
         var service = new JoinUnitWithCodeService(
             invitations, units, links, recalculator, new FixedClock(Now));
 
         var first = await service.JoinAsync(Guid.NewGuid(), "ABCD2345");
+        Assert.Equal(1, unit.OccupiedPlaces);
         Assert.Equal(UnitAvailability.Disponible, unit.Availability);
 
         var second = await service.JoinAsync(Guid.NewGuid(), "ABCD2345");
 
         Assert.Equal(JoinUnitWithCodeStatus.Linked, first.Status);
         Assert.Equal(JoinUnitWithCodeStatus.Linked, second.Status);
+        Assert.Equal(2, unit.OccupiedPlaces);
         Assert.Equal(UnitAvailability.Ocupado, unit.Availability);
     }
 
@@ -71,26 +74,29 @@ public sealed class JoinUnitWithCodeServiceTests
         var units = new FakeUnitRepository();
         units.Items.Add(unit);
         var links = new FakeOccupancyLinkRepository();
-        links.Items.Add(OccupancyLink.CreateActive(Guid.NewGuid(), unit.Id, Now));
         var invitations = new FakeUnitInvitationRepository();
         invitations.Items.Add(UnitInvitation.Create(unit.Id, "ABCD2345", Now));
-        var recalculator = new UnitAvailabilityRecalculator(units, links);
+        var recalculator = new UnitAvailabilityRecalculator(units);
         var service = new JoinUnitWithCodeService(
             invitations, units, links, recalculator, new FixedClock(Now));
+        // Ocupa el único lugar de la unidad individual antes del intento.
+        Assert.NotNull(await units.TryReserveSlotAsync(unit.Id, unit.PropertyId));
 
         var result = await service.JoinAsync(Guid.NewGuid(), "ABCD2345");
 
         Assert.Equal(JoinUnitWithCodeStatus.UnitFull, result.Status);
+        Assert.Equal(1, unit.OccupiedPlaces);
     }
 
     [Fact]
     public async Task JoinAsync_CodigoInexistente_DebeDevolverInvalidCode()
     {
+        var units = new FakeUnitRepository();
         var service = new JoinUnitWithCodeService(
             new FakeUnitInvitationRepository(),
-            new FakeUnitRepository(),
+            units,
             new FakeOccupancyLinkRepository(),
-            new UnitAvailabilityRecalculator(new FakeUnitRepository(), new FakeOccupancyLinkRepository()),
+            new UnitAvailabilityRecalculator(units),
             new FixedClock(Now));
 
         var result = await service.JoinAsync(Guid.NewGuid(), "NOEXISTE");
@@ -101,11 +107,12 @@ public sealed class JoinUnitWithCodeServiceTests
     [Fact]
     public async Task JoinAsync_CodigoVacio_DebeDevolverValidationFailed()
     {
+        var units = new FakeUnitRepository();
         var service = new JoinUnitWithCodeService(
             new FakeUnitInvitationRepository(),
-            new FakeUnitRepository(),
+            units,
             new FakeOccupancyLinkRepository(),
-            new UnitAvailabilityRecalculator(new FakeUnitRepository(), new FakeOccupancyLinkRepository()),
+            new UnitAvailabilityRecalculator(units),
             new FixedClock(Now));
 
         var result = await service.JoinAsync(Guid.NewGuid(), "   ");
@@ -125,7 +132,7 @@ public sealed class JoinUnitWithCodeServiceTests
         var invitations = new FakeUnitInvitationRepository();
         invitations.Items.Add(UnitInvitation.Create(unit.Id, "ABCD2345", Now));
         var links = new FakeOccupancyLinkRepository();
-        var recalculator = new UnitAvailabilityRecalculator(units, links);
+        var recalculator = new UnitAvailabilityRecalculator(units);
         var service = new JoinUnitWithCodeService(
             invitations, units, links, recalculator, new FixedClock(Now.AddDays(8)));
 
@@ -145,7 +152,7 @@ public sealed class JoinUnitWithCodeServiceTests
         var invitations = new FakeUnitInvitationRepository();
         invitations.Items.Add(UnitInvitation.Create(unit.Id, "ABCD2345", Now));
         var links = new FakeOccupancyLinkRepository();
-        var recalculator = new UnitAvailabilityRecalculator(units, links);
+        var recalculator = new UnitAvailabilityRecalculator(units);
         var service = new JoinUnitWithCodeService(
             invitations, units, links, recalculator, new FixedClock(Now));
 
@@ -166,7 +173,7 @@ public sealed class JoinUnitWithCodeServiceTests
         var invitations = new FakeUnitInvitationRepository();
         invitations.Items.Add(UnitInvitation.Create(unit.Id, "ABCD2345", Now));
         var links = new FakeOccupancyLinkRepository();
-        var recalculator = new UnitAvailabilityRecalculator(units, links);
+        var recalculator = new UnitAvailabilityRecalculator(units);
         var service = new JoinUnitWithCodeService(
             invitations, units, links, recalculator, new FixedClock(Now));
 
@@ -176,6 +183,7 @@ public sealed class JoinUnitWithCodeServiceTests
         Assert.Equal(JoinUnitWithCodeStatus.Linked, first.Status);
         Assert.Equal(JoinUnitWithCodeStatus.Linked, second.Status);
         Assert.Single(links.Items);
+        Assert.Equal(1, unit.OccupiedPlaces);
     }
 
     [Fact]
@@ -193,7 +201,7 @@ public sealed class JoinUnitWithCodeServiceTests
         var endedLink = OccupancyLink.CreateActive(tenant, unit.Id, Now);
         endedLink.End(OccupancyEndReason.AbandonoInquilino, Now.AddDays(1));
         links.Items.Add(endedLink);
-        var recalculator = new UnitAvailabilityRecalculator(units, links);
+        var recalculator = new UnitAvailabilityRecalculator(units);
         var service = new JoinUnitWithCodeService(
             invitations, units, links, recalculator, new FixedClock(Now.AddDays(2)));
 
@@ -202,6 +210,36 @@ public sealed class JoinUnitWithCodeServiceTests
         Assert.Equal(JoinUnitWithCodeStatus.Linked, result.Status);
         Assert.Equal(OccupancyStatus.Activo, result.Value!.Estado);
         Assert.Single(links.Items);
+        Assert.Equal(1, unit.OccupiedPlaces);
         Assert.Equal(UnitAvailability.Ocupado, unit.Availability);
+    }
+
+    [Fact]
+    public async Task JoinAsync_DosSolicitudesSimultaneasConUnLugar_SoloUnaDebeVincularse()
+    {
+        var owner = PublicationServiceTestData.Adult("owner8@uni.edu");
+        var property = PublicationServiceTestData.CreateProperty(owner.Id, Guid.NewGuid());
+        var unit = PublicationServiceTestData.UnitFor(property.Id, owner.Id, property.UniversityId);
+        var units = new FakeUnitRepository();
+        units.Items.Add(unit);
+        var invitations = new FakeUnitInvitationRepository();
+        invitations.Items.Add(UnitInvitation.Create(unit.Id, "ABCD2345", Now));
+        var links = new FakeOccupancyLinkRepository();
+        var recalculator = new UnitAvailabilityRecalculator(units);
+        var service = new JoinUnitWithCodeService(
+            invitations, units, links, recalculator, new FixedClock(Now));
+
+        // Task.Run fuerza hilos reales del pool para que la reserva atómica del
+        // repositorio (protegida con lock, igual que el CAS de un solo
+        // documento en MongoDB) sea la única garantía de que no se exceda el
+        // único lugar de la unidad.
+        var results = await Task.WhenAll(
+            Task.Run(() => service.JoinAsync(Guid.NewGuid(), "ABCD2345")),
+            Task.Run(() => service.JoinAsync(Guid.NewGuid(), "ABCD2345")));
+
+        Assert.Single(results, result => result.Status == JoinUnitWithCodeStatus.Linked);
+        Assert.Single(results, result => result.Status == JoinUnitWithCodeStatus.UnitFull);
+        Assert.Equal(1, unit.OccupiedPlaces);
+        Assert.Single(links.Items);
     }
 }

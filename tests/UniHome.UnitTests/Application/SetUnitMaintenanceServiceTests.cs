@@ -1,7 +1,6 @@
 using UniHome.Application.Common;
 using UniHome.Application.OccupancyLinks;
 using UniHome.Application.OccupancyLinks.SetMaintenance;
-using UniHome.Domain.OccupancyLinks;
 using UniHome.Domain.Units;
 using UniHome.UnitTests.TestSupport;
 
@@ -9,8 +8,6 @@ namespace UniHome.UnitTests.Application;
 
 public sealed class SetUnitMaintenanceServiceTests
 {
-    private static readonly DateTimeOffset Now = PublicationServiceTestData.Now;
-
     [Fact]
     public async Task SetAsync_Activa_MarcaMantenimientoSinImportarOcupacion()
     {
@@ -21,9 +18,8 @@ public sealed class SetUnitMaintenanceServiceTests
         var unit = PublicationServiceTestData.UnitFor(property.Id, owner.Id, property.UniversityId);
         var units = new FakeUnitRepository();
         units.Items.Add(unit);
-        var links = new FakeOccupancyLinkRepository();
         var service = new SetUnitMaintenanceService(
-            units, new UnitAvailabilityRecalculator(units, links), eligibility);
+            units, new UnitAvailabilityRecalculator(units), eligibility);
 
         var result = await service.SetAsync(owner.Id, unit.Id, enMantenimiento: true);
 
@@ -32,20 +28,19 @@ public sealed class SetUnitMaintenanceServiceTests
     }
 
     [Fact]
-    public async Task SetAsync_Desactiva_RecalculaDesdeVinculosActivos()
+    public async Task SetAsync_Desactiva_RecalculaDesdeLugaresOcupados()
     {
         var accounts = new InMemoryAccountRepository();
         var owner = PublicationServiceTestData.Adult();
         var eligibility = PublicationServiceTestData.Eligibility(accounts, owner);
         var property = PublicationServiceTestData.CreateProperty(owner.Id, Guid.NewGuid());
         var unit = PublicationServiceTestData.UnitFor(property.Id, owner.Id, property.UniversityId);
-        unit.SetAvailability(UnitAvailability.Mantenimiento);
         var units = new FakeUnitRepository();
         units.Items.Add(unit);
-        var links = new FakeOccupancyLinkRepository();
-        links.Items.Add(OccupancyLink.CreateActive(Guid.NewGuid(), unit.Id, Now));
+        Assert.NotNull(await units.TryReserveSlotAsync(unit.Id, unit.PropertyId));
+        unit.SetAvailability(UnitAvailability.Mantenimiento);
         var service = new SetUnitMaintenanceService(
-            units, new UnitAvailabilityRecalculator(units, links), eligibility);
+            units, new UnitAvailabilityRecalculator(units), eligibility);
 
         var result = await service.SetAsync(owner.Id, unit.Id, enMantenimiento: false);
 
@@ -54,7 +49,7 @@ public sealed class SetUnitMaintenanceServiceTests
     }
 
     [Fact]
-    public async Task SetAsync_Desactiva_SinVinculos_QuedaDisponible()
+    public async Task SetAsync_Desactiva_SinOcupacion_QuedaDisponible()
     {
         var accounts = new InMemoryAccountRepository();
         var owner = PublicationServiceTestData.Adult();
@@ -64,9 +59,8 @@ public sealed class SetUnitMaintenanceServiceTests
         unit.SetAvailability(UnitAvailability.Mantenimiento);
         var units = new FakeUnitRepository();
         units.Items.Add(unit);
-        var links = new FakeOccupancyLinkRepository();
         var service = new SetUnitMaintenanceService(
-            units, new UnitAvailabilityRecalculator(units, links), eligibility);
+            units, new UnitAvailabilityRecalculator(units), eligibility);
 
         var result = await service.SetAsync(owner.Id, unit.Id, enMantenimiento: false);
 
@@ -84,9 +78,8 @@ public sealed class SetUnitMaintenanceServiceTests
             property.Id, property.OwnerAccountId, property.UniversityId);
         var units = new FakeUnitRepository();
         units.Items.Add(unit);
-        var links = new FakeOccupancyLinkRepository();
         var service = new SetUnitMaintenanceService(
-            units, new UnitAvailabilityRecalculator(units, links), eligibility);
+            units, new UnitAvailabilityRecalculator(units), eligibility);
 
         var result = await service.SetAsync(caller.Id, unit.Id, enMantenimiento: true);
 
@@ -100,9 +93,8 @@ public sealed class SetUnitMaintenanceServiceTests
         var owner = PublicationServiceTestData.Adult();
         var eligibility = PublicationServiceTestData.Eligibility(accounts, owner);
         var units = new FakeUnitRepository();
-        var links = new FakeOccupancyLinkRepository();
         var service = new SetUnitMaintenanceService(
-            units, new UnitAvailabilityRecalculator(units, links), eligibility);
+            units, new UnitAvailabilityRecalculator(units), eligibility);
 
         var result = await service.SetAsync(owner.Id, Guid.NewGuid(), enMantenimiento: true);
 

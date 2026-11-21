@@ -255,6 +255,7 @@ cerrarse.
 | `PUT` | `/api/v1/unidades/{unitId}/mantenimiento` | Marca o desmarca el mantenimiento de una unidad propia (HU-093). |
 | `DELETE` | `/api/v1/unidades/{unitId}/inquilinos/{tenantAccountId}` | Da de baja a un inquilino de una unidad propia, con confirmación (HU-094). |
 | `DELETE` | `/api/v1/unidades/{unitId}/mi-vinculo` | El propio inquilino deja la unidad, con confirmación (HU-095). |
+| `GET` | `/api/v1/unidades/{unitId}/inquilinos` | Inquilinos activos de una unidad propia, con nombre y fecha de vínculo; nunca correo ni teléfono (HU-094). |
 
 Reglas principales:
 
@@ -270,28 +271,43 @@ Reglas principales:
   puede unirse a su propia unidad (`403`) y una unidad sin lugares responde
   `409`. Un inquilino ya vinculado recibe `200` de forma idempotente; uno que
   había dejado la unidad reactiva el mismo vínculo al volver a unirse.
+- **Cupo protegido con CAS de un solo documento:** `unidades.lugaresOcupados`
+  es un contador atómico mantenido exclusivamente por
+  `IUnitRepository.TryReserveSlotAsync`/`ReleaseSlotAsync`
+  (`findOneAndUpdate` con filtro `lugaresOcupados < lugares` e `$inc`). Si dos
+  solicitudes de unión llegan al mismo tiempo con un solo lugar libre, MongoDB
+  solo aplica el incremento a una; la otra recibe `409`. Los vínculos de
+  ocupación (`vinculos_ocupacion`) no se usan para contar cupo, solo para el
+  detalle por inquilino; contar documentos ahí sería una condición de carrera
+  entre el conteo y la inserción. Cubierto por una prueba de concurrencia
+  local (dos uniones simultáneas con un lugar) y una prueba real contra
+  MongoDB (opt-in).
 - `vinculos_ocupacion` guarda un único documento por par inquilino/unidad
   (`_id` determinista `inquilino:unidad`, igual que `favoritos`): salir y
   volver a unirse reactiva el documento existente en vez de crear uno nuevo.
 - La disponibilidad de la unidad (`estadoOcupacion` en `UnidadResponse` y
   `UnidadVistaPreviaResponse`) se recalcula tras unirse, dar de baja o
-  abandonar: `Ocupado` si los vínculos activos alcanzan los lugares de la
-  unidad, `Disponible` en otro caso. `Mantenimiento` es un estado manual del
-  propietario que no se sobreescribe automáticamente mientras esté activo;
-  al desactivarlo se recalcula desde los vínculos.
+  abandonar, a partir de `lugaresOcupados` frente a `lugares`: `Ocupado` si se
+  alcanzan, `Disponible` en otro caso. `Mantenimiento` es un estado manual del
+  propietario que no se sobreescribe automáticamente mientras esté activo; al
+  desactivarlo se recalcula desde `lugaresOcupados`.
 - HU-094 y HU-095 exigen `confirmacion: true` en el cuerpo, igual que
   `confirmacionPerdidaInformacion` en la eliminación de cuenta: la UI puede
   pedir confirmación, pero el backend también la exige. Sin ella responden
   `400`. HU-095 usa el claim `sub` de la sesión, nunca un id enviado por el
-  cliente.
+  cliente. Para dar de baja a un inquilino concreto (HU-094) el propietario
+  primero consulta `GET /inquilinos` para obtener su `accountId`; el backend
+  nunca expone ese id por otra vía (ni en el correo ni en el teléfono, que no
+  se devuelven).
 - `PerfilResponse.vinculadoAUnidad` (HU-008/HU-009) ahora es real: `true`
   cuando la cuenta tiene al menos un vínculo de ocupación activo como
   inquilino.
 - Migración `M09-001`: crea `vinculos_ocupacion` (con
   `ix_ocupacion_inquilino_estado` e `ix_ocupacion_unidad_estado`, sin índice
   único declarado) e `invitaciones_unidad` (con `ix_invitaciones_unidad` y
-  `ux_invitaciones_codigo` único). No modifica `M05-001`; `unidades` reutiliza
-  el campo flexible `estadoOcupacion` ya usado por M07.
+  `ux_invitaciones_codigo` único). No modifica `M05-001`; `unidades` añade el
+  campo flexible `lugaresOcupados` (además de `estadoOcupacion`, ya usado por
+  M07) sin requerir una migración nueva.
 
 ## Swagger/OpenAPI protegido
 
