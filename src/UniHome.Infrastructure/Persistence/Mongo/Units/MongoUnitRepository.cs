@@ -19,6 +19,20 @@ internal sealed class MongoUnitRepository : IUnitRepository
     private readonly MongoDbClientProvider _clientProvider;
     private readonly ILogger<MongoUnitRepository> _logger;
 
+    /// <summary>
+    /// Expresión de agregación que trata una unidad sin el campo
+    /// <c>lugaresOcupados</c> como 0 lugares ocupados. El campo es nuevo en
+    /// M09-001 y este servicio es su único escritor (vía
+    /// <see cref="TryReserveSlotAsync"/>), así que no puede haber hoy una
+    /// unidad con vínculos activos y el campo ausente; se deja explícito para
+    /// no depender del orden de comparación implícito de BSON.
+    /// </summary>
+    private static readonly BsonDocument OccupiedPlacesOrZero = new("$ifNull", new BsonArray
+    {
+        $"${MongoPublicationSchema.UnitOccupiedPlacesField}",
+        0
+    });
+
     public MongoUnitRepository(
         MongoDbClientProvider clientProvider,
         ILogger<MongoUnitRepository> logger)
@@ -422,14 +436,18 @@ internal sealed class MongoUnitRepository : IUnitRepository
                     propertyId.ToString("N", CultureInfo.InvariantCulture)),
                 new BsonDocument("$expr", new BsonDocument("$lt", new BsonArray
                 {
-                    $"${MongoPublicationSchema.UnitOccupiedPlacesField}",
+                    OccupiedPlacesOrZero,
                     $"${MongoPublicationSchema.UnitPlacesField}"
                 })));
             var update = Builders<UnitDocument>.Update.Inc(document => document.OccupiedPlaces, 1);
 
             // CAS de un solo documento: MongoDB evalúa el filtro y aplica el
             // $inc de forma atómica, así que dos solicitudes simultáneas con un
-            // solo lugar libre nunca incrementan ambas lugaresOcupados.
+            // solo lugar libre nunca incrementan ambas lugaresOcupados. El
+            // $ifNull trata explícitamente una unidad sin el campo (no puede
+            // existir hoy, porque este sprint es el único escritor de
+            // lugaresOcupados, pero se deja explícito en vez de depender del
+            // orden de comparación implícito de BSON) como lugaresOcupados = 0.
             var updated = await collection
                 .FindOneAndUpdateAsync(
                     filter,
@@ -463,9 +481,17 @@ internal sealed class MongoUnitRepository : IUnitRepository
                 Builders<UnitDocument>.Filter.Eq(
                     document => document.PropertyId,
                     propertyId.ToString("N", CultureInfo.InvariantCulture)),
-                Builders<UnitDocument>.Filter.Gt(document => document.OccupiedPlaces, 0));
+                new BsonDocument("$expr", new BsonDocument("$gt", new BsonArray
+                {
+                    OccupiedPlacesOrZero,
+                    0
+                })));
             var update = Builders<UnitDocument>.Update.Inc(document => document.OccupiedPlaces, -1);
 
+            // Misma convención que TryReserveSlotAsync: una unidad sin el
+            // campo lugaresOcupados (0 lugares ocupados) nunca cumple
+            // lugaresOcupados > 0, así que el filtro no la toca y el contador
+            // jamás queda negativo.
             var updated = await collection
                 .FindOneAndUpdateAsync(
                     filter,

@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Domain.Universities;
 using UniHome.Infrastructure.Persistence.Mongo;
@@ -165,6 +166,125 @@ public sealed class MongoOccupancyPersistenceTests
                 await database
                     .GetCollection<BsonDocument>(MongoOccupancySchema.InvitationsCollection)
                     .DeleteManyAsync(new BsonDocument("unitId", unitId.Value.ToString("N")));
+            }
+
+            if (propertyId is not null)
+            {
+                await DeleteAsync(
+                    database,
+                    MongoPublicationSchema.PropertiesCollection,
+                    [propertyId.Value]);
+            }
+
+            await DeleteAsync(database, MongoUniversitySchema.Collection, universityIds);
+            await DeleteAsync(database, MongoIdentitySchema.AccountsCollection, accountIds);
+        }
+    }
+
+    [MongoIntegrationFact]
+    public async Task TryReserveSlotAsync_UnidadSinCampoLugaresOcupados_LoTrataComoCero()
+    {
+        using var client = MongoIntegrationEnvironment.CreateClient();
+        var database = MongoIntegrationEnvironment.GetDatabase(client);
+        var migration = new MongoMigrationRunner(database, MongoOccupancyMigration.Definition);
+        Assert.Empty((await migration.PlanAsync()).Writes);
+
+        var owner = TestAccountFactory.Create("mongo.occupancy.legacy.owner@example.invalid");
+        var university = University.Restore(
+            Guid.NewGuid(),
+            $"Universidad M09 legado {Guid.NewGuid():N}",
+            true,
+            DateTimeOffset.UtcNow);
+        var accountIds = new[] { owner.Id };
+        var universityIds = new[] { university.Id };
+        Guid? propertyId = null;
+        Guid? unitId = null;
+
+        using var factory = new MongoBackedApiFactory();
+        using var http = factory.CreateClient();
+        var accounts = factory.Services.GetRequiredService<IAccountRepository>();
+        var universities = factory.Services.GetRequiredService<IUniversityRepository>();
+        var units = factory.Services.GetRequiredService<IUnitRepository>();
+        await DeleteAsync(database, MongoIdentitySchema.AccountsCollection, accountIds);
+        await DeleteAsync(database, MongoUniversitySchema.Collection, universityIds);
+        await accounts.AddAsync(owner);
+        await universities.AddAsync(university);
+
+        try
+        {
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                JwtTestTokenFactory.Create(owner.Id, Guid.NewGuid()));
+
+            using var propertyResponse = await http.PostAsJsonAsync(
+                "/api/v1/propiedades",
+                new
+                {
+                    nombre = "Casa M09 legado",
+                    direccion = "Av. M09 legado 200",
+                    colonia = "Centro",
+                    tipoPropiedad = "Casa",
+                    universidadId = university.Id,
+                    latitud = 19.4326,
+                    longitud = -99.1332
+                });
+            Assert.Equal(HttpStatusCode.Created, propertyResponse.StatusCode);
+            using var propertyJson = JsonDocument.Parse(
+                await propertyResponse.Content.ReadAsStringAsync());
+            propertyId = propertyJson.RootElement.GetProperty("id").GetGuid();
+
+            using var unitResponse = await http.PostAsJsonAsync(
+                $"/api/v1/propiedades/{propertyId}/unidades",
+                new
+                {
+                    tipoUnidad = "Habitacion",
+                    ocupacion = "Individual",
+                    lugares = 1,
+                    precioMensualPorLugarMxn = 3500,
+                    tamanoM2 = 12,
+                    paraQuien = "Mixto",
+                    bano = "Privado",
+                    mobiliario = "Amueblado",
+                    muebles = new[] { "Cama" }
+                });
+            Assert.Equal(HttpStatusCode.Created, unitResponse.StatusCode);
+            using var unitJson = JsonDocument.Parse(await unitResponse.Content.ReadAsStringAsync());
+            unitId = unitJson.RootElement.GetProperty("id").GetGuid();
+
+            // Simula una unidad creada antes de M09-001, cuando el campo
+            // lugaresOcupados todavía no existía.
+            var unitsCollection = database.GetCollection<BsonDocument>(
+                MongoPublicationSchema.UnitsCollection);
+            var unsetResult = await unitsCollection.UpdateOneAsync(
+                new BsonDocument("_id", unitId.Value.ToString("N")),
+                new BsonDocument("$unset", new BsonDocument("lugaresOcupados", 1)));
+            Assert.Equal(1, unsetResult.ModifiedCount);
+
+            var reserved = await units.TryReserveSlotAsync(unitId.Value, propertyId.Value);
+            Assert.Equal(1, reserved);
+
+            var afterReserve = await unitsCollection
+                .Find(new BsonDocument("_id", unitId.Value.ToString("N")))
+                .FirstOrDefaultAsync();
+            Assert.Equal(1, afterReserve["lugaresOcupados"].ToInt32());
+
+            var released = await units.ReleaseSlotAsync(unitId.Value, propertyId.Value);
+            Assert.Equal(0, released);
+
+            // Soltar de nuevo sobre una unidad ya en 0 nunca debe quedar negativo.
+            var releasedAgain = await units.ReleaseSlotAsync(unitId.Value, propertyId.Value);
+            Assert.Equal(0, releasedAgain);
+
+            var afterRelease = await unitsCollection
+                .Find(new BsonDocument("_id", unitId.Value.ToString("N")))
+                .FirstOrDefaultAsync();
+            Assert.Equal(0, afterRelease["lugaresOcupados"].ToInt32());
+        }
+        finally
+        {
+            if (unitId is not null)
+            {
+                await DeleteAsync(database, MongoPublicationSchema.UnitsCollection, [unitId.Value]);
             }
 
             if (propertyId is not null)

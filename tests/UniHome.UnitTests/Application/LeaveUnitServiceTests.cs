@@ -38,6 +38,23 @@ public sealed class LeaveUnitServiceTests
     }
 
     [Fact]
+    public async Task ReleaseSlotAsync_SinLugaresOcupados_NuncaQuedaNegativo()
+    {
+        var owner = PublicationServiceTestData.Adult("owner-release@uni.edu");
+        var property = PublicationServiceTestData.CreateProperty(owner.Id, Guid.NewGuid());
+        var unit = PublicationServiceTestData.UnitFor(property.Id, owner.Id, property.UniversityId);
+        var units = new FakeUnitRepository();
+        units.Items.Add(unit);
+
+        var first = await units.ReleaseSlotAsync(unit.Id, unit.PropertyId);
+        var second = await units.ReleaseSlotAsync(unit.Id, unit.PropertyId);
+
+        Assert.Equal(0, first);
+        Assert.Equal(0, second);
+        Assert.Equal(0, unit.OccupiedPlaces);
+    }
+
+    [Fact]
     public async Task LeaveAsync_SinConfirmacion_DebeDevolverValidationFailed()
     {
         var units = new FakeUnitRepository();

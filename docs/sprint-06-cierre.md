@@ -79,6 +79,21 @@ Cobertura de la protección:
   entorno local sin `mongod`, igual que el resto de pruebas reales del
   proyecto; debe ejecutarse en `mongo-db-test` con autorización.
 
+**Campo `lugaresOcupados` ausente (unidades existentes antes de M09-001):**
+el filtro de ambos métodos usa `$ifNull: [lugaresOcupados, 0]` de forma
+explícita, así que una unidad sin el campo se trata como 0 lugares ocupados
+(`TryReserveSlotAsync` la deja reservar; `ReleaseSlotAsync` nunca la toca,
+porque `0 > 0` es falso, de modo que el contador tampoco puede quedar
+negativo). En este sprint el único escritor de `lugaresOcupados` es este
+mismo repositorio (vía `TryReserveSlotAsync`), así que no puede existir hoy
+una unidad con vínculos activos reales y el campo ausente; no se necesitó un
+backfill en la migración porque no hay datos legados que reconciliar, solo
+el caso de un documento nunca tocado por esta funcionalidad. Cobertura:
+`MongoOccupancyPersistenceTests.TryReserveSlotAsync_UnidadSinCampoLugaresOcupados_LoTrataComoCero`
+(real y opt-in, borra el campo con `$unset` para simular una unidad previa a
+M09-001) y `LeaveUnitServiceTests.ReleaseSlotAsync_SinLugaresOcupados_NuncaQuedaNegativo`
+(repositorio en memoria, confirma que soltar dos veces se queda en 0).
+
 ## 4. HU-094: cómo se obtiene el `tenantAccountId`
 
 El propietario no podía dar de baja a un inquilino concreto sin conocer su
