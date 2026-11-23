@@ -8,6 +8,8 @@ public sealed class InMemoryOccupancyLinkRepository : IOccupancyLinkRepository
     private readonly object _gate = new();
     private readonly Dictionary<(Guid Tenant, Guid Unit), OccupancyLink> _links = [];
 
+    public bool FailActivation { get; set; }
+
     public Task<OccupancyLink?> FindAsync(
         Guid tenantAccountId,
         Guid unitId,
@@ -24,6 +26,11 @@ public sealed class InMemoryOccupancyLinkRepository : IOccupancyLinkRepository
         OccupancyLink link,
         CancellationToken cancellationToken = default)
     {
+        if (FailActivation)
+        {
+            return Task.FromResult(false);
+        }
+
         lock (_gate)
         {
             if (_links.TryGetValue((link.TenantAccountId, link.UnitId), out var existing))

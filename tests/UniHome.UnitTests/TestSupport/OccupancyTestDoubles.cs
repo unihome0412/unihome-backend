@@ -9,6 +9,16 @@ internal sealed class FakeOccupancyLinkRepository : IOccupancyLinkRepository
 
     public List<OccupancyLink> Items { get; } = [];
 
+    /// <summary>
+    /// Resultados preparados para simular carreras entre la lectura inicial y
+    /// la relectura posterior a una activación perdida.
+    /// </summary>
+    public Queue<OccupancyLink?> FindResults { get; } = new();
+
+    public bool FailActivation { get; set; }
+
+    public Exception? ActivationException { get; set; }
+
     public Task<OccupancyLink?> FindAsync(
         Guid tenantAccountId,
         Guid unitId,
@@ -16,6 +26,11 @@ internal sealed class FakeOccupancyLinkRepository : IOccupancyLinkRepository
     {
         lock (_gate)
         {
+            if (FindResults.Count > 0)
+            {
+                return Task.FromResult(FindResults.Dequeue());
+            }
+
             return Task.FromResult(Items.SingleOrDefault(
                 link => link.TenantAccountId == tenantAccountId && link.UnitId == unitId));
         }
@@ -25,6 +40,16 @@ internal sealed class FakeOccupancyLinkRepository : IOccupancyLinkRepository
         OccupancyLink link,
         CancellationToken cancellationToken = default)
     {
+        if (ActivationException is not null)
+        {
+            throw ActivationException;
+        }
+
+        if (FailActivation)
+        {
+            return Task.FromResult(false);
+        }
+
         lock (_gate)
         {
             var existing = Items.SingleOrDefault(item =>
