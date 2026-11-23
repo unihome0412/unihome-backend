@@ -6,8 +6,8 @@
 M12 y M13.
 
 Este documento se completa por pasos, igual que Sprints 1–5. Hoy cubre los
-pasos 1–3 (controles transversales, M05 Mis propiedades, M09 Ocupación); M08
-Chat (paso 4) y la matriz final de las 15 HU (paso 5) se añaden al cerrar.
+pasos 1–4 (controles transversales, M05 Mis propiedades, M09 Ocupación, M08
+Chat); la matriz final de las 15 HU (paso 5) se añade al cerrar.
 
 ## 1. Estado por paso
 
@@ -16,7 +16,7 @@ Chat (paso 4) y la matriz final de las 15 HU (paso 5) se añaden al cerrar.
 | 1 | HU-071, HU-086 (controles transversales ya cubiertos desde Sprint 3) | Confirmado, sin cambios de código |
 | 2 | HU-033, HU-036, HU-092 (M05: Mis propiedades) | Implementado |
 | 3 | HU-048, HU-049, HU-093, HU-094, HU-095 (M09: Ocupación) | Implementado |
-| 4 | HU-067, HU-068, HU-069, HU-070, HU-089 (M08: Chat) | Pendiente |
+| 4 | HU-067, HU-068, HU-069, HU-070, HU-086, HU-089 (M08: Chat) | Implementado |
 | 5 | Cierre, matriz de las 15 HU y PR a `main` | Pendiente |
 
 ## 2. Decisiones provisionales de M09 (sin aprobación de producto)
@@ -106,18 +106,65 @@ usan este endpoint para obtener el id antes de dar de baja, en vez de leer el
 claim `sub` del JWT (que era un atajo exclusivo del script de pruebas, no algo
 que Android pudiera hacer).
 
-## 5. Pendientes
+## 6. M08 Chat: diseño y cobertura
+
+- **Identificador determinista en vez de backfill o CAS nuevo.** El `_id` de
+  `conversaciones` se calcula con SHA-256 de `unidad|propietario|solicitante`
+  (`Conversation.ComputeId`): mismo par (unidad, propietario, solicitante) →
+  mismo `_id`, siempre. No hace falta inventar un índice único nuevo (fuera
+  de lo ya observado en Atlas, solo `ix_conversaciones_participantes`):
+  la unicidad nativa de `_id` en Mongo basta, igual que el `_id` compuesto
+  `inquilino:unidad` de `vinculos_ocupacion`. Dos solicitudes simultáneas
+  para iniciar la misma conversación no pueden duplicarla; el riesgo es
+  menor que el de HU-049 (cupo), así que no se justificaba una protección
+  CAS adicional, solo esta elección de identificador.
+- **Límite de frecuencia con fail-open deliberado.** 30 mensajes/minuto por
+  cuenta (umbral provisional), usando el mismo `IDistributedRateLimiter`
+  que `Auth:RateLimit`. Si el almacén distribuido no está disponible, el
+  mensaje se envía igual: a diferencia del cupo de unidades, este límite no
+  protege una invariante de negocio, así que se prefiere disponibilidad del
+  chat sobre bloquear todo por una caída de Redis.
+- **Paginación por cursor de fecha**, no por `skip/take`: `GET /mensajes`
+  devuelve lo más reciente primero y un `siguienteCursor` (fecha del mensaje
+  más antiguo de la página) para pedir el historial anterior, aprovechando
+  el índice compuesto `ix_mensajes_conversacion_fecha`.
+- **HU-070 por omisión, no por enmascarado.** Las vistas de chat
+  (`ConversationView`, `MessageView`, `ConversationSummaryView`) solo
+  proyectan `AccountId`/`FullName`; nunca referencian `Email` ni un campo de
+  teléfono (que no existe en `Account`). Mismo patrón que
+  `UnitTenantView` (HU-094).
+- **HU-089**: toda respuesta de envío/lectura de mensajes incluye
+  `"aviso": "Comunicación cifrada en tránsito."`, agregado en la capa Api
+  (no en Domain/Application) porque es texto de presentación, no una regla
+  de negocio.
+- Migración `M08-001`: crea `conversaciones` (`ix_conversaciones_participantes`
+  sobre el arreglo `participantes`) y `mensajes`
+  (`ix_mensajes_conversacion_fecha`, compuesto), respetando los índices ya
+  observados en Atlas. Como M09-001, no declara backfill porque la
+  migración versionada de este proyecto solo declara colecciones e índices,
+  nunca pasos de datos.
+- Cobertura: pruebas de dominio (`ChatDomainTests`), de los 4 servicios de
+  Application con repositorios en memoria (`StartConversationServiceTests`,
+  `SendMessageServiceTests` incluyendo límite de frecuencia y fail-open,
+  `ListConversationMessagesServiceTests`, `ListMyConversationsServiceTests`),
+  de los 4 endpoints HTTP (`ChatEndpointTests`, incluyendo HU-070 sin correo
+  ni teléfono en el cuerpo de la respuesta) y una prueba real y opt-in
+  contra MongoDB (`MongoChatPersistenceTests`), **BLOCKED** localmente sin
+  `mongod` igual que el resto de pruebas reales del proyecto. Catálogo
+  OpenAPI actualizado de 48 a 52 operaciones; fixture y driver real de ZAP
+  actualizados para cubrir los 4 endpoints nuevos.
+
+## 7. Pendientes
 
 1. **CI (paso 5):** `.github/workflows/ci.yml` no se modificó en este paso.
    Los jobs manuales `mongo-db-test`, `dast-zap` y `restler-fuzzing` siguen
    aplicando migraciones solo hasta `M07-001`; sus pasos de inicialización de
-   base efímera deben extenderse con `M09-001` (y, al cerrar el paso 4,
-   `M08-001`) antes de poder ejecutarlos. Mientras tanto, si alguno de esos
-   jobs se dispara tal como está, los endpoints de M09 fallarían contra una
-   base real por falta de la migración.
-2. M08 Chat (HU-067/068/069/070/089) no implementado todavía.
-3. Matriz final de las 15 HU, evidencia de pruebas consolidada y PR a `main`
+   base efímera deben extenderse con `M08-001` y `M09-001` antes de poder
+   ejecutarlos. Mientras tanto, si alguno de esos jobs se dispara tal como
+   está, los endpoints de M08/M09 fallarían contra una base real por falta
+   de las migraciones.
+2. Matriz final de las 15 HU, evidencia de pruebas consolidada y PR a `main`
    quedan para el cierre (paso 5).
-4. Las tres decisiones provisionales de la sección 2 no tienen aprobación de
+3. Las tres decisiones provisionales de la sección 2 no tienen aprobación de
    producto.
-5. `M09-001` no se aplicó ni promovió a Atlas.
+4. `M08-001` y `M09-001` no se aplicaron ni promovieron a Atlas.

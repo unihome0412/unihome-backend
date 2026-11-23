@@ -279,9 +279,12 @@ Reglas principales:
   solo aplica el incremento a una; la otra recibe `409`. Los vínculos de
   ocupación (`vinculos_ocupacion`) no se usan para contar cupo, solo para el
   detalle por inquilino; contar documentos ahí sería una condición de carrera
-  entre el conteo y la inserción. Cubierto por una prueba de concurrencia
-  local (dos uniones simultáneas con un lugar) y una prueba real contra
-  MongoDB (opt-in).
+  entre el conteo y la inserción. El filtro trata explícitamente una unidad
+  sin el campo `lugaresOcupados` (anterior a M09-001) como 0 lugares ocupados
+  (`$ifNull`), y `ReleaseSlotAsync` nunca decrementa por debajo de 0. Cubierto
+  por una prueba de concurrencia local (dos uniones simultáneas con un
+  lugar), una prueba de concurrencia HTTP y dos pruebas reales contra MongoDB
+  (opt-in): la del CAS y la del campo ausente.
 - `vinculos_ocupacion` guarda un único documento por par inquilino/unidad
   (`_id` determinista `inquilino:unidad`, igual que `favoritos`): salir y
   volver a unirse reactiva el documento existente en vez de crear uno nuevo.
@@ -308,6 +311,56 @@ Reglas principales:
   `ux_invitaciones_codigo` único). No modifica `M05-001`; `unidades` añade el
   campo flexible `lugaresOcupados` (además de `estadoOcupacion`, ya usado por
   M07) sin requerir una migración nueva.
+
+## Sprint 6 / M08: chat
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/v1/unidades/{unitId}/conversaciones` | Inicia o reutiliza la conversación con el propietario de una unidad aprobada (HU-067). |
+| `GET` | `/api/v1/conversaciones` | Conversaciones propias, con nombre del otro participante, último mensaje, hora y contexto de la unidad (HU-069). |
+| `GET` | `/api/v1/conversaciones/{conversationId}/mensajes` | Historial paginado de una conversación, más reciente primero (HU-068). |
+| `POST` | `/api/v1/conversaciones/{conversationId}/mensajes` | Envía un mensaje; solo participantes, con límite de longitud y de frecuencia (HU-068/HU-089). |
+
+Reglas principales:
+
+- **Identificador determinista sin backfill de datos:** el `_id` de
+  `conversaciones` se deriva con SHA-256 de `unidad|propietario|solicitante`
+  (`Conversation.ComputeId`), el mismo espíritu que el `_id` compuesto
+  `inquilino:unidad` de `vinculos_ocupacion`. Dos solicitudes simultáneas para
+  iniciar la misma conversación nunca duplican el documento: el upsert por
+  `_id` en Mongo es atómico sobre un único documento. No se puede iniciar una
+  conversación con uno mismo (HU-067); si ya existe, se reutiliza sin
+  reiniciar su resumen de último mensaje.
+- Solo se puede contactar una unidad **aprobada** (`PublicationState.Aprobada`,
+  igual criterio que la ficha pública EP-M04-04); una unidad no aprobada o
+  inexistente responde `404`, sin distinguir entre ambos casos.
+- **Solo participantes leen y envían** (HU-068): cualquier otra cuenta recibe
+  `403`. El cuerpo exige `texto` no vacío y de hasta 1000 caracteres
+  (`Message.MaxBodyLength`); fuera de ese rango responde `400`.
+- **Límite de frecuencia por cuenta:** 30 mensajes por minuto (umbral
+  provisional, igual estatus que los de `Auth:RateLimit`), con el mismo
+  `IDistributedRateLimiter` compartido entre réplicas. Al excederse responde
+  `429`. Si el almacén distribuido no está disponible, el envío se permite
+  (fail-open): a diferencia del cupo de HU-049, este límite no protege una
+  invariante de negocio crítica.
+- **Paginación por cursor:** `GET /mensajes` devuelve los mensajes más
+  recientes primero y, si la página viene llena, un `siguienteCursor` (fecha
+  del mensaje más antiguo de la página) para pedir el historial anterior con
+  `?antes=`. Tamaño de página por defecto 20, máximo 50.
+- **Nunca correo ni teléfono (HU-070):** las respuestas de chat solo
+  proyectan `AccountId` y `FullName` de la cuenta, igual que
+  `GET /unidades/{unitId}/inquilinos` en M09; no hay otro campo de contacto
+  que exponer.
+- **Aviso de cifrado en tránsito (HU-089):** toda respuesta de envío o
+  lectura de mensajes incluye `"aviso": "Comunicación cifrada en tránsito."`.
+- **Sesión obligatoria en todo el módulo (HU-086):** los cuatro endpoints
+  exigen `[Authorize]`; sin sesión responden `401`.
+- Migración `M08-001`: crea `conversaciones` (con `ix_conversaciones_participantes`,
+  sobre el arreglo `participantes`) y `mensajes` (con
+  `ix_mensajes_conversacion_fecha`, compuesto `conversacionId` ascendente y
+  `fecha` descendente), respetando los índices ya observados en Atlas. No
+  declara un índice único adicional: la unicidad de la conversación la da el
+  `_id` determinista, no un índice declarado.
 
 ## Swagger/OpenAPI protegido
 

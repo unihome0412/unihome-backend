@@ -1,3 +1,4 @@
+using UniHome.Infrastructure.Persistence.Mongo.Chat;
 using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
@@ -23,6 +24,7 @@ public sealed class MongoMigrationRegistry
             MongoPublicationMigration.Definition,
             MongoVerificationMigration.Definition,
             MongoExplorationMigration.Definition,
+            MongoChatMigration.Definition,
             MongoOccupancyMigration.Definition
         ]);
 

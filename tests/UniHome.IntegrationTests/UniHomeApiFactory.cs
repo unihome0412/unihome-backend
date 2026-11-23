@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using UniHome.Application.Chat.Abstractions;
 using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.OccupancyLinks.Abstractions;
@@ -68,6 +69,10 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     public InMemoryOccupancyLinkRepository OccupancyLinks { get; } = new();
 
     public InMemoryUnitInvitationRepository UnitInvitations { get; } = new();
+
+    public InMemoryConversationRepository Conversations { get; } = new();
+
+    public InMemoryMessageRepository Messages { get; } = new();
 
     public InMemoryTermsAcceptanceRepository Terms { get; } = new();
 
@@ -192,6 +197,12 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
                 services.RemoveAll<IUnitInvitationRepository>();
                 services.AddSingleton<IUnitInvitationRepository>(UnitInvitations);
+
+                services.RemoveAll<IConversationRepository>();
+                services.AddSingleton<IConversationRepository>(Conversations);
+
+                services.RemoveAll<IMessageRepository>();
+                services.AddSingleton<IMessageRepository>(Messages);
             }
 
             services.RemoveAll<ITermsAcceptanceRepository>();

@@ -1479,6 +1479,24 @@ def run_scan(args: argparse.Namespace) -> int:
         body={"confirmacion": True},
         token=access_b, expected={204}, auth=True, note="abandono B")
 
+    # M08: conversación entre B (quien contacta desde la ficha) y A (propietario).
+    _, conversation_payload, _ = http.request(
+        "POST", f"/api/v1/unidades/{unit_id}/conversaciones",
+        token=access_b, expected={200}, auth=True, note="iniciar conversación B")
+    conversation_id = str(_json_body(conversation_payload).get("conversacionId") or "")
+    if not conversation_id:
+        raise DastError("La conversación iniciada por B no devolvió conversacionId.")
+    http.request(
+        "POST", f"/api/v1/conversaciones/{conversation_id}/mensajes",
+        body={"texto": "Hola, ¿sigue disponible?"},
+        token=access_b, expected={201}, auth=True, note="enviar mensaje B")
+    http.request(
+        "GET", f"/api/v1/conversaciones/{conversation_id}/mensajes",
+        token=access_a, expected={200}, auth=True, note="listar mensajes A")
+    http.request(
+        "GET", "/api/v1/conversaciones",
+        token=access_a, expected={200}, auth=True, note="listar conversaciones A")
+
     # M01: recuperación de contraseña con token real capturado por SMTP.
     http.request(
         "POST", "/api/v1/auth/recuperacion/solicitud",

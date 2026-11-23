@@ -20,7 +20,8 @@ public abstract class AuthenticatedControllerBase : ControllerBase
         string notFoundDetail,
         string forbiddenDetail,
         string conflictDetail,
-        string unprocessableDetail = "La solicitud no cumple una regla de negocio.") =>
+        string unprocessableDetail = "La solicitud no cumple una regla de negocio.",
+        string rateLimitedDetail = "Demasiadas solicitudes. Intenta de nuevo más tarde.") =>
         result.Status switch
         {
             OperationStatus.Success => success(result.Value!),
@@ -37,6 +38,9 @@ public abstract class AuthenticatedControllerBase : ControllerBase
             OperationStatus.Unprocessable => CreateProblemResult(
                 StatusCodes.Status422UnprocessableEntity,
                 unprocessableDetail),
+            OperationStatus.RateLimited => CreateProblemResult(
+                StatusCodes.Status429TooManyRequests,
+                rateLimitedDetail),
             _ => CreateProblemResult(
                 StatusCodes.Status500InternalServerError,
                 "No se pudo completar la operación.")
