@@ -215,6 +215,78 @@ public sealed class JoinUnitWithCodeServiceTests
     }
 
     [Fact]
+    public async Task JoinAsync_UnidadLlenaConVinculoYaActivo_DevuelveLinkedSinReservar()
+    {
+        var context = CreateRaceService();
+        context.Unit.SetOccupiedPlaces(1);
+        context.Links.FindResults.Enqueue(null);
+        context.Links.FindResults.Enqueue(
+            OccupancyLink.CreateActive(context.Tenant, context.Unit.Id, Now));
+
+        var result = await context.Service.JoinAsync(context.Tenant, "ABCD2345");
+
+        Assert.Equal(JoinUnitWithCodeStatus.Linked, result.Status);
+        Assert.Equal(1, context.Unit.OccupiedPlaces);
+    }
+
+    [Fact]
+    public async Task JoinAsync_UnidadLlenaConVinculoFinalizado_DevuelveUnitFull()
+    {
+        var context = CreateRaceService();
+        context.Unit.SetOccupiedPlaces(1);
+        context.Links.FindResults.Enqueue(null);
+        var ended = OccupancyLink.CreateActive(context.Tenant, context.Unit.Id, Now);
+        ended.End(OccupancyEndReason.AbandonoInquilino, Now.AddDays(1));
+        context.Links.FindResults.Enqueue(ended);
+
+        var result = await context.Service.JoinAsync(context.Tenant, "ABCD2345");
+
+        Assert.Equal(JoinUnitWithCodeStatus.UnitFull, result.Status);
+        Assert.Equal(1, context.Unit.OccupiedPlaces);
+    }
+
+    [Fact]
+    public async Task JoinAsync_ActivacionPierdeCarreraConVinculoActivo_DevuelveLinkedYCompensaReserva()
+    {
+        var context = CreateRaceService();
+        context.Links.FindResults.Enqueue(null);
+        context.Links.FindResults.Enqueue(
+            OccupancyLink.CreateActive(context.Tenant, context.Unit.Id, Now));
+
+        var result = await context.Service.JoinAsync(context.Tenant, "ABCD2345");
+
+        Assert.Equal(JoinUnitWithCodeStatus.Linked, result.Status);
+        Assert.Equal(OccupancyStatus.Activo, result.Value!.Estado);
+        Assert.Equal(0, context.Unit.OccupiedPlaces);
+    }
+
+    [Fact]
+    public async Task JoinAsync_ActivacionPierdeCarreraSinVinculoActivo_DevuelveConcurrentUpdate()
+    {
+        var context = CreateRaceService();
+        context.Links.FindResults.Enqueue(null);
+        context.Links.FindResults.Enqueue(null);
+
+        var result = await context.Service.JoinAsync(context.Tenant, "ABCD2345");
+
+        Assert.Equal(JoinUnitWithCodeStatus.ConcurrentUpdate, result.Status);
+        Assert.Equal(0, context.Unit.OccupiedPlaces);
+    }
+
+    [Fact]
+    public async Task JoinAsync_ActivacionFalla_DebevolverExcepcionYCompensarReserva()
+    {
+        var context = CreateRaceService();
+        context.Links.FindResults.Enqueue(null);
+        context.Links.ActivationException = new InvalidOperationException("fallo simulado");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => context.Service.JoinAsync(context.Tenant, "ABCD2345"));
+
+        Assert.Equal(0, context.Unit.OccupiedPlaces);
+    }
+
+    [Fact]
     public async Task JoinAsync_DosSolicitudesSimultaneasConUnLugar_SoloUnaDebeVincularse()
     {
         var owner = PublicationServiceTestData.Adult("owner8@uni.edu");
@@ -242,4 +314,31 @@ public sealed class JoinUnitWithCodeServiceTests
         Assert.Equal(1, unit.OccupiedPlaces);
         Assert.Single(links.Items);
     }
+
+    private static RaceContext CreateRaceService()
+    {
+        var owner = PublicationServiceTestData.Adult("owner-race@uni.edu");
+        var tenant = Guid.NewGuid();
+        var property = PublicationServiceTestData.CreateProperty(owner.Id, Guid.NewGuid());
+        var unit = PublicationServiceTestData.UnitFor(property.Id, owner.Id, property.UniversityId);
+        var units = new FakeUnitRepository();
+        units.Items.Add(unit);
+        var invitations = new FakeUnitInvitationRepository();
+        invitations.Items.Add(UnitInvitation.Create(unit.Id, "ABCD2345", Now));
+        var links = new FakeOccupancyLinkRepository { FailActivation = true };
+        var service = new JoinUnitWithCodeService(
+            invitations,
+            units,
+            links,
+            new UnitAvailabilityRecalculator(units),
+            new FixedClock(Now));
+
+        return new RaceContext(service, links, unit, tenant);
+    }
+
+    private sealed record RaceContext(
+        JoinUnitWithCodeService Service,
+        FakeOccupancyLinkRepository Links,
+        Unit Unit,
+        Guid Tenant);
 }

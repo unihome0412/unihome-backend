@@ -742,16 +742,17 @@ ejecuta restore/build/formato/pruebas, revisión de dependencias vulnerables y G
 sobre el historial completo; `.github/workflows/codeql.yml` ejecuta CodeQL para C#. No
 despliega ni usa credenciales.
 
-El job manual `mongo-db-test` (habilitado con la variable de repositorio
-`UNIHOME_ENABLE_MONGO_CI=true`) levanta MongoDB Community 8.0.34 dentro del runner
-de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
-local ni secretos: la URI se limita a `127.0.0.1`, la base es
-`unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`,
-`M06-001`, `M07-001`, `M08-001` y `M09-001` a esa base temporal y las pruebas
-reales de identidad, recuperación de contraseña, universidades, publicaciones,
-verificación documental, exploración/favoritos, bloqueo distribuido, ocupación
-(cupo con CAS y campo `lugaresOcupados` ausente) y chat
-se ejecutan con TRX. El job falla
+El job `mongo-db-test` (habilitado con la variable de repositorio
+`UNIHOME_ENABLE_MONGO_CI=true`) se ejecuta en PR, push a `main` y manualmente;
+levanta MongoDB Community 8.0.34 dentro del runner de GitHub Actions, en un
+contenedor efímero fijado por digest. No usa Atlas, Docker local ni secretos: la
+URI se limita a `127.0.0.1`, la base es `unihome_ci_verificacion`, se aplican
+`M01-001`, `M01-002`, `M03-001`, `M05-001`, `M06-001`, `M07-001`, `M08-001` y
+`M09-001` a esa base temporal y las pruebas reales de identidad, recuperación de
+contraseña, universidades, publicaciones, verificación documental,
+exploración/favoritos, bloqueo distribuido, ocupación (cupo con CAS, campo
+`lugaresOcupados` ausente, salida/baja concurrente y reactivación) y chat
+(inicio, envío, lectura, paginación y autorización) se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
 La ejecución manual de verificación

@@ -15,7 +15,7 @@ Referencia de diseño: grafo de trabajos GitHub Actions compartido el 6 de novie
 | PR Quality Gate | Analiza realmente los resultados; **skipped no es passed** | Todos los runs, aunque fallen anteriores |
 | Hardening Report | Tabla Markdown y artefacto con resultados reales | Todos los runs salvo cancelación |
 
-El análisis **CodeQL existente** sigue ejecutándose de manera independiente en `.github/workflows/codeql.yml`; para proteger `main`, configurar **ambos** estados requeridos (CodeQL y el gate DevSecOps). Las pruebas de integración que necesitan MongoDB están protegidas con un opt-in en el proyecto y se omiten por defecto en las pruebas locales: el pipeline registra dicho `skipped` de forma honesta. El job manual de MongoDB CI no acepta una omisión como aprobación.
+El análisis **CodeQL existente** sigue ejecutándose de manera independiente en `.github/workflows/codeql.yml`; para proteger `main`, configurar **ambos** estados requeridos (CodeQL y el gate DevSecOps). Las pruebas de integración que necesitan MongoDB están protegidas con un opt-in en el proyecto y se omiten por defecto en las pruebas locales: el pipeline registra dicho `skipped` de forma honesta. El job de MongoDB CI no acepta una omisión como aprobación y, desde el hotfix de Sprint 6, es obligatorio en PR y push a main cuando hay cambios de código.
 
 ## Trabajos visibles pero desactivados por defecto
 
@@ -24,7 +24,7 @@ Estos trabajos aparecen como `skipped` en el grafo hasta configurar las variable
 | Job | Variable de repositorio | Otro requisito | Evento permitido |
 |---|---|---|---|
 | SonarCloud SAST | `UNIHOME_ENABLE_SONAR=true` | Secret `SONAR_TOKEN` y vars `SONAR_PROJECT_KEY`, `SONAR_ORGANIZATION`; proyecto Sonar | PR interno a main, push main o manual desde main |
-| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001 en el propio job; sin Atlas, secretos ni credenciales | Solo manual |
+| Database Test (MongoDB efímero) | `UNIHOME_ENABLE_MONGO_CI=true` | MongoDB Community 8.0.34 fijado por digest como servicio temporal del runner; base **exclusiva `unihome_ci_verificacion`**, inicializada con M01-001, M01-002, M03-001, M05-001, M06-001, M07-001, M08-001 y M09-001 en el propio job; sin Atlas, secretos ni credenciales | PR, push main y manual |
 | Mutation Test (Stryker.NET) | `UNIHOME_ENABLE_MUTATION=true` | Stryker.NET 5.0.0 local desde `dotnet-tools.json`; configuración en `tests/UniHome.UnitTests/stryker-config.json`; reportes HTML/JSON | Solo manual |
 | Cloudinary Integration | `UNIHOME_ENABLE_CLOUDINARY_INTEGRATION=true` | Environment protegido `cloudinary-integration` y secretos dedicados `CLOUDINARY_INTEGRATION_CLOUD_NAME`, `CLOUDINARY_INTEGRATION_API_KEY`, `CLOUDINARY_INTEGRATION_API_SECRET`; el test real sube un PNG sintético y limpia el asset en `finally` | Solo manual y con aprobación |
 | Docker Build + Dockle + Container Smoke | `UNIHOME_ENABLE_DOCKER=true` | Aprobar uso de Docker en CI, cuotas de acciones/artefactos; **no** publica imagen. El smoke arranca la imagen real con MongoDB efímero y configuración de Production, exige `/health/live` y `/health/ready` en 200, HSTS con `X-Forwarded-Proto: https`, `/openapi/v1.json` no disponible con Swagger desactivado, proceso vivo y ausencia de exit 139/errores fatales | PR, push main, manual |
@@ -39,7 +39,7 @@ comprobación. El certificado es efímero, se monta como CA de confianza en el
 contenedor y el proceso se detiene en el paso de limpieza. No se usan secretos
 reales ni red externa.
 
-**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. Las migraciones `M01-001`, `M01-002`, `M03-001`, `M05-001`, `M06-001` y `M07-001` se aplican únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
+**Ninguno de estos trabajos usa `unihome_desarrollo`, ejecuta deploy ni escribe en Azure.** El trabajo MongoDB no se conecta a Atlas: usa un contenedor efímero del runner, sin credenciales y con la URI restringida a loopback. Las migraciones `M01-001`, `M01-002`, `M03-001`, `M05-001`, `M06-001`, `M07-001`, `M08-001` y `M09-001` se aplican únicamente a `unihome_ci_verificacion`; no se ejecuta `promote` ni se escribe en bases compartidas.
 
 ### DAST ZAP baseline pasivo
 
@@ -50,7 +50,7 @@ El job `dast-zap` ya no se limita a `/health/live`. Su implementación actual:
 - Levanta una API efímera en `http://127.0.0.1:5088`, un MongoDB Community
   8.0.34 fijado por digest como servicio del runner y un SMTP de captura local
   con STARTTLS en `127.0.0.1:587`. La base `unihome_dast` se inicializa con
-  M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001 y se destruye al final. No usa Atlas, Brevo, Azure,
+  M01-001, M01-002, M03-001, M05-001, M06-001, M07-001, M08-001 y M09-001 y se destruye al final. No usa Atlas, Brevo, Azure,
   puertos públicos ni credenciales reales. La CA efímera del SMTP no publica CRL/OCSP, por lo
   que solo en este job se configura `Smtp__CheckCertificateRevocation=false`;
   el valor predeterminado del código sigue siendo `true` y STARTTLS sigue
@@ -125,7 +125,7 @@ El job `restler-fuzzing` usa Microsoft RESTler **v9.3.1**, commit
 en el runner. No se usa una imagen móvil ni un servicio remoto.
 
 - Reutiliza la API ASP.NET Core en `127.0.0.1:5088`, MongoDB 8.0.34 efímero con
-  M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001, y el SMTP de captura local con STARTTLS en
+  M01-001, M01-002, M03-001, M05-001, M06-001, M07-001, M08-001 y M09-001, y el SMTP de captura local con STARTTLS en
   `127.0.0.1:587`.
 - Prepara dos cuentas sintéticas: una confirmada para login/refresh y otra
   pendiente de confirmar para ejercer el endpoint con un código real capturado
@@ -294,7 +294,9 @@ dotnet stryker --config-file stryker-config.json
 
 ## MongoDB CI efímero
 
-- Job manual `mongo-db-test`, condicionado por `UNIHOME_ENABLE_MONGO_CI=true`.
+- Job `mongo-db-test`, condicionado por `UNIHOME_ENABLE_MONGO_CI=true` y
+  obligatorio en PR, push a main y ejecución manual cuando hay cambios de
+  código.
 - Servicio de GitHub Actions con MongoDB Community **8.0.34**, fijado por digest
   `sha256:b9924c330a8bbc5800fe9c69f04a84e221eca7b28fd049a0354147d9908fa142`.
   No se usa `latest`, Atlas ni Docker local.
@@ -323,11 +325,12 @@ dotnet stryker --config-file stryker-config.json
   [ejecución manual 43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
   commit de código `f51ac10`, job `mongo-db-test` en verde, TRX con 4 pruebas
   ejecutadas y aprobadas, 0 fallidas, 0 omitidas y limpieza confirmada.
-- **Sprint 4/5:** el job aplica también M01-002, M06-001 y M07-001 y exige las
-  pruebas M06 de documentos cifrados y decisión administrativa. La siguiente
-  ejecución real debe mostrar **8/8 pruebas** (identidad, promoción,
-  recuperación, universidades, publicaciones, verificación documental, decisión
-  y exploración/favoritos); queda **PENDIENTE_CI**.
+- **Sprint 6:** el job aplica también M08-001 y M09-001 y exige las pruebas
+  reales de chat, ocupación, salida/baja concurrente y reactivación. La
+  ejecución real debe mostrar **15/15 pruebas** (identidad, promoción,
+  recuperación, universidades, publicaciones, verificación documental, decisión,
+  exploración/favoritos, chat M08, ocupación M09 y concurrencia M09); queda
+  **PENDIENTE_CI** hasta la ejecución manual autorizada.
 
 ## CD Azure preparado (sin despliegue)
 

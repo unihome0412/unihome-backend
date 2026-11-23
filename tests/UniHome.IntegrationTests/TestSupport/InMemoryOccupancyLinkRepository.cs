@@ -8,6 +8,8 @@ public sealed class InMemoryOccupancyLinkRepository : IOccupancyLinkRepository
     private readonly object _gate = new();
     private readonly Dictionary<(Guid Tenant, Guid Unit), OccupancyLink> _links = [];
 
+    public bool FailActivation { get; set; }
+
     public Task<OccupancyLink?> FindAsync(
         Guid tenantAccountId,
         Guid unitId,
@@ -20,14 +22,51 @@ public sealed class InMemoryOccupancyLinkRepository : IOccupancyLinkRepository
         }
     }
 
-    public Task SaveAsync(OccupancyLink link, CancellationToken cancellationToken = default)
+    public Task<bool> TryActivateAsync(
+        OccupancyLink link,
+        CancellationToken cancellationToken = default)
+    {
+        if (FailActivation)
+        {
+            return Task.FromResult(false);
+        }
+
+        lock (_gate)
+        {
+            if (_links.TryGetValue((link.TenantAccountId, link.UnitId), out var existing))
+            {
+                if (existing.Status == OccupancyStatus.Activo)
+                {
+                    return Task.FromResult(false);
+                }
+
+                existing.Reactivate(link.JoinedAt);
+                return Task.FromResult(true);
+            }
+
+            _links[(link.TenantAccountId, link.UnitId)] = link;
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> TryEndActiveAsync(
+        Guid tenantAccountId,
+        Guid unitId,
+        OccupancyEndReason reason,
+        DateTimeOffset endedAt,
+        CancellationToken cancellationToken = default)
     {
         lock (_gate)
         {
-            _links[(link.TenantAccountId, link.UnitId)] = link;
-        }
+            if (!_links.TryGetValue((tenantAccountId, unitId), out var link) ||
+                link.Status != OccupancyStatus.Activo)
+            {
+                return Task.FromResult(false);
+            }
 
-        return Task.CompletedTask;
+            link.End(reason, endedAt);
+            return Task.FromResult(true);
+        }
     }
 
     public Task<bool> HasActiveLinkAsync(

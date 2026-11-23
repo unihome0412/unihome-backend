@@ -44,7 +44,7 @@ class MongoSummaryTests(unittest.TestCase):
             result = main(argv)
         return result, stdout.getvalue(), stderr.getvalue()
 
-    def test_aprueba_las_ocho_pruebas_reales(self):
+    def test_aprueba_todas_las_pruebas_reales(self):
         with tempfile.TemporaryDirectory() as directory:
             trx = Path(directory) / "mongo-ci.trx"
             trx.write_text(
@@ -55,8 +55,8 @@ class MongoSummaryTests(unittest.TestCase):
             result, output, _ = self.run_main(trx)
 
             self.assertEqual(0, result)
-            self.assertIn("| Pruebas ejecutadas | 8 |", output)
-            self.assertIn("| Pruebas aprobadas | 8 |", output)
+            self.assertIn(f"| Pruebas ejecutadas | {len(EXPECTED_TESTS)} |", output)
+            self.assertIn(f"| Pruebas aprobadas | {len(EXPECTED_TESTS)} |", output)
             self.assertIn("| Resultado final | **PASS** |", output)
             self.assertIn("| Tiempo de ejecución | 3.25 s |", output)
 

@@ -65,17 +65,21 @@ public sealed class RemoveTenantService
             return OperationResult<Guid>.Forbidden();
         }
 
-        var link = await _links
-            .FindAsync(tenantAccountId, unitId, cancellationToken)
+        // Misma transición atómica que la salida del inquilino: solo una de las
+        // solicitudes concurrentes puede finalizar el vínculo y liberar cupo.
+        var ended = await _links
+            .TryEndActiveAsync(
+                tenantAccountId,
+                unitId,
+                OccupancyEndReason.BajaPorPropietario,
+                _clock.UtcNow,
+                cancellationToken)
             .ConfigureAwait(false);
 
-        if (link is null || link.Status != OccupancyStatus.Activo)
+        if (!ended)
         {
             return OperationResult<Guid>.NotFound();
         }
-
-        link.End(OccupancyEndReason.BajaPorPropietario, _clock.UtcNow);
-        await _links.SaveAsync(link, cancellationToken).ConfigureAwait(false);
 
         var remaining = await _units
             .ReleaseSlotAsync(unit.Id, unit.PropertyId, cancellationToken)

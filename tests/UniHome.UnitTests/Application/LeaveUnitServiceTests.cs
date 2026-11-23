@@ -38,6 +38,29 @@ public sealed class LeaveUnitServiceTests
     }
 
     [Fact]
+    public async Task LeaveAsync_DosVeces_NoLiberaElMismoLugarDosVeces()
+    {
+        var owner = PublicationServiceTestData.Adult("owner-leave-twice@uni.edu");
+        var tenant = Guid.NewGuid();
+        var property = PublicationServiceTestData.CreateProperty(owner.Id, Guid.NewGuid());
+        var unit = PublicationServiceTestData.UnitFor(property.Id, owner.Id, property.UniversityId);
+        var units = new FakeUnitRepository();
+        units.Items.Add(unit);
+        Assert.NotNull(await units.TryReserveSlotAsync(unit.Id, unit.PropertyId));
+        var links = new FakeOccupancyLinkRepository();
+        links.Items.Add(OccupancyLink.CreateActive(tenant, unit.Id, Now));
+        var service = new LeaveUnitService(
+            units, links, new UnitAvailabilityRecalculator(units), new FixedClock(Now));
+
+        var first = await service.LeaveAsync(tenant, unit.Id, confirmacion: true);
+        var second = await service.LeaveAsync(tenant, unit.Id, confirmacion: true);
+
+        Assert.Equal(OperationStatus.Success, first.Status);
+        Assert.Equal(OperationStatus.NotFound, second.Status);
+        Assert.Equal(0, unit.OccupiedPlaces);
+    }
+
+    [Fact]
     public async Task ReleaseSlotAsync_SinLugaresOcupados_NuncaQuedaNegativo()
     {
         var owner = PublicationServiceTestData.Adult("owner-release@uni.edu");

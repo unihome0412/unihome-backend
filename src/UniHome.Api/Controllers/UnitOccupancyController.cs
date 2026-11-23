@@ -158,6 +158,9 @@ public sealed class UnitOccupancyController : AuthenticatedControllerBase
             JoinUnitWithCodeStatus.UnitFull => CreateProblemResult(
                 StatusCodes.Status409Conflict,
                 "La unidad ya no tiene lugares disponibles."),
+            JoinUnitWithCodeStatus.ConcurrentUpdate => CreateProblemResult(
+                StatusCodes.Status409Conflict,
+                "El vínculo fue modificado por otra operación. Intente de nuevo."),
             _ => CreateProblemResult(
                 StatusCodes.Status500InternalServerError,
                 "No se pudo completar la operación.")

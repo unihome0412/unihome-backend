@@ -1,6 +1,7 @@
 using MongoDB.Bson;
 using MongoDB.Driver;
 using UniHome.Application.Identity.Exceptions;
+using UniHome.Infrastructure.Persistence.Mongo.Chat;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
 using UniHome.Infrastructure.Persistence.Mongo.Exploration;
 using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
@@ -26,6 +27,7 @@ internal static class MongoIdentitySchemaGuard
         .. MongoPublicationIndexes.Definitions,
         MongoExplorationIndexes.Definition,
         .. MongoVerificationIndexes.Definitions,
+        .. MongoChatIndexes.Definitions,
         .. MongoOccupancyIndexes.Definitions
     ];
 

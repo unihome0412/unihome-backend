@@ -12,7 +12,7 @@ MUST_RUN_FOR_CODE = ("semgrep-sast", "build-test", "contract-test")
 MAIN_REF_ONLY = {"sonarcloud-sast"}
 OPTIONAL = {
     "sonarcloud-sast": ("UNIHOME_ENABLE_SONAR", {"pull_request", "push", "workflow_dispatch"}),
-    "mongo-db-test": ("UNIHOME_ENABLE_MONGO_CI", {"workflow_dispatch"}),
+    "mongo-db-test": ("UNIHOME_ENABLE_MONGO_CI", {"pull_request", "push", "workflow_dispatch"}),
     "mutation-test": ("UNIHOME_ENABLE_MUTATION", {"workflow_dispatch"}),
     "pact-contract": ("UNIHOME_ENABLE_PACT", {"workflow_dispatch"}),
     "cloudinary-integration": ("UNIHOME_ENABLE_CLOUDINARY_INTEGRATION", {"workflow_dispatch"}),

@@ -461,9 +461,11 @@ jobs:
           dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
   mongo-db-test:
-    name: Database Test (MongoDB efímero, manual)
+    name: Database Test (MongoDB efímero)
     needs: detect-changes
-    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MONGO_CI == 'true' && github.event_name == 'workflow_dispatch' }}
+    # M08/M09 persisten el chat y el cupo de ocupación. Si este job no se
+    # ejecuta en PR/push, una regresión como el 503 de chat pasaría el gate.
+    if: ${{ needs.detect-changes.outputs.code == 'true' && vars.UNIHOME_ENABLE_MONGO_CI == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -661,7 +663,7 @@ jobs:
         run: >-
           dotnet test tests/UniHome.IntegrationTests/UniHome.IntegrationTests.csproj
           --configuration Release --no-build --no-restore
-          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests|FullyQualifiedName~MongoPasswordResetPersistenceTests|FullyQualifiedName~MongoUniversityPersistenceTests|FullyQualifiedName~MongoPublicationPersistenceTests|FullyQualifiedName~MongoVerificationPersistenceTests|FullyQualifiedName~MongoExplorationPersistenceTests"
+          --filter "FullyQualifiedName~MongoIdentityPersistenceTests|FullyQualifiedName~MongoPromotionLockPersistenceTests|FullyQualifiedName~MongoPasswordResetPersistenceTests|FullyQualifiedName~MongoUniversityPersistenceTests|FullyQualifiedName~MongoPublicationPersistenceTests|FullyQualifiedName~MongoVerificationPersistenceTests|FullyQualifiedName~MongoExplorationPersistenceTests|FullyQualifiedName~MongoChatPersistenceTests|FullyQualifiedName~MongoOccupancyPersistenceTests|FullyQualifiedName~MongoOccupancyConcurrencyPersistenceTests"
           --logger "trx;LogFileName=mongo-ci.trx"
           --results-directory TestResults/mongo
       - name: Validar evidencias y resumir MongoDB

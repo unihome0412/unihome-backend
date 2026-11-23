@@ -28,6 +28,13 @@ EXPECTED_TESTS = (
     "MongoVerificationPersistenceTests.ExpedienteYDocumentosCifrados_DebenPersistirSinBinarioEnClaro",
     "MongoVerificationPersistenceTests.DecisionAprobacion_DebePersistirExpedienteUnidadYAuditoria",
     "MongoExplorationPersistenceTests.ExploracionYFavoritos_DebenPersistirYReflejarEstadoReal",
+    "MongoChatPersistenceTests.FlujoM08_DebePersistirConversacionMensajesPaginacionYAutorizacion",
+    "MongoOccupancyPersistenceTests.TryReserveSlotAsync_DosSolicitudesSimultaneasConUnLugar_SoloUnaDebeReservar",
+    "MongoOccupancyPersistenceTests.TryReserveSlotAsync_UnidadSinCampoLugaresOcupados_LoTrataComoCero",
+    "MongoOccupancyConcurrencyPersistenceTests.SalidaConcurrente_DelMismoInquilino_LiberaUnaSolaVez",
+    "MongoOccupancyConcurrencyPersistenceTests.BajaConcurrente_DelMismoInquilino_LiberaUnaSolaVez",
+    "MongoOccupancyConcurrencyPersistenceTests.SalidaYBajaConcurrentes_DelMismoInquilino_LiberanUnaSolaVez",
+    "MongoOccupancyConcurrencyPersistenceTests.ReactivacionConcurrente_DelMismoInquilino_ReservaUnaSolaVez",
 )
 
 
@@ -155,7 +162,7 @@ def render_report(
         "|---|---|",
         f"| Versión de MongoDB | {mongo_version} |",
         f"| Base temporal | `{database}` |",
-        f"| Inicialización M01-001 + M01-002 + M03-001 + M05-001 + M06-001 + M07-001 | {initialization or 'desconocida'} |",
+        f"| Inicialización M01-001, M01-002, M03-001, M05-001, M06-001, M07-001, M08-001 y M09-001 | {initialization or 'desconocida'} |",
         f"| Pruebas ejecutadas | {evidence.executed} |",
         f"| Pruebas aprobadas | {evidence.passed} |",
         f"| Pruebas fallidas | {evidence.failed} |",

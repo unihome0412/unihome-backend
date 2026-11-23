@@ -50,17 +50,22 @@ public sealed class LeaveUnitService
             return OperationResult<Guid>.NotFound();
         }
 
-        var link = await _links
-            .FindAsync(tenantAccountId, unitId, cancellationToken)
+        // La transición Activo -> Finalizado es atómica y solo la gana una
+        // solicitud. Así, dos salidas simultáneas (o una salida que compite con
+        // la baja del propietario) no liberan el mismo lugar dos veces.
+        var ended = await _links
+            .TryEndActiveAsync(
+                tenantAccountId,
+                unitId,
+                OccupancyEndReason.AbandonoInquilino,
+                _clock.UtcNow,
+                cancellationToken)
             .ConfigureAwait(false);
 
-        if (link is null || link.Status != OccupancyStatus.Activo)
+        if (!ended)
         {
             return OperationResult<Guid>.NotFound();
         }
-
-        link.End(OccupancyEndReason.AbandonoInquilino, _clock.UtcNow);
-        await _links.SaveAsync(link, cancellationToken).ConfigureAwait(false);
 
         var remaining = await _units
             .ReleaseSlotAsync(unit.Id, unit.PropertyId, cancellationToken)
