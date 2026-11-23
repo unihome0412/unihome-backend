@@ -3,6 +3,7 @@ using MongoDB.Bson;
 using MongoDB.Driver;
 using UniHome.Application.Identity.Exceptions;
 using UniHome.Infrastructure.Persistence.Mongo;
+using UniHome.Infrastructure.Persistence.Mongo.Chat;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
 
 namespace UniHome.UnitTests.Infrastructure;
@@ -62,6 +63,36 @@ public sealed class MongoSchemaSafetyTests
     }
 
     [Fact]
+    public async Task Guard_DebeReconocerColeccionesDeChatM08()
+    {
+        foreach (var definition in MongoChatMigration.Definition.Collections)
+        {
+            var reads = 0;
+            var manager = InterfaceProxy<IMongoIndexManager<BsonDocument>>.Create((method, _) =>
+            {
+                Assert.Equal("ListAsync", method.Name);
+                reads++;
+                return Task.FromResult<IAsyncCursor<BsonDocument>>(
+                    new IndexCursor(ValidIndexes(definition)));
+            });
+            var collection = InterfaceProxy<IMongoCollection<BsonDocument>>.Create((method, _) =>
+                method.Name switch
+                {
+                    "get_CollectionNamespace" => new CollectionNamespace(
+                        new DatabaseNamespace("unit_test"),
+                        definition.Name),
+                    "get_Indexes" => manager,
+                    _ => throw new InvalidOperationException(
+                        "El guard no debe escribir ni consultar documentos.")
+                });
+
+            await MongoIdentitySchemaGuard.EnsureAsync(collection);
+
+            Assert.Equal(1, reads);
+        }
+    }
+
+    [Fact]
     public void Ledger_DebeRechazarChecksumDistintoSinModificarRegistro()
     {
         var existing = new BsonDocument("checksumSha256", "checksum_anterior");
@@ -78,16 +109,38 @@ public sealed class MongoSchemaSafetyTests
         MongoMigrationRunner.ValidateRecordedChecksum(existing, MongoIdentityMigration.Definition);
     }
 
-    private static List<BsonDocument> ValidAccountIndexes() =>
-    [
-        BsonDocument.Parse("{ name: '_id_', key: { _id: 1 } }"),
-        new BsonDocument
+    private static List<BsonDocument> ValidAccountIndexes() => ValidIndexes(Accounts);
+
+    private static List<BsonDocument> ValidIndexes(MongoCollectionDefinition definition)
+    {
+        var indexes = new List<BsonDocument>
         {
-            ["name"] = Accounts.Indexes[0].Name,
-            ["key"] = Accounts.Indexes[0].ToKeyDocument(),
-            ["unique"] = true
+            BsonDocument.Parse("{ name: '_id_', key: { _id: 1 } }")
+        };
+
+        foreach (var index in definition.Indexes)
+        {
+            var document = new BsonDocument
+            {
+                ["name"] = index.Name,
+                ["key"] = index.ToKeyDocument()
+            };
+
+            if (index.Unique)
+            {
+                document["unique"] = true;
+            }
+
+            if (index.ExpireAfterSeconds is not null)
+            {
+                document["expireAfterSeconds"] = index.ExpireAfterSeconds.Value;
+            }
+
+            indexes.Add(document);
         }
-    ];
+
+        return indexes;
+    }
 
     private sealed class IndexCursor(IReadOnlyList<BsonDocument> documents) : IAsyncCursor<BsonDocument>
     {

@@ -278,3 +278,37 @@ que Android pudiera hacer).
 - `tools/ci/zap_dast.py` y `tools/ci/test_zap_dast.py`: catálogo de 52
   operaciones, flujo real de M09/M08.
 - `README.md`: secciones de Sprint 6 (M05, M09, M08).
+
+## 11. Hotfix de bloqueos del preflight productivo (23-nov-2026)
+
+El preflight contra el SHA `34c69ae` detectó tres bloqueos y se corrigieron en
+la rama `fix/sprint-06-m08-m09-hardening`:
+
+- **B-01, chat M08 inoperante:** `MongoIdentitySchemaGuard` no reconocía
+  `conversaciones` ni `mensajes`; los repositorios de chat lanzaban
+  `StorageUnavailableException` y los cuatro endpoints respondían 503. El guard
+  incorpora ahora `MongoChatIndexes.Definitions`, con una prueba unitaria de
+  regresión y una prueba real M08 que inicia conversación, envía, lee, pagina y
+  verifica autorización entre participantes.
+- **B-02, doble liberación de cupo:** salida y baja leían el vínculo activo y
+  luego lo guardaban con `ReplaceOne`, permitiendo dos liberaciones simultáneas.
+  El repositorio expone `TryEndActiveAsync`, una transición atómica
+  `Activo -> Finalizado`; solo la solicitud que gana libera cupo. La activación
+  y reactivación usan `TryActivateAsync`, y la reserva perdedora se compensa.
+  Se añadieron pruebas reales contra MongoDB para salida concurrente, baja
+  concurrente, salida frente a baja y reactivación concurrente.
+- **B-03, Quality Gate incompleto:** el job `mongo-db-test` aplicaba M08/M09 pero
+  no ejecutaba sus pruebas de persistencia. El filtro incluye ahora
+  `MongoChatPersistenceTests`, `MongoOccupancyPersistenceTests` y
+  `MongoOccupancyConcurrencyPersistenceTests`; el resumen TRX exige 15 pruebas
+  y falla si falta cualquiera o queda omitida. El job dejó de ser exclusivamente
+  manual: se ejecuta y es obligatorio en PR y push a `main` cuando hay cambios
+  de código, por lo que una regresión como B-01 bloquea el Quality Gate antes
+  del merge.
+
+Evidencia local: compilación Release con `-warnaserror`, 875 unitarias y 299
+integradas aprobadas; MongoDB efímero real con M01-001, M01-002, M03-001,
+M05-001, M06-001, M07-001, M08-001 y M09-001, **15/15** pruebas reales
+aprobadas; OpenAPI 56/56. Stryker.NET, ZAP, RESTler, Sonar,
+Semgrep, Gitleaks y CodeQL quedan **PENDIENTE_CI** hasta la ejecución manual
+autorizada; no se declaran aprobados anticipadamente.

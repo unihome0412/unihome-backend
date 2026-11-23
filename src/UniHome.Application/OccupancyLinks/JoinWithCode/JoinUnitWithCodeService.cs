@@ -80,8 +80,7 @@ public sealed class JoinUnitWithCodeService
         {
             // Idempotente: el inquilino ya está contado en lugaresOcupados, no se
             // reserva un lugar adicional.
-            return JoinUnitWithCodeResult.Linked(
-                new OccupancyLinkView(unit.Id, existing.Status, existing.JoinedAt));
+            return Linked(unit.Id, existing);
         }
 
         // CAS de un solo documento sobre la propia unidad: dos solicitudes con un
@@ -94,19 +93,43 @@ public sealed class JoinUnitWithCodeService
 
         if (reserved is null)
         {
-            return JoinUnitWithCodeResult.UnitFull();
+            // Otra solicitud del mismo inquilino pudo activar el vínculo mientras
+            // esta esperaba el CAS del cupo. En ese caso el resultado correcto es
+            // idempotente y no un falso "unidad llena".
+            var active = await _links
+                .FindAsync(tenantAccountId, unit.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            return active is not null && active.Status == OccupancyStatus.Activo
+                ? Linked(unit.Id, active)
+                : JoinUnitWithCodeResult.UnitFull();
         }
 
-        var link = existing ?? OccupancyLink.CreateActive(tenantAccountId, unit.Id, now);
-
-        if (existing is not null)
-        {
-            link.Reactivate(now);
-        }
+        // Se usa un candidato nuevo en vez de mutar el vínculo leído: la
+        // reactivación real la decide la transición atómica del repositorio.
+        var link = OccupancyLink.CreateActive(tenantAccountId, unit.Id, now);
 
         try
         {
-            await _links.SaveAsync(link, cancellationToken).ConfigureAwait(false);
+            // Reservar y activar son dos operaciones atómicas separadas. Si la
+            // activación pierde la carrera, se libera la reserva de esta solicitud
+            // para que el contador no quede inflado; nunca se libera dos veces un
+            // lugar ajeno.
+            var activated = await _links
+                .TryActivateAsync(link, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!activated)
+            {
+                await _units.ReleaseSlotAsync(unit.Id, unit.PropertyId, cancellationToken).ConfigureAwait(false);
+                var active = await _links
+                    .FindAsync(tenantAccountId, unit.Id, cancellationToken)
+                    .ConfigureAwait(false);
+
+                return active is not null && active.Status == OccupancyStatus.Activo
+                    ? Linked(unit.Id, active)
+                    : JoinUnitWithCodeResult.ConcurrentUpdate();
+            }
         }
         catch
         {
@@ -120,6 +143,10 @@ public sealed class JoinUnitWithCodeService
             .RecomputeAsync(unit, reserved.Value, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
-        return JoinUnitWithCodeResult.Linked(new OccupancyLinkView(unit.Id, link.Status, link.JoinedAt));
+        return Linked(unit.Id, link);
     }
+
+    private static JoinUnitWithCodeResult Linked(Guid unitId, OccupancyLink link) =>
+        JoinUnitWithCodeResult.Linked(
+            new OccupancyLinkView(unitId, link.Status, link.JoinedAt));
 }

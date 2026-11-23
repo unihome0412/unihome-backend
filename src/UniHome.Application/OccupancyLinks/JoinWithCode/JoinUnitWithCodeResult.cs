@@ -9,7 +9,8 @@ public enum JoinUnitWithCodeStatus
     InvalidCode,
     ExpiredCode,
     SelfJoinForbidden,
-    UnitFull
+    UnitFull,
+    ConcurrentUpdate
 }
 
 public sealed record OccupancyLinkView(
@@ -55,4 +56,7 @@ public sealed class JoinUnitWithCodeResult
         new(JoinUnitWithCodeStatus.SelfJoinForbidden, null);
 
     public static JoinUnitWithCodeResult UnitFull() => new(JoinUnitWithCodeStatus.UnitFull, null);
+
+    public static JoinUnitWithCodeResult ConcurrentUpdate() =>
+        new(JoinUnitWithCodeStatus.ConcurrentUpdate, null);
 }

@@ -12,6 +12,8 @@ namespace UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 [ExcludeFromCodeCoverage]
 internal sealed class MongoOccupancyLinkRepository : IOccupancyLinkRepository
 {
+    private const int DuplicateKeyCode = 11000;
+
     private readonly MongoDbClientProvider _clientProvider;
     private readonly ILogger<MongoOccupancyLinkRepository> _logger;
 
@@ -47,22 +49,91 @@ internal sealed class MongoOccupancyLinkRepository : IOccupancyLinkRepository
         }
     }
 
-    public async Task SaveAsync(OccupancyLink link, CancellationToken cancellationToken = default)
+    public async Task<bool> TryActivateAsync(
+        OccupancyLink link,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(link);
+
+        if (link.Status != OccupancyStatus.Activo)
+        {
+            throw new ArgumentException("El vínculo a activar debe estar activo.", nameof(link));
+        }
 
         try
         {
             var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
-            await collection
-                .ReplaceOneAsync(
-                    Builders<OccupancyLinkDocument>.Filter.Eq(
-                        item => item.Id,
-                        BuildId(link.TenantAccountId, link.UnitId)),
-                    ToDocument(link),
-                    new ReplaceOptions { IsUpsert = true },
-                    cancellationToken)
+            var id = BuildId(link.TenantAccountId, link.UnitId);
+            var filter = Builders<OccupancyLinkDocument>.Filter.And(
+                Builders<OccupancyLinkDocument>.Filter.Eq(item => item.Id, id),
+                Builders<OccupancyLinkDocument>.Filter.Ne(
+                    item => item.Status,
+                    OccupancyStatus.Activo.ToString()));
+            var update = Builders<OccupancyLinkDocument>.Update
+                .Set(document => document.Status, OccupancyStatus.Activo.ToString())
+                .Set(document => document.JoinedAt, link.JoinedAt.UtcDateTime)
+                .Unset(document => document.EndedAt)
+                .Unset(document => document.EndedReason);
+
+            // Reactivación de un vínculo previo: solo gana quien encuentra el
+            // documento todavía inactivo. Un vínculo ya activo no se reescribe.
+            var reactivated = await collection
+                .UpdateOneAsync(filter, update, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
+
+            if (reactivated.ModifiedCount == 1)
+            {
+                return true;
+            }
+
+            // Vínculo nuevo. La unicidad nativa de _id evita duplicados; el
+            // perdedor recibe duplicate key y compensa liberando su reserva.
+            try
+            {
+                await collection
+                    .InsertOneAsync(ToDocument(link), cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                return true;
+            }
+            catch (MongoWriteException exception) when (exception.WriteError?.Code == DuplicateKeyCode)
+            {
+                return false;
+            }
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<bool> TryEndActiveAsync(
+        Guid tenantAccountId,
+        Guid unitId,
+        OccupancyEndReason reason,
+        DateTimeOffset endedAt,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<OccupancyLinkDocument>.Filter.And(
+                Builders<OccupancyLinkDocument>.Filter.Eq(
+                    item => item.Id,
+                    BuildId(tenantAccountId, unitId)),
+                Builders<OccupancyLinkDocument>.Filter.Eq(
+                    item => item.Status,
+                    OccupancyStatus.Activo.ToString()));
+            var update = Builders<OccupancyLinkDocument>.Update
+                .Set(document => document.Status, OccupancyStatus.Finalizado.ToString())
+                .Set(document => document.EndedAt, endedAt.UtcDateTime)
+                .Set(document => document.EndedReason, reason.ToString());
+
+            var ended = await collection
+                .UpdateOneAsync(filter, update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            return ended.ModifiedCount == 1;
         }
         catch (MongoException exception)
         {

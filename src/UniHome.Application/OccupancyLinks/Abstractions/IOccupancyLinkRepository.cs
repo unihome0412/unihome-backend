@@ -9,8 +9,24 @@ public interface IOccupancyLinkRepository
         Guid unitId,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Inserta o reemplaza el único documento del par inquilino/unidad.</summary>
-    Task SaveAsync(OccupancyLink link, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Activa o reactiva el único documento del par inquilino/unidad solo si no
+    /// está activo. La transición es atómica en el almacenamiento; dos
+    /// solicitudes simultáneas no pueden activar dos veces el mismo vínculo.
+    /// Devuelve true únicamente a la solicitud que ganó la transición.
+    /// </summary>
+    Task<bool> TryActivateAsync(OccupancyLink link, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finaliza un vínculo solo si sigue activo. Devuelve true únicamente a la
+    /// solicitud que ganó la transición; el resto no debe liberar cupo.
+    /// </summary>
+    Task<bool> TryEndActiveAsync(
+        Guid tenantAccountId,
+        Guid unitId,
+        OccupancyEndReason reason,
+        DateTimeOffset endedAt,
+        CancellationToken cancellationToken = default);
 
     Task<bool> HasActiveLinkAsync(Guid tenantAccountId, CancellationToken cancellationToken = default);
 

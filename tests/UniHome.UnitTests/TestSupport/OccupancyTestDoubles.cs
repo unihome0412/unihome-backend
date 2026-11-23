@@ -5,36 +5,92 @@ namespace UniHome.UnitTests.TestSupport;
 
 internal sealed class FakeOccupancyLinkRepository : IOccupancyLinkRepository
 {
+    private readonly object _gate = new();
+
     public List<OccupancyLink> Items { get; } = [];
 
     public Task<OccupancyLink?> FindAsync(
         Guid tenantAccountId,
         Guid unitId,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(Items.SingleOrDefault(
-            link => link.TenantAccountId == tenantAccountId && link.UnitId == unitId));
-
-    public Task SaveAsync(OccupancyLink link, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
-        Items.RemoveAll(item =>
-            item.TenantAccountId == link.TenantAccountId && item.UnitId == link.UnitId);
-        Items.Add(link);
-        return Task.CompletedTask;
+        lock (_gate)
+        {
+            return Task.FromResult(Items.SingleOrDefault(
+                link => link.TenantAccountId == tenantAccountId && link.UnitId == unitId));
+        }
+    }
+
+    public Task<bool> TryActivateAsync(
+        OccupancyLink link,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            var existing = Items.SingleOrDefault(item =>
+                item.TenantAccountId == link.TenantAccountId && item.UnitId == link.UnitId);
+
+            if (existing is null)
+            {
+                Items.Add(link);
+                return Task.FromResult(true);
+            }
+
+            if (existing.Status == OccupancyStatus.Activo)
+            {
+                return Task.FromResult(false);
+            }
+
+            existing.Reactivate(link.JoinedAt);
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> TryEndActiveAsync(
+        Guid tenantAccountId,
+        Guid unitId,
+        OccupancyEndReason reason,
+        DateTimeOffset endedAt,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            var link = Items.SingleOrDefault(item =>
+                item.TenantAccountId == tenantAccountId && item.UnitId == unitId);
+
+            if (link is null || link.Status != OccupancyStatus.Activo)
+            {
+                return Task.FromResult(false);
+            }
+
+            link.End(reason, endedAt);
+            return Task.FromResult(true);
+        }
     }
 
     public Task<bool> HasActiveLinkAsync(
         Guid tenantAccountId,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(Items.Any(
-            link => link.TenantAccountId == tenantAccountId && link.Status == OccupancyStatus.Activo));
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(Items.Any(
+                link => link.TenantAccountId == tenantAccountId && link.Status == OccupancyStatus.Activo));
+        }
+    }
 
     public Task<IReadOnlyList<OccupancyLink>> ListActiveByUnitAsync(
         Guid unitId,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<OccupancyLink>>(Items
-            .Where(link => link.UnitId == unitId && link.Status == OccupancyStatus.Activo)
-            .OrderBy(link => link.JoinedAt)
-            .ToArray());
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<OccupancyLink>>(Items
+                .Where(link => link.UnitId == unitId && link.Status == OccupancyStatus.Activo)
+                .OrderBy(link => link.JoinedAt)
+                .ToArray());
+        }
+    }
 }
 
 internal sealed class FakeUnitInvitationRepository : IUnitInvitationRepository
