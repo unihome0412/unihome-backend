@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UniHome.Api.Contracts.Chat;
+using UniHome.Application.Chat.Abstractions;
 using UniHome.Application.Chat.ListConversations;
 using UniHome.Application.Chat.ListMessages;
 using UniHome.Application.Chat.SendMessage;
@@ -102,6 +103,7 @@ public sealed class ChatController : AuthenticatedControllerBase
     public async Task<IActionResult> ListMessages(
         Guid conversationId,
         [FromQuery(Name = "antes")] DateTimeOffset? antes,
+        [FromQuery(Name = "antesId")] Guid? antesId,
         [FromQuery(Name = "limite")] int? limite,
         CancellationToken cancellationToken)
     {
@@ -112,8 +114,14 @@ public sealed class ChatController : AuthenticatedControllerBase
 
         Response.Headers.CacheControl = "no-store";
 
+        // El cursor es compuesto (fecha, id): sin ambos, se trata como la
+        // primera página en vez de aplicar un corte parcial ambiguo.
+        var before = antes is not null && antesId is not null
+            ? new MessageCursor(antes.Value, antesId.Value)
+            : null;
+
         var result = await _listMessages
-            .ListAsync(accountId, conversationId, antes, limite, cancellationToken)
+            .ListAsync(accountId, conversationId, before, limite, cancellationToken)
             .ConfigureAwait(false);
 
         return ToActionResult(

@@ -29,7 +29,7 @@ public sealed class ListConversationMessagesService
     public async Task<OperationResult<MessagePageView>> ListAsync(
         Guid accountId,
         Guid conversationId,
-        DateTimeOffset? before,
+        MessageCursor? before,
         int? pageSize,
         CancellationToken cancellationToken = default)
     {
@@ -57,7 +57,9 @@ public sealed class ListConversationMessagesService
 
         // Página llena: puede haber más historial anterior al mensaje más
         // antiguo devuelto. Página incompleta: ya se llegó al principio.
-        DateTimeOffset? nextCursor = page.Count == size ? page[^1].SentAt : null;
+        MessageCursor? nextCursor = page.Count == size
+            ? new MessageCursor(page[^1].SentAt, page[^1].Id)
+            : null;
 
         var views = page
             .Select(message => new MessageView(
@@ -74,4 +76,4 @@ public sealed class ListConversationMessagesService
 
 public sealed record MessagePageView(
     IReadOnlyList<MessageView> Mensajes,
-    DateTimeOffset? SiguienteCursor);
+    MessageCursor? SiguienteCursor);

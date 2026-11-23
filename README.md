@@ -243,8 +243,9 @@ Reglas principales:
 - La respuesta añade `Cache-Control: no-store` por ser datos propios del
   arrendador.
 
-HU-033/036/092 pertenecen a M05; M08 (mensajería) del Sprint 6 se documenta al
-cerrarse.
+HU-033/036/092 pertenecen a M05; M08 (mensajería, sección "Sprint 6 / M08:
+chat" más abajo) y M09 (ocupación, sección siguiente) completan el alcance de
+Sprint 6.
 
 ## Sprint 6 / M09: ocupación
 
@@ -343,10 +344,13 @@ Reglas principales:
   `429`. Si el almacén distribuido no está disponible, el envío se permite
   (fail-open): a diferencia del cupo de HU-049, este límite no protege una
   invariante de negocio crítica.
-- **Paginación por cursor:** `GET /mensajes` devuelve los mensajes más
-  recientes primero y, si la página viene llena, un `siguienteCursor` (fecha
-  del mensaje más antiguo de la página) para pedir el historial anterior con
-  `?antes=`. Tamaño de página por defecto 20, máximo 50.
+- **Paginación por cursor compuesto (fecha + id):** `GET /mensajes` devuelve
+  los mensajes más recientes primero y, si la página viene llena, un
+  `siguienteCursor` (`{fecha, mensajeId}` del mensaje más antiguo de la
+  página) para pedir el historial anterior con `?antes=&antesId=`. Un cursor
+  de solo fecha se saltaría mensajes con la misma fecha en el corte de
+  página; el `mensajeId` desempata. Tamaño de página por defecto 20, máximo
+  50.
 - **Nunca correo ni teléfono (HU-070):** las respuestas de chat solo
   proyectan `AccountId` y `FullName` de la cuenta, igual que
   `GET /unidades/{unitId}/inquilinos` en M09; no hay otro campo de contacto
@@ -358,9 +362,15 @@ Reglas principales:
 - Migración `M08-001`: crea `conversaciones` (con `ix_conversaciones_participantes`,
   sobre el arreglo `participantes`) y `mensajes` (con
   `ix_mensajes_conversacion_fecha`, compuesto `conversacionId` ascendente y
-  `fecha` descendente), respetando los índices ya observados en Atlas. No
-  declara un índice único adicional: la unicidad de la conversación la da el
-  `_id` determinista, no un índice declarado.
+  `fecha` descendente), con los nombres de índice ya observados en Atlas (sus
+  campos clave exactos siguen pendientes de verificar contra la base real; no
+  hay un índice único adicional, la unicidad de la conversación la da el
+  `_id` determinista).
+
+HU-033/036/092 (M05), HU-048/049/093/094/095 (M09) y HU-067/068/069/070/086/089
+(M08) completan las 15 HU de Sprint 6, junto con HU-071 y HU-086 ya cubiertas
+desde Sprint 3. Detalle, decisiones provisionales y pendientes en
+[`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
 
 ## Swagger/OpenAPI protegido
 
@@ -715,9 +725,11 @@ y no se declaran aprobadas. El workflow manual
 [`.github/workflows/ocr-documental.yml`](.github/workflows/ocr-documental.yml)
 prepara la ejecución autorizada en CI con ambos motores reales.
 
-Estado local del cierre: **790 unitarias** y **256 integraciones ejecutadas**
-(9 opt-in de Mongo/Cloudinary omitidas de forma explícita). La matriz de las
-56 HU de Sprints 1–5 está en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md).
+Estado local del cierre de Sprint 6: **869 unitarias** y **296 integraciones
+ejecutadas** (13 opt-in de Mongo/Cloudinary omitidas de forma explícita). La
+matriz de las 56 HU de Sprints 1–5 está en
+[`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md); la de las 15 HU de
+Sprint 6, en [`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
 La matriz de aceptación HTTPS de las 41 operaciones y la colección
 Postman/Newman parametrizada están en
 [`docs/aceptacion-sprints-1-5.md`](docs/aceptacion-sprints-1-5.md) y
@@ -735,9 +747,10 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
 `unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`,
-`M06-001` y `M07-001` a esa base temporal y las pruebas reales de identidad,
-recuperación de contraseña, universidades, publicaciones, verificación documental,
-exploración/favoritos y bloqueo distribuido
+`M06-001`, `M07-001`, `M08-001` y `M09-001` a esa base temporal y las pruebas
+reales de identidad, recuperación de contraseña, universidades, publicaciones,
+verificación documental, exploración/favoritos, bloqueo distribuido, ocupación
+(cupo con CAS y campo `lugaresOcupados` ausente) y chat
 se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
@@ -745,14 +758,16 @@ La ejecución manual de verificación
 ([43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
 commit de código `f51ac10`) dejó 4/4 pruebas reales aprobadas, 0 omitidas,
 `M01-001` y `M03-001` válidas y la limpieza temporal confirmada. **Sprint 4/5**
-añade `M06-001` y las dos pruebas de verificación documental; la siguiente
-ejecución autorizada debe mostrar **8/8** y permanece **PENDIENTE_CI**.
+añade `M06-001` y las dos pruebas de verificación documental (**8/8**).
+**Sprint 6** añade `M08-001`, `M09-001` y tres pruebas reales más (dos de
+ocupación, una de chat); la siguiente ejecución autorizada debe mostrar
+**11/11** y permanece **PENDIENTE_CI**.
 
 El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
 `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
 `127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M01-002, M03-001,
-M05-001, M06-001 y M07-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+M05-001, M06-001, M07-001, M08-001 y M09-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
 confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
 operación documentada y publica `zap-report.html`, `zap-report.json`,
 `dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el
@@ -786,6 +801,16 @@ privado, y el administrador la aprueba; la segunda repite el flujo y el
 administrador la rechaza con motivo, que el solicitante consulta después. La
 exploración M04 se valida tras la aprobación real. La ejecución real 41/41 queda
 **PENDIENTE_CI** y no se declara PASS anticipado.
+
+**Sprint 6:** el catálogo OpenAPI pasa a **52 operaciones** (11 nuevas: 1 de
+M05, 6 de M09, 4 de M08). `mongo-db-test`, `dast-zap` y `restler-fuzzing` ya
+aplican/verifican `M08-001` y `M09-001` después de `M07-001`; el fixture y el
+driver real de ZAP se ampliaron con el flujo completo de ocupación (invitación,
+unirse, mantenimiento, baja, abandono) y de chat (iniciar conversación, enviar
+y listar mensajes, listar conversaciones). La ejecución real 52/52 queda
+**PENDIENTE_CI**: estos tres jobs no se dispararon en GitHub con el código de
+Sprint 6; solo se validó localmente contra el fixture (`tools/ci/test_zap_dast.py`,
+167/167 PASS).
 
 El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
 cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que

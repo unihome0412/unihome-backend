@@ -40,7 +40,7 @@ internal sealed class FakeMessageRepository : IMessageRepository
 
     public Task<IReadOnlyList<Message>> ListPageAsync(
         Guid conversationId,
-        DateTimeOffset? before,
+        MessageCursor? before,
         int limit,
         CancellationToken cancellationToken = default)
     {
@@ -48,11 +48,20 @@ internal sealed class FakeMessageRepository : IMessageRepository
 
         if (before is not null)
         {
-            query = query.Where(message => message.SentAt < before.Value);
+            var cursor = before;
+
+            // Mismo desempate (fecha, id como cadena "N") que MongoMessageRepository,
+            // para que la prueba en memoria detecte el mismo bug de corte de página.
+            query = query.Where(message =>
+                message.SentAt < cursor.SentAt ||
+                (message.SentAt == cursor.SentAt &&
+                 string.CompareOrdinal(
+                     message.Id.ToString("N"), cursor.MessageId.ToString("N")) < 0));
         }
 
         var page = query
             .OrderByDescending(message => message.SentAt)
+            .ThenByDescending(message => message.Id.ToString("N"), StringComparer.Ordinal)
             .Take(limit)
             .ToArray();
 

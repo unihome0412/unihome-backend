@@ -43,7 +43,7 @@ internal sealed class MongoMessageRepository : IMessageRepository
 
     public async Task<IReadOnlyList<Message>> ListPageAsync(
         Guid conversationId,
-        DateTimeOffset? before,
+        MessageCursor? before,
         int limit,
         CancellationToken cancellationToken = default)
     {
@@ -61,12 +61,23 @@ internal sealed class MongoMessageRepository : IMessageRepository
 
             if (before is not null)
             {
-                filters.Add(Builders<MessageDocument>.Filter.Lt(item => item.SentAt, before.Value.UtcDateTime));
+                // Cursor compuesto (fecha, id): dos mensajes con la misma fecha no se
+                // saltan en el corte de página, porque el desempate por id completa
+                // un orden total, a diferencia de comparar solo por fecha.
+                var beforeDate = before.SentAt.UtcDateTime;
+                var beforeId = before.MessageId.ToString("N", CultureInfo.InvariantCulture);
+                filters.Add(Builders<MessageDocument>.Filter.Or(
+                    Builders<MessageDocument>.Filter.Lt(item => item.SentAt, beforeDate),
+                    Builders<MessageDocument>.Filter.And(
+                        Builders<MessageDocument>.Filter.Eq(item => item.SentAt, beforeDate),
+                        Builders<MessageDocument>.Filter.Lt(item => item.Id, beforeId))));
             }
 
             var documents = await collection
                 .Find(Builders<MessageDocument>.Filter.And(filters))
-                .Sort(Builders<MessageDocument>.Sort.Descending(item => item.SentAt))
+                .Sort(Builders<MessageDocument>.Sort
+                    .Descending(item => item.SentAt)
+                    .Descending(item => item.Id))
                 .Limit(limit)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);

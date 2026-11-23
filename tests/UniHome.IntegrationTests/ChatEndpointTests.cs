@@ -171,10 +171,13 @@ public sealed class ChatEndpointTests : IClassFixture<UniHomeApiFactory>
         Assert.Equal(2, items.Length);
         Assert.Equal("Tres", items[0].GetProperty("texto").GetString());
         Assert.Equal("Dos", items[1].GetProperty("texto").GetString());
-        var cursor = pageJson.RootElement.GetProperty("siguienteCursor").GetDateTimeOffset();
+        var cursor = pageJson.RootElement.GetProperty("siguienteCursor");
+        var cursorFecha = cursor.GetProperty("fecha").GetDateTimeOffset();
+        var cursorMensajeId = cursor.GetProperty("mensajeId").GetGuid();
 
         using var nextPage = await _client.GetAsync(
-            $"/api/v1/conversaciones/{conversationId}/mensajes?limite=2&antes={Uri.EscapeDataString(cursor.ToString("O"))}");
+            $"/api/v1/conversaciones/{conversationId}/mensajes?limite=2" +
+            $"&antes={Uri.EscapeDataString(cursorFecha.ToString("O"))}&antesId={cursorMensajeId:N}");
         using var nextPageJson = JsonDocument.Parse(await nextPage.Content.ReadAsStringAsync());
         var nextItems = nextPageJson.RootElement.GetProperty("mensajes").EnumerateArray().ToArray();
         Assert.Single(nextItems);

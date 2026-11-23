@@ -61,6 +61,44 @@ public sealed class ListConversationMessagesServiceTests
     }
 
     [Fact]
+    public async Task ListAsync_VariosMensajesConLaMismaFecha_NingunoSeSaltaEnElCorteDePagina()
+    {
+        var (conversations, conversation) = SeedConversation();
+        var messages = new FakeMessageRepository();
+        // Tres mensajes con exactamente la misma fecha: un corte de página que
+        // compare solo por fecha (sin desempate por id) se saltaría el que
+        // quede "en medio" del grupo al pasar de la página 1 a la 2.
+        var sameInstant = Now.AddMinutes(5);
+        var same = new[]
+        {
+            Message.Create(conversation.Id, conversation.OwnerAccountId, "Mismo A", sameInstant),
+            Message.Create(conversation.Id, conversation.RequesterAccountId, "Mismo B", sameInstant),
+            Message.Create(conversation.Id, conversation.OwnerAccountId, "Mismo C", sameInstant)
+        };
+        messages.Items.AddRange(same);
+        var service = new ListConversationMessagesService(conversations, messages);
+
+        var firstPage = await service.ListAsync(
+            conversation.OwnerAccountId, conversation.Id, before: null, pageSize: 2);
+
+        Assert.Equal(2, firstPage.Value!.Mensajes.Count);
+        Assert.NotNull(firstPage.Value.SiguienteCursor);
+
+        var secondPage = await service.ListAsync(
+            conversation.OwnerAccountId, conversation.Id,
+            before: firstPage.Value.SiguienteCursor, pageSize: 2);
+
+        Assert.Single(secondPage.Value!.Mensajes);
+        Assert.Null(secondPage.Value.SiguienteCursor);
+
+        var seenIds = firstPage.Value.Mensajes.Concat(secondPage.Value.Mensajes)
+            .Select(message => message.MensajeId)
+            .ToHashSet();
+        Assert.Equal(3, seenIds.Count);
+        Assert.All(same, message => Assert.Contains(message.Id, seenIds));
+    }
+
+    [Fact]
     public async Task ListAsync_NoParticipante_DebeDevolverForbidden()
     {
         var (conversations, conversation) = SeedConversation();
