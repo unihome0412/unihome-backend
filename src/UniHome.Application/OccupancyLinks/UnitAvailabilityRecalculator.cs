@@ -32,8 +32,8 @@ public sealed class UnitAvailabilityRecalculator
     public async Task RecomputeAsync(
         Unit unit,
         int occupiedPlaces,
-        CancellationToken cancellationToken = default,
-        bool ignoreMaintenanceGuard = false)
+        bool ignoreMaintenanceGuard = false,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(unit);
 

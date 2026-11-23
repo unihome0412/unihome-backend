@@ -117,7 +117,7 @@ public sealed class JoinUnitWithCodeService
         }
 
         await _recalculator
-            .RecomputeAsync(unit, reserved.Value, cancellationToken)
+            .RecomputeAsync(unit, reserved.Value, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         return JoinUnitWithCodeResult.Linked(new OccupancyLinkView(unit.Id, link.Status, link.JoinedAt));

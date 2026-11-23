@@ -80,7 +80,9 @@ public sealed class RemoveTenantService
         var remaining = await _units
             .ReleaseSlotAsync(unit.Id, unit.PropertyId, cancellationToken)
             .ConfigureAwait(false);
-        await _recalculator.RecomputeAsync(unit, remaining, cancellationToken).ConfigureAwait(false);
+        await _recalculator
+            .RecomputeAsync(unit, remaining, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
 
         return OperationResult<Guid>.Success(tenantAccountId);
     }

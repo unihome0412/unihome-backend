@@ -27,6 +27,7 @@ public sealed class MongoChatPersistenceTests
 {
     private const string OwnerEmail = "mongo.chat.owner@example.invalid";
     private const string RequesterEmail = "mongo.chat.requester@example.invalid";
+    private static readonly string[] SingleFurniture = ["Cama"];
 
     [MongoIntegrationFact]
     public async Task FlujoM08_DebePersistirConversacionYMensajesConParticipantes()
@@ -94,7 +95,7 @@ public sealed class MongoChatPersistenceTests
                     paraQuien = "Mixto",
                     bano = "Privado",
                     mobiliario = "Amueblado",
-                    muebles = new[] { "Cama" }
+                    muebles = SingleFurniture
                 });
             Assert.Equal(HttpStatusCode.Created, unitResponse.StatusCode);
             using var unitJson = JsonDocument.Parse(await unitResponse.Content.ReadAsStringAsync());

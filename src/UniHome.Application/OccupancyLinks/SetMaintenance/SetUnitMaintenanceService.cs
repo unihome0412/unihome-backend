@@ -75,7 +75,11 @@ public sealed class SetUnitMaintenanceService
             // porque el estado en memoria todavía es Mantenimiento y, sin el
             // flag, el recalculador no haría nada.
             await _recalculator
-                .RecomputeAsync(unit, unit.OccupiedPlaces, cancellationToken, ignoreMaintenanceGuard: true)
+                .RecomputeAsync(
+                    unit,
+                    unit.OccupiedPlaces,
+                    ignoreMaintenanceGuard: true,
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
         }
 

@@ -412,6 +412,48 @@ public sealed class UnitOccupancyEndpointTests : IClassFixture<UniHomeApiFactory
     }
 
     [Fact]
+    public async Task BajaInquilino_SinCampoConfirmacion_DebeResponder400()
+    {
+        var ownerToken = await AuthenticateAsync(OwnerEmail);
+        var universityId = await SeedUniversityAsync();
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", ownerToken);
+        var propertyId = await CreatePropertyAsync(
+            universityId, $"Casa {Guid.NewGuid():N}", "SinCampoConfirmacion");
+        var unitId = await CreateUnitAsync(propertyId, "Individual", 1);
+
+        // El cuerpo omite "confirmacion" por completo (no es que valga false):
+        // JsonRequired debe rechazarlo en el enlace del modelo, antes de llegar
+        // al servicio.
+        using var response = await _client.SendAsync(
+            BuildDeleteRequest(
+                $"/api/v1/unidades/{unitId}/inquilinos/{Guid.NewGuid()}",
+                new { }));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Mantenimiento_SinCampoEnMantenimiento_DebeResponder400()
+    {
+        var ownerToken = await AuthenticateAsync(OwnerEmail);
+        var universityId = await SeedUniversityAsync();
+
+        _client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", ownerToken);
+        var propertyId = await CreatePropertyAsync(
+            universityId, $"Casa {Guid.NewGuid():N}", "SinCampoMantenimiento");
+        var unitId = await CreateUnitAsync(propertyId, "Individual", 1);
+
+        using var response = await _client.PutAsJsonAsync(
+            $"/api/v1/unidades/{unitId}/mantenimiento",
+            new { });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task DejarUnidad_SinVinculoActivo_DebeResponder404()
     {
         var ownerToken = await AuthenticateAsync(OwnerEmail);

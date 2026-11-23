@@ -28,6 +28,7 @@ public sealed class MongoOccupancyPersistenceTests
     private const string OwnerEmail = "mongo.occupancy.owner@example.invalid";
     private const string TenantAEmail = "mongo.occupancy.tenant.a@example.invalid";
     private const string TenantBEmail = "mongo.occupancy.tenant.b@example.invalid";
+    private static readonly string[] SingleFurniture = ["Cama"];
 
     [MongoIntegrationFact]
     public async Task TryReserveSlotAsync_DosSolicitudesSimultaneasConUnLugar_SoloUnaDebeReservar()
@@ -96,7 +97,7 @@ public sealed class MongoOccupancyPersistenceTests
                     paraQuien = "Mixto",
                     bano = "Privado",
                     mobiliario = "Amueblado",
-                    muebles = new[] { "Cama" }
+                    muebles = SingleFurniture
                 });
             Assert.Equal(HttpStatusCode.Created, unitResponse.StatusCode);
             using var unitJson = JsonDocument.Parse(await unitResponse.Content.ReadAsStringAsync());
@@ -245,7 +246,7 @@ public sealed class MongoOccupancyPersistenceTests
                     paraQuien = "Mixto",
                     bano = "Privado",
                     mobiliario = "Amueblado",
-                    muebles = new[] { "Cama" }
+                    muebles = SingleFurniture
                 });
             Assert.Equal(HttpStatusCode.Created, unitResponse.StatusCode);
             using var unitJson = JsonDocument.Parse(await unitResponse.Content.ReadAsStringAsync());
