@@ -22,7 +22,8 @@ public sealed record UnidadResponse(
     IReadOnlyList<ServicioResponse> Servicios,
     int TotalFotos,
     PublicationState EstadoPublicacion,
-    DateTimeOffset FechaAlta)
+    DateTimeOffset FechaAlta,
+    UnitAvailability EstadoOcupacion)
 {
     public static UnidadResponse FromDomain(Unit unit) =>
         new(
@@ -49,5 +50,6 @@ public sealed record UnidadResponse(
                 .ToArray(),
             unit.Photos.Count,
             unit.PublicationState,
-            unit.CreatedAt);
+            unit.CreatedAt,
+            unit.Availability);
 }

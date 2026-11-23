@@ -1251,6 +1251,17 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", photo_path, token=access_a,
         expected={200}, auth=True, note="lectura foto")
 
+    # Sprint 6 / HU-033: "Mis propiedades" agrupa la propiedad y su habitación.
+    _, my_properties_payload, _ = http.request(
+        "GET", "/api/v1/mis-propiedades",
+        token=access_a, expected={200}, auth=True, note="mis propiedades")
+    try:
+        my_properties = json.loads(my_properties_payload)
+    except json.JSONDecodeError as error:
+        raise DastError("Mis propiedades no devolvió un cuerpo JSON.") from error
+    if not isinstance(my_properties, list) or not my_properties:
+        raise DastError("Mis propiedades no devolvió ninguna propiedad.")
+
     http.request(
         "POST", "/api/v1/publicaciones/primera/terminos",
         body={"versionTerminos": TERMS_VERSION},
@@ -1423,6 +1434,68 @@ def run_scan(args: argparse.Namespace) -> int:
     http.request(
         "DELETE", f"/api/v1/favoritos/{unit_id}",
         token=access_a, expected={204}, auth=True, note="baja favorito")
+
+    # M09: invitación, vínculo con código, mantenimiento y baja/abandono.
+    # B se une a la unidad aprobada de A como inquilino.
+    _, invitation_payload, _ = http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/invitacion",
+        token=access_a, expected={200}, auth=True, note="invitación unidad A")
+    invitation_code = str(_json_body(invitation_payload).get("codigo") or "")
+    if not invitation_code:
+        raise DastError("La invitación de la unidad A no devolvió un código.")
+    http.request(
+        "POST", "/api/v1/unidades/unirse",
+        body={"codigo": invitation_code},
+        token=access_b, expected={200}, auth=True, note="unirse con código B")
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/mantenimiento",
+        body={"enMantenimiento": True},
+        token=access_a, expected={200}, auth=True, note="activar mantenimiento")
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/mantenimiento",
+        body={"enMantenimiento": False},
+        token=access_a, expected={200}, auth=True, note="desactivar mantenimiento")
+    # HU-094: el propietario obtiene el accountId del inquilino desde el
+    # endpoint real, igual que lo haría Android; nunca se decodifica el token.
+    _, tenants_payload, _ = http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/inquilinos",
+        token=access_a, expected={200}, auth=True, note="inquilinos activos unidad A")
+    tenants = json.loads(tenants_payload)
+    if not isinstance(tenants, list) or not tenants:
+        raise DastError("La unidad A no devolvió inquilinos activos.")
+    tenant_b_id = str(tenants[0].get("accountId") or "")
+    if not tenant_b_id:
+        raise DastError("El inquilino activo no devolvió accountId.")
+    http.request(
+        "DELETE", f"/api/v1/unidades/{unit_id}/inquilinos/{tenant_b_id}",
+        body={"confirmacion": True},
+        token=access_a, expected={204}, auth=True, note="baja de inquilino B")
+    http.request(
+        "POST", "/api/v1/unidades/unirse",
+        body={"codigo": invitation_code},
+        token=access_b, expected={200}, auth=True, note="reingreso con código B")
+    http.request(
+        "DELETE", f"/api/v1/unidades/{unit_id}/mi-vinculo",
+        body={"confirmacion": True},
+        token=access_b, expected={204}, auth=True, note="abandono B")
+
+    # M08: conversación entre B (quien contacta desde la ficha) y A (propietario).
+    _, conversation_payload, _ = http.request(
+        "POST", f"/api/v1/unidades/{unit_id}/conversaciones",
+        token=access_b, expected={200}, auth=True, note="iniciar conversación B")
+    conversation_id = str(_json_body(conversation_payload).get("conversacionId") or "")
+    if not conversation_id:
+        raise DastError("La conversación iniciada por B no devolvió conversacionId.")
+    http.request(
+        "POST", f"/api/v1/conversaciones/{conversation_id}/mensajes",
+        body={"texto": "Hola, ¿sigue disponible?"},
+        token=access_b, expected={201}, auth=True, note="enviar mensaje B")
+    http.request(
+        "GET", f"/api/v1/conversaciones/{conversation_id}/mensajes",
+        token=access_a, expected={200}, auth=True, note="listar mensajes A")
+    http.request(
+        "GET", "/api/v1/conversaciones",
+        token=access_a, expected={200}, auth=True, note="listar conversaciones A")
 
     # M01: recuperación de contraseña con token real capturado por SMTP.
     http.request(

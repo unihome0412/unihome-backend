@@ -212,6 +212,166 @@ Reglas principales:
 Detalle en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md), incluida la
 matriz de las 56 HU de Sprints 1–5.
 
+## Sprint 6 / M05: mis propiedades
+
+El Sprint 6 añade, por ahora, la vista agregada de propiedades del titular:
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/mis-propiedades` | Propiedades del titular con tipo, total de habitaciones, cuántas están disponibles y el estado de cada una (HU-033). |
+
+Reglas principales:
+
+- `HU-036` (dar de alta una propiedad desde el Resumen o desde Mis propiedades)
+  y `HU-092` (agregar otra habitación a una propiedad ya registrada, sin volver a
+  capturar su dirección) no requieren endpoints nuevos: reutilizan
+  `POST /api/v1/propiedades` y `POST /api/v1/propiedades/{propertyId}/unidades`
+  de M05 (Sprint 2), que ya permiten varias unidades sobre la misma propiedad sin
+  reenviar domicilio. El origen del botón (Resumen o Mis propiedades) es
+  responsabilidad de Android.
+- `GET /api/v1/mis-propiedades` exige `Authorization: Bearer` y solo devuelve
+  propiedades del titular autenticado; `tipoPropiedad` filtra por el tipo de la
+  propiedad y `estadoHabitacion` incluye una propiedad si al menos una de sus
+  habitaciones está en ese estado. Ambos filtros son opcionales y se combinan con
+  `AND`. Un valor fuera del enum (incluido un entero) responde `400`.
+  Una propiedad sin habitaciones aparece con `totalHabitaciones: 0`,
+  `habitacionesDisponibles: 0` y `habitaciones: []`.
+- No se añadió una migración nueva: la propiedad reutiliza el índice existente
+  `ix_propiedades_propietario` de `M05-001` para listar por titular; las
+  habitaciones de cada propiedad se obtienen con `ListByOwnerAsync` (ya usado por
+  HU-028) y se agrupan en memoria por `propertyId`.
+- La respuesta añade `Cache-Control: no-store` por ser datos propios del
+  arrendador.
+
+HU-033/036/092 pertenecen a M05; M08 (mensajería, sección "Sprint 6 / M08:
+chat" más abajo) y M09 (ocupación, sección siguiente) completan el alcance de
+Sprint 6.
+
+## Sprint 6 / M09: ocupación
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/unidades/{unitId}/invitacion` | Código de invitación vigente de una unidad propia, con su fecha de vigencia (HU-048). |
+| `POST` | `/api/v1/unidades/unirse` | Vincula al solicitante como inquilino con un código de invitación (HU-049). |
+| `PUT` | `/api/v1/unidades/{unitId}/mantenimiento` | Marca o desmarca el mantenimiento de una unidad propia (HU-093). |
+| `DELETE` | `/api/v1/unidades/{unitId}/inquilinos/{tenantAccountId}` | Da de baja a un inquilino de una unidad propia, con confirmación (HU-094). |
+| `DELETE` | `/api/v1/unidades/{unitId}/mi-vinculo` | El propio inquilino deja la unidad, con confirmación (HU-095). |
+| `GET` | `/api/v1/unidades/{unitId}/inquilinos` | Inquilinos activos de una unidad propia, con nombre y fecha de vínculo; nunca correo ni teléfono (HU-094). |
+
+Reglas principales:
+
+- El código de invitación es de la unidad, no de un inquilino concreto: se
+  reutiliza mientras no venza y no se consume al unirse, así que varias
+  personas pueden unirse a una unidad compartida con el mismo código mientras
+  haya lugares. `GET /invitacion` es idempotente: devuelve el código vigente si
+  existe, o genera uno nuevo (8 caracteres, sin `0`/`O`/`1`/`I`) si no hay uno o
+  venció. La vigencia es de 7 días, un umbral provisional sin aprobación de
+  producto. Los códigos anteriores no se borran, quedan vencidos.
+- `POST /unidades/unirse` exige `codigo` en el cuerpo; un código inexistente o
+  mal formado responde `400`, uno vencido responde `410`, el propietario no
+  puede unirse a su propia unidad (`403`) y una unidad sin lugares responde
+  `409`. Un inquilino ya vinculado recibe `200` de forma idempotente; uno que
+  había dejado la unidad reactiva el mismo vínculo al volver a unirse.
+- **Cupo protegido con CAS de un solo documento:** `unidades.lugaresOcupados`
+  es un contador atómico mantenido exclusivamente por
+  `IUnitRepository.TryReserveSlotAsync`/`ReleaseSlotAsync`
+  (`findOneAndUpdate` con filtro `lugaresOcupados < lugares` e `$inc`). Si dos
+  solicitudes de unión llegan al mismo tiempo con un solo lugar libre, MongoDB
+  solo aplica el incremento a una; la otra recibe `409`. Los vínculos de
+  ocupación (`vinculos_ocupacion`) no se usan para contar cupo, solo para el
+  detalle por inquilino; contar documentos ahí sería una condición de carrera
+  entre el conteo y la inserción. El filtro trata explícitamente una unidad
+  sin el campo `lugaresOcupados` (anterior a M09-001) como 0 lugares ocupados
+  (`$ifNull`), y `ReleaseSlotAsync` nunca decrementa por debajo de 0. Cubierto
+  por una prueba de concurrencia local (dos uniones simultáneas con un
+  lugar), una prueba de concurrencia HTTP y dos pruebas reales contra MongoDB
+  (opt-in): la del CAS y la del campo ausente.
+- `vinculos_ocupacion` guarda un único documento por par inquilino/unidad
+  (`_id` determinista `inquilino:unidad`, igual que `favoritos`): salir y
+  volver a unirse reactiva el documento existente en vez de crear uno nuevo.
+- La disponibilidad de la unidad (`estadoOcupacion` en `UnidadResponse` y
+  `UnidadVistaPreviaResponse`) se recalcula tras unirse, dar de baja o
+  abandonar, a partir de `lugaresOcupados` frente a `lugares`: `Ocupado` si se
+  alcanzan, `Disponible` en otro caso. `Mantenimiento` es un estado manual del
+  propietario que no se sobreescribe automáticamente mientras esté activo; al
+  desactivarlo se recalcula desde `lugaresOcupados`.
+- HU-094 y HU-095 exigen `confirmacion: true` en el cuerpo, igual que
+  `confirmacionPerdidaInformacion` en la eliminación de cuenta: la UI puede
+  pedir confirmación, pero el backend también la exige. Sin ella responden
+  `400`. HU-095 usa el claim `sub` de la sesión, nunca un id enviado por el
+  cliente. Para dar de baja a un inquilino concreto (HU-094) el propietario
+  primero consulta `GET /inquilinos` para obtener su `accountId`; el backend
+  nunca expone ese id por otra vía (ni en el correo ni en el teléfono, que no
+  se devuelven).
+- `PerfilResponse.vinculadoAUnidad` (HU-008/HU-009) ahora es real: `true`
+  cuando la cuenta tiene al menos un vínculo de ocupación activo como
+  inquilino.
+- Migración `M09-001`: crea `vinculos_ocupacion` (con
+  `ix_ocupacion_inquilino_estado` e `ix_ocupacion_unidad_estado`, sin índice
+  único declarado) e `invitaciones_unidad` (con `ix_invitaciones_unidad` y
+  `ux_invitaciones_codigo` único). No modifica `M05-001`; `unidades` añade el
+  campo flexible `lugaresOcupados` (además de `estadoOcupacion`, ya usado por
+  M07) sin requerir una migración nueva.
+
+## Sprint 6 / M08: chat
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/v1/unidades/{unitId}/conversaciones` | Inicia o reutiliza la conversación con el propietario de una unidad aprobada (HU-067). |
+| `GET` | `/api/v1/conversaciones` | Conversaciones propias, con nombre del otro participante, último mensaje, hora y contexto de la unidad (HU-069). |
+| `GET` | `/api/v1/conversaciones/{conversationId}/mensajes` | Historial paginado de una conversación, más reciente primero (HU-068). |
+| `POST` | `/api/v1/conversaciones/{conversationId}/mensajes` | Envía un mensaje; solo participantes, con límite de longitud y de frecuencia (HU-068/HU-089). |
+
+Reglas principales:
+
+- **Identificador determinista sin backfill de datos:** el `_id` de
+  `conversaciones` se deriva con SHA-256 de `unidad|propietario|solicitante`
+  (`Conversation.ComputeId`), el mismo espíritu que el `_id` compuesto
+  `inquilino:unidad` de `vinculos_ocupacion`. Dos solicitudes simultáneas para
+  iniciar la misma conversación nunca duplican el documento: el upsert por
+  `_id` en Mongo es atómico sobre un único documento. No se puede iniciar una
+  conversación con uno mismo (HU-067); si ya existe, se reutiliza sin
+  reiniciar su resumen de último mensaje.
+- Solo se puede contactar una unidad **aprobada** (`PublicationState.Aprobada`,
+  igual criterio que la ficha pública EP-M04-04); una unidad no aprobada o
+  inexistente responde `404`, sin distinguir entre ambos casos.
+- **Solo participantes leen y envían** (HU-068): cualquier otra cuenta recibe
+  `403`. El cuerpo exige `texto` no vacío y de hasta 1000 caracteres
+  (`Message.MaxBodyLength`); fuera de ese rango responde `400`.
+- **Límite de frecuencia por cuenta:** 30 mensajes por minuto (umbral
+  provisional, igual estatus que los de `Auth:RateLimit`), con el mismo
+  `IDistributedRateLimiter` compartido entre réplicas. Al excederse responde
+  `429`. Si el almacén distribuido no está disponible, el envío se permite
+  (fail-open): a diferencia del cupo de HU-049, este límite no protege una
+  invariante de negocio crítica.
+- **Paginación por cursor compuesto (fecha + id):** `GET /mensajes` devuelve
+  los mensajes más recientes primero y, si la página viene llena, un
+  `siguienteCursor` (`{fecha, mensajeId}` del mensaje más antiguo de la
+  página) para pedir el historial anterior con `?antes=&antesId=`. Un cursor
+  de solo fecha se saltaría mensajes con la misma fecha en el corte de
+  página; el `mensajeId` desempata. Tamaño de página por defecto 20, máximo
+  50.
+- **Nunca correo ni teléfono (HU-070):** las respuestas de chat solo
+  proyectan `AccountId` y `FullName` de la cuenta, igual que
+  `GET /unidades/{unitId}/inquilinos` en M09; no hay otro campo de contacto
+  que exponer.
+- **Aviso de cifrado en tránsito (HU-089):** toda respuesta de envío o
+  lectura de mensajes incluye `"aviso": "Comunicación cifrada en tránsito."`.
+- **Sesión obligatoria en todo el módulo (HU-086):** los cuatro endpoints
+  exigen `[Authorize]`; sin sesión responden `401`.
+- Migración `M08-001`: crea `conversaciones` (con `ix_conversaciones_participantes`,
+  sobre el arreglo `participantes`) y `mensajes` (con
+  `ix_mensajes_conversacion_fecha`, compuesto `conversacionId` ascendente y
+  `fecha` descendente), con los nombres de índice ya observados en Atlas (sus
+  campos clave exactos siguen pendientes de verificar contra la base real; no
+  hay un índice único adicional, la unicidad de la conversación la da el
+  `_id` determinista).
+
+HU-033/036/092 (M05), HU-048/049/093/094/095 (M09) y HU-067/068/069/070/086/089
+(M08) completan las 15 HU de Sprint 6, junto con HU-071 y HU-086 ya cubiertas
+desde Sprint 3. Detalle, decisiones provisionales y pendientes en
+[`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
+
 ## Swagger/OpenAPI protegido
 
 La documentación interna se habilita explícitamente con
@@ -389,6 +549,12 @@ AES-256-GCM antes de persistirse; el binario en claro no se guarda. El detalle d
 colecciones, campos, índices, cifrado y límites está en
 [`docs/mongodb-m06.md`](docs/mongodb-m06.md).
 
+M09 usa `vinculos_ocupacion` (`inquilinoAccountId`, `unitId`, `estado`,
+`fechaVinculo`, `fechaFin`, `motivoFin`; `_id` determinista
+`inquilino:unidad`) e `invitaciones_unidad` (`unitId`, `codigo`, `createdAt`,
+`vigenciaHasta`) con la migración `M09-001`. No modifica `M05-001`. Detalle en
+la sección "Sprint 6 / M09: ocupación".
+
 Sprint 3 / M04-M07: `GET /api/v1/exploracion/mapa`, `GET /api/v1/exploracion/lista`,
 `GET /api/v1/unidades/{id}/tarjeta`, `GET /api/v1/unidades/{id}/ficha`,
 `PUT/DELETE /api/v1/favoritos/{id}` y `GET /api/v1/favoritos`. Mapa, lista y tarjeta
@@ -400,7 +566,7 @@ usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
 [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
 
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001`, `M03-001`, `M05-001`, `M06-001` y `M07-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001`, `M05-001`, `M06-001`, `M07-001` y `M09-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -415,6 +581,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M06-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M07-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M07-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M09-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M09-001
 ```
 
 La migración ordinaria solo escribe en `unihome_modelo_pruebas` o en una base incluida
@@ -441,8 +609,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
 No ejecutar ese comando sin completar las puertas de conectividad TLS/SSPI, usuario
 técnico separado, respaldo/restauración verificado y autorización humana. Cada
 promoción selecciona una versión; hoy existen `M01-001`, `M01-002`, `M03-001`,
-`M05-001`, `M06-001` y `M07-001`. Las demás colecciones externas aún no tienen
-migración versionada ni contratos BSON/DTO aprobados.
+`M05-001`, `M06-001`, `M07-001` y `M09-001`. Las demás colecciones externas aún
+no tienen migración versionada ni contratos BSON/DTO aprobados.
 
 Matriz de cierre, endpoints y responsabilidades Android del Sprint 1:
 [`docs/sprint-01-cierre.md`](docs/sprint-01-cierre.md).
@@ -483,11 +651,15 @@ o diverge, HU-006 responde `503` y no se declara operativa.
   sesión administrativa: `GET /openapi/v1.json`. Incluye el esquema Bearer y
   marca `logout` como operación autenticada. La interfaz `/swagger` usa la misma
   policy; ver “Swagger/OpenAPI protegido”.
-- Los 15 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
+- Los 17 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
   `Occupancy`, `ForWhom`, `BathroomType`, `FurnitureType`, `UnitTemplate`,
   `ServiceName`, `ServiceMode`, `AccountLabel`, `EstadoExpediente`,
-  `TipoDocumentoVerificacion`, `ResultadoComparacionNombres`) se documentan como string con sus
-  valores reales; los enteros se rechazan en runtime. `POST
+  `TipoDocumentoVerificacion`, `ResultadoComparacionNombres`, `UnitAvailability`,
+  `OccupancyStatus`)
+  se documentan como string con sus
+  valores reales; los enteros se rechazan en runtime. `tipoPropiedad` y
+  `estadoHabitacion` en `GET /api/v1/mis-propiedades` siguen el mismo criterio:
+  un entero o un valor fuera del enum responde `400`. `POST
   /api/v1/unidades/{unitId}/fotos` se documenta como `multipart/form-data` con
   `Fotos` repetible, array de binarios, JPEG/PNG, 10 fotos, 5 MB por archivo y
   52 MB por solicitud.
@@ -509,6 +681,22 @@ o diverge, HU-006 responde `503` y no se declara operativa.
   intentos agotados, `413`, `429` y `503`.
 - Eliminación de cuenta: `204`, `400` sin confirmar la pérdida de información, `401`
   por contraseña incorrecta o sesión inválida, `413` y `503`.
+- Mis propiedades: `200` siempre que la sesión sea válida (lista vacía si no hay
+  propiedades), `400` por `tipoPropiedad`/`estadoHabitacion` inválidos, `401` sin
+  sesión y `503` si MongoDB no está disponible.
+- Invitación de unidad: `200`, `401` sin sesión, `403` si la unidad no es propia,
+  `404` si no existe, `409` si no se pudo generar un código tras reintentar y
+  `503`.
+- Unirse con código: `200` (incluido el reingreso idempotente), `400` por código
+  vacío/inexistente, `401` sin sesión, `403` si el propietario intenta unirse a su
+  propia unidad, `409` sin lugares disponibles, `410` por código vencido, `413` y
+  `503`.
+- Mantenimiento: `200`, `401` sin sesión, `403` si la unidad no es propia, `404`
+  si no existe, `413` y `503`.
+- Baja de inquilino y abandono de unidad: `204`, `400` sin
+  `confirmacion: true`, `401` sin sesión, `403` si la unidad no es propia (solo
+  baja de inquilino), `404` si la unidad o el vínculo activo no existen, `413` y
+  `503`.
 
 ## Pruebas
 
@@ -537,9 +725,11 @@ y no se declaran aprobadas. El workflow manual
 [`.github/workflows/ocr-documental.yml`](.github/workflows/ocr-documental.yml)
 prepara la ejecución autorizada en CI con ambos motores reales.
 
-Estado local del cierre: **790 unitarias** y **256 integraciones ejecutadas**
-(9 opt-in de Mongo/Cloudinary omitidas de forma explícita). La matriz de las
-56 HU de Sprints 1–5 está en [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md).
+Estado local del cierre de Sprint 6: **869 unitarias** y **296 integraciones
+ejecutadas** (13 opt-in de Mongo/Cloudinary omitidas de forma explícita). La
+matriz de las 56 HU de Sprints 1–5 está en
+[`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md); la de las 15 HU de
+Sprint 6, en [`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
 La matriz de aceptación HTTPS de las 41 operaciones y la colección
 Postman/Newman parametrizada están en
 [`docs/aceptacion-sprints-1-5.md`](docs/aceptacion-sprints-1-5.md) y
@@ -557,9 +747,10 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
 `unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`,
-`M06-001` y `M07-001` a esa base temporal y las pruebas reales de identidad,
-recuperación de contraseña, universidades, publicaciones, verificación documental,
-exploración/favoritos y bloqueo distribuido
+`M06-001`, `M07-001`, `M08-001` y `M09-001` a esa base temporal y las pruebas
+reales de identidad, recuperación de contraseña, universidades, publicaciones,
+verificación documental, exploración/favoritos, bloqueo distribuido, ocupación
+(cupo con CAS y campo `lugaresOcupados` ausente) y chat
 se ejecutan con TRX. El job falla
 si MongoDB no inicia, si alguna migración no queda válida, si las pruebas se omiten
 o si no se genera la evidencia; el artefacto se publica como `mongodb-ci-results`.
@@ -567,14 +758,16 @@ La ejecución manual de verificación
 ([43395389178](https://github.com/unihome0412/unihome-backend/actions/runs/43395389178),
 commit de código `f51ac10`) dejó 4/4 pruebas reales aprobadas, 0 omitidas,
 `M01-001` y `M03-001` válidas y la limpieza temporal confirmada. **Sprint 4/5**
-añade `M06-001` y las dos pruebas de verificación documental; la siguiente
-ejecución autorizada debe mostrar **8/8** y permanece **PENDIENTE_CI**.
+añade `M06-001` y las dos pruebas de verificación documental (**8/8**).
+**Sprint 6** añade `M08-001`, `M09-001` y tres pruebas reales más (dos de
+ocupación, una de chat); la siguiente ejecución autorizada debe mostrar
+**11/11** y permanece **PENDIENTE_CI**.
 
 El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
 `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
 `127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M01-002, M03-001,
-M05-001, M06-001 y M07-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+M05-001, M06-001, M07-001, M08-001 y M09-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
 confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
 operación documentada y publica `zap-report.html`, `zap-report.json`,
 `dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el
@@ -608,6 +801,16 @@ privado, y el administrador la aprueba; la segunda repite el flujo y el
 administrador la rechaza con motivo, que el solicitante consulta después. La
 exploración M04 se valida tras la aprobación real. La ejecución real 41/41 queda
 **PENDIENTE_CI** y no se declara PASS anticipado.
+
+**Sprint 6:** el catálogo OpenAPI pasa a **52 operaciones** (11 nuevas: 1 de
+M05, 6 de M09, 4 de M08). `mongo-db-test`, `dast-zap` y `restler-fuzzing` ya
+aplican/verifican `M08-001` y `M09-001` después de `M07-001`; el fixture y el
+driver real de ZAP se ampliaron con el flujo completo de ocupación (invitación,
+unirse, mantenimiento, baja, abandono) y de chat (iniciar conversación, enviar
+y listar mensajes, listar conversaciones). La ejecución real 52/52 queda
+**PENDIENTE_CI**: estos tres jobs no se dispararon en GitHub con el código de
+Sprint 6; solo se validó localmente contra el fixture (`tools/ci/test_zap_dast.py`,
+167/167 PASS).
 
 El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
 cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que

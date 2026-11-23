@@ -67,4 +67,19 @@ public sealed class InMemoryPropertyRepository : IPropertyRepository
             return Task.FromResult(items);
         }
     }
+
+    public Task<IReadOnlyList<Property>> ListByOwnerAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<Property> items = _properties.Values
+                .Where(property => property.OwnerAccountId == ownerAccountId)
+                .OrderByDescending(property => property.CreatedAt)
+                .ThenBy(property => property.Id)
+                .ToArray();
+            return Task.FromResult(items);
+        }
+    }
 }

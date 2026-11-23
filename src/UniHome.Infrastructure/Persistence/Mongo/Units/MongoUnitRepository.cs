@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using UniHome.Application.Identity.Exceptions;
 using UniHome.Application.Units.Abstractions;
@@ -17,6 +18,20 @@ internal sealed class MongoUnitRepository : IUnitRepository
 {
     private readonly MongoDbClientProvider _clientProvider;
     private readonly ILogger<MongoUnitRepository> _logger;
+
+    /// <summary>
+    /// Expresión de agregación que trata una unidad sin el campo
+    /// <c>lugaresOcupados</c> como 0 lugares ocupados. El campo es nuevo en
+    /// M09-001 y este servicio es su único escritor (vía
+    /// <see cref="TryReserveSlotAsync"/>), así que no puede haber hoy una
+    /// unidad con vínculos activos y el campo ausente; se deja explícito para
+    /// no depender del orden de comparación implícito de BSON.
+    /// </summary>
+    private static readonly BsonDocument OccupiedPlacesOrZero = new("$ifNull", new BsonArray
+    {
+        $"${MongoPublicationSchema.UnitOccupiedPlacesField}",
+        0
+    });
 
     public MongoUnitRepository(
         MongoDbClientProvider clientProvider,
@@ -376,6 +391,127 @@ internal sealed class MongoUnitRepository : IUnitRepository
         }
     }
 
+    public async Task<bool> UpdateAvailabilityAsync(
+        Guid id,
+        Guid propertyId,
+        UnitAvailability availability,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UnitDocument>.Filter.And(
+                ByIdFilter(id),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.PropertyId,
+                    propertyId.ToString("N", CultureInfo.InvariantCulture)));
+            var update = Builders<UnitDocument>.Update.Set(
+                document => document.AvailabilityState,
+                availability.ToString());
+
+            var result = await collection
+                .UpdateOneAsync(filter, update, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return result.MatchedCount == 1;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<int?> TryReserveSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UnitDocument>.Filter.And(
+                ByIdFilter(id),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.PropertyId,
+                    propertyId.ToString("N", CultureInfo.InvariantCulture)),
+                new BsonDocument("$expr", new BsonDocument("$lt", new BsonArray
+                {
+                    OccupiedPlacesOrZero,
+                    $"${MongoPublicationSchema.UnitPlacesField}"
+                })));
+            var update = Builders<UnitDocument>.Update.Inc(document => document.OccupiedPlaces, 1);
+
+            // CAS de un solo documento: MongoDB evalúa el filtro y aplica el
+            // $inc de forma atómica, así que dos solicitudes simultáneas con un
+            // solo lugar libre nunca incrementan ambas lugaresOcupados. El
+            // $ifNull trata explícitamente una unidad sin el campo (no puede
+            // existir hoy, porque este sprint es el único escritor de
+            // lugaresOcupados, pero se deja explícito en vez de depender del
+            // orden de comparación implícito de BSON) como lugaresOcupados = 0.
+            var updated = await collection
+                .FindOneAndUpdateAsync(
+                    filter,
+                    update,
+                    new FindOneAndUpdateOptions<UnitDocument>
+                    {
+                        ReturnDocument = ReturnDocument.After
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return updated?.OccupiedPlaces;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
+    public async Task<int> ReleaseSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var filter = Builders<UnitDocument>.Filter.And(
+                ByIdFilter(id),
+                Builders<UnitDocument>.Filter.Eq(
+                    document => document.PropertyId,
+                    propertyId.ToString("N", CultureInfo.InvariantCulture)),
+                new BsonDocument("$expr", new BsonDocument("$gt", new BsonArray
+                {
+                    OccupiedPlacesOrZero,
+                    0
+                })));
+            var update = Builders<UnitDocument>.Update.Inc(document => document.OccupiedPlaces, -1);
+
+            // Misma convención que TryReserveSlotAsync: una unidad sin el
+            // campo lugaresOcupados (0 lugares ocupados) nunca cumple
+            // lugaresOcupados > 0, así que el filtro no la toca y el contador
+            // jamás queda negativo.
+            var updated = await collection
+                .FindOneAndUpdateAsync(
+                    filter,
+                    update,
+                    new FindOneAndUpdateOptions<UnitDocument>
+                    {
+                        ReturnDocument = ReturnDocument.After
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return updated?.OccupiedPlaces ?? 0;
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<bool> TryAppendPhotosAsync(
         Guid id,
         Guid propertyId,
@@ -456,6 +592,7 @@ internal sealed class MongoUnitRepository : IUnitRepository
             Photos = unit.Photos.Select(ToDocument).ToList(),
             PublicationState = unit.PublicationState.ToString(),
             AvailabilityState = unit.Availability.ToString(),
+            OccupiedPlaces = unit.OccupiedPlaces,
             CreatedAt = unit.CreatedAt.UtcDateTime
         };
 
@@ -506,7 +643,8 @@ internal sealed class MongoUnitRepository : IUnitRepository
                 DateTime.SpecifyKind(document.CreatedAt, DateTimeKind.Utc)),
             string.IsNullOrWhiteSpace(document.AvailabilityState)
                 ? UnitAvailability.Disponible
-                : Enum.Parse<UnitAvailability>(document.AvailabilityState));
+                : Enum.Parse<UnitAvailability>(document.AvailabilityState),
+            document.OccupiedPlaces);
 
     private static ServiceCharge ToDomain(ServiceChargeDocument document) =>
         ServiceCharge.Create(

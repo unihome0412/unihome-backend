@@ -26,6 +26,11 @@ using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
 using UniHome.Api.Security;
 using UniHome.Application.Abstractions.RateLimiting;
+using UniHome.Application.Chat.Abstractions;
+using UniHome.Application.Chat.ListConversations;
+using UniHome.Application.Chat.ListMessages;
+using UniHome.Application.Chat.SendMessage;
+using UniHome.Application.Chat.StartConversation;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Exploration;
 using UniHome.Application.Favorites;
@@ -36,9 +41,17 @@ using UniHome.Application.Identity.Logout;
 using UniHome.Application.Identity.PasswordRecovery;
 using UniHome.Application.Identity.RefreshSessions;
 using UniHome.Application.Identity.RegisterAccount;
+using UniHome.Application.OccupancyLinks;
+using UniHome.Application.OccupancyLinks.GetInvitation;
+using UniHome.Application.OccupancyLinks.JoinWithCode;
+using UniHome.Application.OccupancyLinks.LeaveUnit;
+using UniHome.Application.OccupancyLinks.ListTenants;
+using UniHome.Application.OccupancyLinks.RemoveTenant;
+using UniHome.Application.OccupancyLinks.SetMaintenance;
 using UniHome.Application.Profiles;
 using UniHome.Application.Profiles.GetProfile;
 using UniHome.Application.Properties.CreateProperty;
+using UniHome.Application.Properties.MyProperties;
 using UniHome.Application.Publications.AcceptTerms;
 using UniHome.Application.Publications.MyPublicationMap;
 using UniHome.Application.Publications.SubmitFirstPublication;
@@ -162,6 +175,7 @@ builder.Services.AddScoped<ConfirmPasswordResetService>();
 builder.Services.AddScoped<GetProfileService>();
 builder.Services.AddScoped<PublishingEligibilityService>();
 builder.Services.AddScoped<CreatePropertyService>();
+builder.Services.AddScoped<GetMyPropertiesService>();
 builder.Services.AddScoped<CreateUnitService>();
 builder.Services.AddScoped<AddUnitPhotosService>();
 builder.Services.AddScoped<ConfigureUnitServicesService>();
@@ -177,6 +191,17 @@ builder.Services.AddScoped<ListFavoritesService>();
 builder.Services.AddScoped<AcceptTermsService>();
 builder.Services.AddScoped<SubmitFirstPublicationService>();
 builder.Services.AddScoped<GetMyPublicationMapService>();
+builder.Services.AddScoped<UnitAvailabilityRecalculator>();
+builder.Services.AddScoped<GetUnitInvitationService>();
+builder.Services.AddScoped<JoinUnitWithCodeService>();
+builder.Services.AddScoped<SetUnitMaintenanceService>();
+builder.Services.AddScoped<RemoveTenantService>();
+builder.Services.AddScoped<LeaveUnitService>();
+builder.Services.AddScoped<ListUnitTenantsService>();
+builder.Services.AddScoped<StartConversationService>();
+builder.Services.AddScoped<SendMessageService>();
+builder.Services.AddScoped<ListConversationMessagesService>();
+builder.Services.AddScoped<ListMyConversationsService>();
 builder.Services.AddScoped<UploadVerificationDocumentService>();
 builder.Services.AddScoped<GetMyExpedienteService>();
 builder.Services.AddScoped<ListExpedientesService>();
@@ -763,7 +788,8 @@ app.Use(async (context, next) =>
             path.StartsWithSegments("/api/v1/perfil") ||
             path.StartsWithSegments("/api/v1/expedientes") ||
             path.StartsWithSegments("/api/v1/admin/expedientes") ||
-            path.StartsWithSegments("/api/v1/publicaciones"))
+            path.StartsWithSegments("/api/v1/publicaciones") ||
+            path.StartsWithSegments("/api/v1/mis-propiedades"))
         {
             headers.CacheControl = "no-store";
         }

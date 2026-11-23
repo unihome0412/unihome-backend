@@ -7,7 +7,8 @@ public enum OperationStatus
     NotFound,
     Forbidden,
     Conflict,
-    Unprocessable
+    Unprocessable,
+    RateLimited
 }
 
 public sealed record OperationResult<T>(
@@ -39,6 +40,9 @@ public sealed record OperationResult<T>(
 
     public static OperationResult<T> Unprocessable() =>
         new(OperationStatus.Unprocessable, default, EmptyErrors);
+
+    public static OperationResult<T> RateLimited() =>
+        new(OperationStatus.RateLimited, default, EmptyErrors);
 
     private static IReadOnlyDictionary<string, string[]> EmptyErrors { get; } =
         new Dictionary<string, string[]>(StringComparer.Ordinal);

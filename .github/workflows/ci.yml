@@ -547,7 +547,7 @@ jobs:
         run: dotnet restore UniHome.Backend.slnx --locked-mode
       - name: Build Release
         run: dotnet build UniHome.Backend.slnx --configuration Release --no-restore -warnaserror
-      - name: Inicializar base efímera con M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001
+      - name: Inicializar base efímera con M01-001, M01-002, M03-001, M05-001, M06-001, M07-001, M08-001 y M09-001
         id: mongo-migration
         run: |
           set -euo pipefail
@@ -630,6 +630,32 @@ jobs:
           grep -F 'M07-001 coinciden: True' TestResults/mongo/migration-verify-m07.txt
           grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m07.txt
           grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m07.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database unihome_ci_verificacion --confirm --version M08-001 \
+            | tee TestResults/mongo/migration-apply-m08.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database unihome_ci_verificacion --version M08-001 \
+            | tee TestResults/mongo/migration-verify-m08.txt
+          grep -F 'Registrada: True' TestResults/mongo/migration-verify-m08.txt
+          grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify-m08.txt
+          grep -F 'M08-001 coinciden: True' TestResults/mongo/migration-verify-m08.txt
+          grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m08.txt
+          grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m08.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database unihome_ci_verificacion --confirm --version M09-001 \
+            | tee TestResults/mongo/migration-apply-m09.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database unihome_ci_verificacion --version M09-001 \
+            | tee TestResults/mongo/migration-verify-m09.txt
+          grep -F 'Registrada: True' TestResults/mongo/migration-verify-m09.txt
+          grep -F 'Checksum coincide: True' TestResults/mongo/migration-verify-m09.txt
+          grep -F 'M09-001 coinciden: True' TestResults/mongo/migration-verify-m09.txt
+          grep -F 'Escrituras pendientes: 0' TestResults/mongo/migration-verify-m09.txt
+          grep -F 'Resultado: VÁLIDO' TestResults/mongo/migration-verify-m09.txt
       - name: Pruebas reales contra MongoDB
         id: mongo-tests
         run: >-
@@ -1204,7 +1230,7 @@ jobs:
           done
           echo "::error::MongoDB efímero no disponible para DAST."
           exit 1
-      - name: Inicializar base efímera DAST con M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001
+      - name: Inicializar base efímera DAST con M01-001, M01-002, M03-001, M05-001, M06-001, M07-001, M08-001 y M09-001
         run: |
           set -euo pipefail
           mkdir -p artifacts/dast-zap
@@ -1266,6 +1292,24 @@ jobs:
             verify --database "$MONGO_DAST_DATABASE" --version M07-001 \
             | tee artifacts/dast-zap/migration-verify-m07.txt
           grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m07.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_DAST_DATABASE" --confirm --version M08-001 \
+            | tee artifacts/dast-zap/migration-apply-m08.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_DAST_DATABASE" --version M08-001 \
+            | tee artifacts/dast-zap/migration-verify-m08.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m08.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_DAST_DATABASE" --confirm --version M09-001 \
+            | tee artifacts/dast-zap/migration-apply-m09.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_DAST_DATABASE" --version M09-001 \
+            | tee artifacts/dast-zap/migration-verify-m09.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/dast-zap/migration-verify-m09.txt
       - name: Preparar SMTP de captura local y confianza TLS
         run: |
           set -euo pipefail
@@ -1789,7 +1833,7 @@ jobs:
           done
           echo "::error::MongoDB efímero no disponible para RESTler."
           exit 1
-      - name: Inicializar base efímera RESTler con M01-001, M01-002, M03-001, M05-001, M06-001 y M07-001
+      - name: Inicializar base efímera RESTler con M01-001, M01-002, M03-001, M05-001, M06-001, M07-001, M08-001 y M09-001
         run: |
           set -euo pipefail
           mkdir -p artifacts/restler
@@ -1851,6 +1895,24 @@ jobs:
             verify --database "$MONGO_RESTLER_DATABASE" --version M07-001 \
             | tee artifacts/restler/migration-verify-m07.txt
           grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m07.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M08-001 \
+            | tee artifacts/restler/migration-apply-m08.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_RESTLER_DATABASE" --version M08-001 \
+            | tee artifacts/restler/migration-verify-m08.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m08.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            apply --database "$MONGO_RESTLER_DATABASE" --confirm --version M09-001 \
+            | tee artifacts/restler/migration-apply-m09.txt
+          dotnet run --project tools/UniHome.MongoMigrator/UniHome.MongoMigrator.csproj \
+            --configuration Release --no-build -- \
+            verify --database "$MONGO_RESTLER_DATABASE" --version M09-001 \
+            | tee artifacts/restler/migration-verify-m09.txt
+          grep -F 'Resultado: VÁLIDO' artifacts/restler/migration-verify-m09.txt
       - name: Preparar SMTP de captura local y confianza TLS
         run: |
           set -euo pipefail

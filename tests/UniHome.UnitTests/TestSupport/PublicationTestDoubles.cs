@@ -35,10 +35,21 @@ internal sealed class FakePropertyRepository : IPropertyRepository
         CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Property>>(
             Items.Where(property => ids.Contains(property.Id)).ToArray());
+
+    public Task<IReadOnlyList<Property>> ListByOwnerAsync(
+        Guid ownerAccountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<Property>>(Items
+            .Where(property => property.OwnerAccountId == ownerAccountId)
+            .OrderByDescending(property => property.CreatedAt)
+            .ThenBy(property => property.Id)
+            .ToArray());
 }
 
 internal sealed class FakeUnitRepository : IUnitRepository
 {
+    private readonly object _gate = new();
+
     public List<Unit> Items { get; } = [];
 
     public bool UpdateResult { get; set; } = true;
@@ -181,6 +192,66 @@ internal sealed class FakeUnitRepository : IUnitRepository
         }
 
         return Task.FromResult(UpdateResult);
+    }
+
+    public Task<bool> UpdateAvailabilityAsync(
+        Guid id,
+        Guid propertyId,
+        UnitAvailability availability,
+        CancellationToken cancellationToken = default)
+    {
+        if (!UpdateResult)
+        {
+            return Task.FromResult(false);
+        }
+
+        var unit = Items.SingleOrDefault(item => item.Id == id && item.PropertyId == propertyId);
+
+        if (unit is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        unit.SetAvailability(availability);
+        return Task.FromResult(true);
+    }
+
+    public Task<int?> TryReserveSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            var unit = Items.SingleOrDefault(item => item.Id == id && item.PropertyId == propertyId);
+
+            if (unit is null || unit.OccupiedPlaces >= unit.Places)
+            {
+                return Task.FromResult<int?>(null);
+            }
+
+            unit.SetOccupiedPlaces(unit.OccupiedPlaces + 1);
+            return Task.FromResult<int?>(unit.OccupiedPlaces);
+        }
+    }
+
+    public Task<int> ReleaseSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            var unit = Items.SingleOrDefault(item => item.Id == id && item.PropertyId == propertyId);
+
+            if (unit is null || unit.OccupiedPlaces <= 0)
+            {
+                return Task.FromResult(unit?.OccupiedPlaces ?? 0);
+            }
+
+            unit.SetOccupiedPlaces(unit.OccupiedPlaces - 1);
+            return Task.FromResult(unit.OccupiedPlaces);
+        }
     }
 
     public Task<bool> TryAppendPhotosAsync(

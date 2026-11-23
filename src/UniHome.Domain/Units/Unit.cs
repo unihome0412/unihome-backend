@@ -41,7 +41,8 @@ public sealed class Unit
         IReadOnlyList<UnitPhoto> photos,
         PublicationState publicationState,
         DateTimeOffset createdAt,
-        UnitAvailability availability)
+        UnitAvailability availability,
+        int occupiedPlaces)
     {
         Id = id;
         PropertyId = propertyId;
@@ -64,6 +65,7 @@ public sealed class Unit
         PublicationState = publicationState;
         CreatedAt = createdAt;
         Availability = availability;
+        OccupiedPlaces = occupiedPlaces;
     }
 
     public Guid Id { get; }
@@ -85,8 +87,17 @@ public sealed class Unit
     public IReadOnlyList<ServiceCharge> Services => _services.AsReadOnly();
     public IReadOnlyList<UnitPhoto> Photos => _photos.AsReadOnly();
     public PublicationState PublicationState { get; private set; }
-    public UnitAvailability Availability { get; }
+    public UnitAvailability Availability { get; private set; }
     public DateTimeOffset CreatedAt { get; }
+
+    /// <summary>
+    /// EP-M09 (HU-049): contador atómico de lugares ocupados, mantenido en
+    /// exclusiva por <c>IUnitRepository.TryReserveSlotAsync</c>/<c>ReleaseSlotAsync</c>.
+    /// Es el CAS de un solo documento que impide exceder <see cref="Places"/>
+    /// cuando dos solicitudes de unión llegan al mismo tiempo; los vínculos de
+    /// ocupación no se usan para contar cupo.
+    /// </summary>
+    public int OccupiedPlaces { get; private set; }
 
     public static Unit Create(
         Guid propertyId,
@@ -152,7 +163,8 @@ public sealed class Unit
             [],
             PublicationState.Borrador,
             now,
-            UnitAvailability.Disponible);
+            UnitAvailability.Disponible,
+            occupiedPlaces: 0);
     }
 
     public static Unit Restore(
@@ -176,7 +188,8 @@ public sealed class Unit
         IEnumerable<UnitPhoto>? photos,
         PublicationState publicationState,
         DateTimeOffset createdAt,
-        UnitAvailability availability = UnitAvailability.Disponible) =>
+        UnitAvailability availability = UnitAvailability.Disponible,
+        int occupiedPlaces = 0) =>
         new(
             id,
             propertyId,
@@ -198,7 +211,8 @@ public sealed class Unit
             photos?.ToArray() ?? [],
             publicationState,
             createdAt,
-            availability);
+            availability,
+            occupiedPlaces);
 
     public void ConfigureServices(IEnumerable<ServiceCharge> services)
     {
@@ -218,6 +232,39 @@ public sealed class Unit
     {
         ZoneInfo = OptionalText(zoneInfo, MaxZoneInfoLength, "La información de zona es demasiado larga.");
         Rules = OptionalText(rules, MaxRulesLength, "Las reglas de convivencia son demasiado largas.");
+    }
+
+    /// <summary>
+    /// EP-M09: aplica la disponibilidad recalculada (mantenimiento manual o
+    /// Disponible/Ocupado según los vínculos activos). No valida el conteo de
+    /// lugares aquí; esa regla pertenece al servicio de aplicación, que conoce
+    /// los vínculos de ocupación.
+    /// </summary>
+    public void SetAvailability(UnitAvailability availability)
+    {
+        if (!Enum.IsDefined(availability))
+        {
+            throw new ArgumentException("La disponibilidad no es válida.", nameof(availability));
+        }
+
+        Availability = availability;
+    }
+
+    /// <summary>
+    /// Sincroniza el valor en memoria con el resultado devuelto por el CAS del
+    /// repositorio (<c>TryReserveSlotAsync</c>/<c>ReleaseSlotAsync</c>). No
+    /// realiza el incremento/decremento aquí: eso solo es atómico en MongoDB.
+    /// </summary>
+    public void SetOccupiedPlaces(int occupiedPlaces)
+    {
+        if (occupiedPlaces < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(occupiedPlaces),
+                "El número de lugares ocupados no puede ser negativo.");
+        }
+
+        OccupiedPlaces = occupiedPlaces;
     }
 
     /// <summary>

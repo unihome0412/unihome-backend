@@ -60,10 +60,11 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
   --version M01-002
 ```
 
-`--version M01-001|M01-002|M03-001|M05-001|M07-001` es opcional; el valor
-predeterminado es M01-001. No se admiten alias, mayúsculas distintas, espacios ni
-nombres parciales. La secuencia para `unihome_verificacion` es M01-001, M01-002,
-M03-001, M05-001 y M07-001; no se promueve una versión si falta la anterior.
+`--version M01-001|M01-002|M03-001|M05-001|M07-001|M09-001` es opcional; el
+valor predeterminado es M01-001. No se admiten alias, mayúsculas distintas,
+espacios ni nombres parciales. La secuencia para `unihome_verificacion` es
+M01-001, M01-002, M03-001, M05-001, M07-001 y M09-001; no se promueve una
+versión si falta la anterior.
 
 ## Alcance
 
@@ -97,8 +98,17 @@ La migración crea, si faltan:
 - `propiedades`, `unidades` y `aceptaciones_terminos` con sus índices de
   propietario, búsqueda, duplicado de propiedad y unicidad de términos.
 
-Las migraciones M01, M03, M05 y M07 se seleccionan con `--version`; no se aplican
-en cascada. La promoción incremental exige las versiones anteriores. El TTL solo
+`M09-001` crea, si faltan:
+
+- `vinculos_ocupacion` con `ix_ocupacion_inquilino_estado` e
+  `ix_ocupacion_unidad_estado` (sin índice único: la unicidad por par
+  inquilino/unidad la da el `_id` determinista `inquilino:unidad`, igual que
+  `favoritos`).
+- `invitaciones_unidad` con `ix_invitaciones_unidad` para la invitación vigente
+  más reciente de cada unidad y `ux_invitaciones_codigo` único sobre el código.
+
+Las migraciones M01, M03, M05, M07 y M09 se seleccionan con `--version`; no se
+aplican en cascada. La promoción incremental exige las versiones anteriores. El TTL solo
 elimina sesiones vencidas; la autorización de una sesión se comprueba
 siempre en el backend. No se crean validadores JSON para M01 porque el contrato no
 los define.

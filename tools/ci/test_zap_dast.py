@@ -1,4 +1,5 @@
 """Pruebas sin red de la lógica del escaneo DAST."""
+import base64
 import json
 import tempfile
 import unittest
@@ -46,6 +47,7 @@ OPERATIONS = [
     ("GET", "/api/v1/perfil/mi-perfil", True),
     ("POST", "/api/v1/propiedades", True),
     ("POST", "/api/v1/propiedades/{propertyId}/unidades", True),
+    ("GET", "/api/v1/mis-propiedades", True),
     ("POST", "/api/v1/publicaciones/primera/terminos", True),
     ("POST", "/api/v1/publicaciones/primera/enviar", True),
     ("POST", "/api/v1/expedientes/mi-expediente/ine", True),
@@ -70,6 +72,16 @@ OPERATIONS = [
     ("PUT", "/api/v1/favoritos/{unitId}", True),
     ("GET", "/api/v1/favoritos", True),
     ("DELETE", "/api/v1/favoritos/{unitId}", True),
+    ("GET", "/api/v1/unidades/{unitId}/invitacion", True),
+    ("POST", "/api/v1/unidades/unirse", True),
+    ("PUT", "/api/v1/unidades/{unitId}/mantenimiento", True),
+    ("DELETE", "/api/v1/unidades/{unitId}/inquilinos/{tenantAccountId}", True),
+    ("DELETE", "/api/v1/unidades/{unitId}/mi-vinculo", True),
+    ("GET", "/api/v1/unidades/{unitId}/inquilinos", True),
+    ("POST", "/api/v1/unidades/{unitId}/conversaciones", True),
+    ("GET", "/api/v1/conversaciones", True),
+    ("GET", "/api/v1/conversaciones/{conversationId}/mensajes", True),
+    ("POST", "/api/v1/conversaciones/{conversationId}/mensajes", True),
 ]
 
 
@@ -91,6 +103,16 @@ SAFE_HEADERS = {
     "content-security-policy": "default-src 'none'",
     "cache-control": "no-store",
 }
+
+
+def _fake_jwt() -> str:
+    """Token con forma de JWT (header.payload.firma) para que
+    `_account_id_from_token` pueda leer un `sub` simulado en las pruebas."""
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode("ascii")
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"sub": uuid.uuid4().hex}).encode("utf-8")
+    ).rstrip(b"=").decode("ascii")
+    return f"{header}.{payload}.fake-signature"
 
 
 class FakeResponse:
@@ -216,14 +238,14 @@ class FakeHttpClient:
             if note == "login C tras borrado":
                 return 401, b"{}"
             return 200, json.dumps({
-                "accessToken": f"access-{uuid.uuid4().hex}",
+                "accessToken": _fake_jwt(),
                 "refreshToken": f"refresh-{uuid.uuid4().hex}",
             }).encode("utf-8")
         if base == "/api/v1/auth/refresh":
             if note == "refresh tras logout":
                 return 401, b"{}"
             return 200, json.dumps({
-                "accessToken": f"access-{uuid.uuid4().hex}",
+                "accessToken": _fake_jwt(),
                 "refreshToken": f"refresh-{uuid.uuid4().hex}",
             }).encode("utf-8")
         if base == "/api/v1/auth/logout":
@@ -248,6 +270,19 @@ class FakeHttpClient:
             return 201, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
         if base.startswith("/api/v1/propiedades/") and base.endswith("/unidades"):
             return 201, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
+        if base == "/api/v1/mis-propiedades":
+            return 200, json.dumps([{
+                "id": str(uuid.uuid4()),
+                "nombre": "DAST Propiedad",
+                "tipoPropiedad": "Casa",
+                "totalHabitaciones": 1,
+                "habitacionesDisponibles": 1,
+                "habitaciones": [{
+                    "id": str(uuid.uuid4()),
+                    "tipoUnidad": "Habitacion",
+                    "estado": "Disponible",
+                }],
+            }]).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/servicios"):
             return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/zona-reglas"):
@@ -262,6 +297,72 @@ class FakeHttpClient:
             return 200, b"[]"
         if base.startswith("/api/v1/favoritos/"):
             return 204, b""
+        if base.startswith("/api/v1/unidades/") and base.endswith("/invitacion"):
+            return 200, json.dumps({
+                "codigo": "ABCD2345",
+                "vigenciaHasta": "2026-11-26T00:00:00+00:00",
+            }).encode("utf-8")
+        if base == "/api/v1/unidades/unirse":
+            return 200, json.dumps({
+                "unidadId": str(uuid.uuid4()),
+                "estado": "Activo",
+                "fechaVinculo": "2026-11-19T00:00:00+00:00",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and base.endswith("/mantenimiento"):
+            return 200, json.dumps({
+                "id": str(uuid.uuid4()),
+                "estadoOcupacion": "Mantenimiento",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and base.endswith("/inquilinos"):
+            return 200, json.dumps([{
+                "accountId": str(uuid.uuid4()),
+                "nombreCompleto": "Inquilino DAST",
+                "fechaVinculo": "2026-11-19T00:00:00+00:00",
+            }]).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and "/inquilinos/" in base:
+            return 204, b""
+        if base.startswith("/api/v1/unidades/") and base.endswith("/mi-vinculo"):
+            return 204, b""
+        if base.startswith("/api/v1/unidades/") and base.endswith("/conversaciones"):
+            return 200, json.dumps({
+                "conversacionId": str(uuid.uuid4()),
+                "unidadId": str(uuid.uuid4()),
+                "otroAccountId": str(uuid.uuid4()),
+                "otroNombreCompleto": "Propietario DAST",
+                "creadaEn": "2026-11-19T00:00:00+00:00",
+            }).encode("utf-8")
+        if base == "/api/v1/conversaciones":
+            return 200, json.dumps([{
+                "conversacionId": str(uuid.uuid4()),
+                "unidadId": str(uuid.uuid4()),
+                "tipoUnidad": "Habitacion",
+                "precioMensualPorLugarMxn": 3500,
+                "otroAccountId": str(uuid.uuid4()),
+                "otroNombreCompleto": "Inquilino DAST",
+                "ultimoMensaje": "Hola, ¿sigue disponible?",
+                "ultimaActividad": "2026-11-19T00:00:00+00:00",
+            }]).encode("utf-8")
+        if base.startswith("/api/v1/conversaciones/") and base.endswith("/mensajes"):
+            if method == "POST":
+                return 201, json.dumps({
+                    "id": str(uuid.uuid4()),
+                    "conversacionId": str(uuid.uuid4()),
+                    "remitenteAccountId": str(uuid.uuid4()),
+                    "texto": "Hola, ¿sigue disponible?",
+                    "enviadoEn": "2026-11-19T00:00:00+00:00",
+                    "aviso": "Comunicación cifrada en tránsito.",
+                }).encode("utf-8")
+            return 200, json.dumps({
+                "mensajes": [{
+                    "id": str(uuid.uuid4()),
+                    "conversacionId": str(uuid.uuid4()),
+                    "remitenteAccountId": str(uuid.uuid4()),
+                    "texto": "Hola, ¿sigue disponible?",
+                    "enviadoEn": "2026-11-19T00:00:00+00:00",
+                }],
+                "siguienteCursor": None,
+                "aviso": "Comunicación cifrada en tránsito.",
+            }).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/fotos"):
             return 200, b'{"totalFotos":1}'
         if base.startswith("/api/v1/unidades/") and base.endswith("/vista-previa"):
@@ -372,9 +473,9 @@ class ZapDastTests(unittest.TestCase):
         self.assertIn("estadoPublicacion", command[-1])
         self.assertIn("estadoOcupacion", command[-1])
 
-    def test_openapi_operations_incluyen_41_operaciones_y_auth(self):
+    def test_openapi_operations_incluyen_52_operaciones_y_auth(self):
         operations = parse_openapi_operations(SPEC)
-        self.assertEqual(41, len(operations))
+        self.assertEqual(52, len(operations))
         auth = {(item["method"], item["path"]) for item in operations if item["auth"]}
         self.assertIn(("POST", "/api/v1/auth/logout"), auth)
         self.assertIn(("DELETE", "/api/v1/cuentas/mi-cuenta"), auth)
@@ -399,7 +500,7 @@ class ZapDastTests(unittest.TestCase):
         ]
         coverage = build_coverage(operations, records)
         self.assertEqual(3, coverage["openapi_visited"])
-        self.assertEqual(38, len(coverage["missing"]))
+        self.assertEqual(49, len(coverage["missing"]))
         self.assertEqual(0, len(coverage["support_routes"]))
 
     def test_cobertura_detecta_ruta_no_visitada(self):
@@ -729,13 +830,13 @@ class ZapDastTests(unittest.TestCase):
             result = zap_dast.run_scan(args)
         return result, output
 
-    def test_run_scan_genera_evidencia_y_cobertura_41_de_41(self):
+    def test_run_scan_genera_evidencia_y_cobertura_52_de_52(self):
         result, output = self._run_scan()
         self.assertEqual(0, result)
         summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
         self.assertEqual("PASS", summary["status"])
-        self.assertEqual(41, summary["coverage"]["openapi_operations"])
-        self.assertEqual(41, summary["coverage"]["openapi_visited"])
+        self.assertEqual(52, summary["coverage"]["openapi_operations"])
+        self.assertEqual(52, summary["coverage"]["openapi_visited"])
         self.assertEqual([], summary["coverage"]["missing"])
         self.assertTrue((output / "dast-report.md").exists())
         self.assertTrue((output / "zap-report.html").exists())

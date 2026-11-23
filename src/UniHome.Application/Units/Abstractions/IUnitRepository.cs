@@ -82,4 +82,36 @@ public interface IUnitRepository
         int expectedPhotoCount,
         IReadOnlyList<UnitPhoto> photos,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// EP-M09 (HU-093/HU-094/HU-095): persiste la disponibilidad recalculada por
+    /// los servicios de ocupación (mantenimiento manual o lugares ocupados
+    /// frente a los lugares de la unidad).
+    /// </summary>
+    Task<bool> UpdateAvailabilityAsync(
+        Guid id,
+        Guid propertyId,
+        UnitAvailability availability,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// EP-M09 (HU-049): reserva atómicamente un lugar si <c>lugaresOcupados</c>
+    /// sigue por debajo de <c>Places</c>. Es el CAS de un solo documento que
+    /// impide exceder el cupo cuando dos solicitudes de unión llegan al mismo
+    /// tiempo. Devuelve el nuevo total de lugares ocupados, o null si la unidad
+    /// ya estaba llena (o no coincide id/propiedad).
+    /// </summary>
+    Task<int?> TryReserveSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// EP-M09 (HU-094/HU-095): libera un lugar previamente reservado. Devuelve
+    /// el nuevo total de lugares ocupados (0 si ya estaba en cero).
+    /// </summary>
+    Task<int> ReleaseSlotAsync(
+        Guid id,
+        Guid propertyId,
+        CancellationToken cancellationToken = default);
 }
