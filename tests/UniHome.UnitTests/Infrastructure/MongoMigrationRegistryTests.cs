@@ -3,9 +3,11 @@ using UniHome.Infrastructure.Persistence.Mongo;
 using UniHome.Infrastructure.Persistence.Mongo.Chat;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
 using UniHome.Infrastructure.Persistence.Mongo.Exploration;
+using UniHome.Infrastructure.Persistence.Mongo.Notifications;
 using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
+using UniHome.Infrastructure.Persistence.Mongo.Rentals;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
 using UniHome.Infrastructure.Persistence.Mongo.Verification;
 
@@ -14,7 +16,7 @@ namespace UniHome.UnitTests.Infrastructure;
 public sealed class MongoMigrationRegistryTests
 {
     [Fact]
-    public void RegistroPorDefecto_DebeContenerM01M01_002M03M05M06M07M08YM09EnOrden()
+    public void RegistroPorDefecto_DebeContenerM01AM12EnOrden()
     {
         var registry = MongoMigrationRegistry.Default;
 
@@ -27,7 +29,9 @@ public sealed class MongoMigrationRegistryTests
                 MongoVerificationMigration.Version,
                 MongoExplorationMigration.Version,
                 MongoChatMigration.Version,
-                MongoOccupancyMigration.Version
+                MongoOccupancyMigration.Version,
+                MongoRentalsMigration.Version,
+                MongoNotificationsMigration.Version
             ],
             registry.Migrations.Select(migration => migration.Version));
         Assert.Equal(MongoIdentityMigration.Definition.Checksum, registry.Migrations[0].Checksum);
@@ -38,6 +42,8 @@ public sealed class MongoMigrationRegistryTests
         Assert.Equal(MongoExplorationMigration.Definition.Checksum, registry.Migrations[5].Checksum);
         Assert.Equal(MongoChatMigration.Definition.Checksum, registry.Migrations[6].Checksum);
         Assert.Equal(MongoOccupancyMigration.Definition.Checksum, registry.Migrations[7].Checksum);
+        Assert.Equal(MongoRentalsMigration.Definition.Checksum, registry.Migrations[8].Checksum);
+        Assert.Equal(MongoNotificationsMigration.Definition.Checksum, registry.Migrations[9].Checksum);
         Assert.Contains(MongoIdentitySchema.AccountsCollection, registry.ManagedCollections);
         Assert.Contains(MongoIdentitySchema.AccountRecoveryCollection, registry.ManagedCollections);
         Assert.Contains(MongoUniversitySchema.Collection, registry.ManagedCollections);
@@ -52,6 +58,9 @@ public sealed class MongoMigrationRegistryTests
         Assert.Contains(MongoChatSchema.MessagesCollection, registry.ManagedCollections);
         Assert.Contains(MongoOccupancySchema.LinksCollection, registry.ManagedCollections);
         Assert.Contains(MongoOccupancySchema.InvitationsCollection, registry.ManagedCollections);
+        Assert.Contains(MongoRentalsSchema.RentPeriodsCollection, registry.ManagedCollections);
+        Assert.Contains(MongoRentalsSchema.PaymentsCollection, registry.ManagedCollections);
+        Assert.Contains(MongoNotificationsSchema.NotificationsCollection, registry.ManagedCollections);
     }
 
     [Fact]
@@ -70,7 +79,9 @@ public sealed class MongoMigrationRegistryTests
             ["M06-001"] = "A4C76265FC753CAEF0EA0EE971063F1B8483696339A58FC53E8111665C35A33A",
             ["M07-001"] = "003D4CC39CCB6ACC6E44C8762AEEBD60C417A08C03ABA35B2AE585392F38887E",
             ["M08-001"] = "6AA8900080A8F0F4F12D56A7CD49CD31B6A145A9E067F9D306A7D14A7AFEFA66",
-            ["M09-001"] = "097B741234F5DF9DF0F53E611BDF3C1D0D41F23197CF6466FEE6825707DCA237"
+            ["M09-001"] = "097B741234F5DF9DF0F53E611BDF3C1D0D41F23197CF6466FEE6825707DCA237",
+            ["M10-001"] = "41D877A8CB04A72A5D5C5C2F24EFEB22332D09E647D523919B90672B98AEE9C0",
+            ["M12-001"] = "7D5024EA255550A1FEB797AF3398B125BB7C336BABA5E20D71513EABB39CC875"
         };
 
         Assert.Equal(
@@ -112,6 +123,49 @@ public sealed class MongoMigrationRegistryTests
             ],
             byAccount.Fields.Select(field => field.Name));
         Assert.Equal(-1, byAccount.Fields[1].Direction);
+    }
+
+    [Fact]
+    public void M10_DebeCrearRentasYPagosConSusIndices()
+    {
+        var migration = MongoRentalsMigration.Definition;
+
+        Assert.Equal(2, migration.Collections.Count);
+
+        var rentPeriods = Assert.Single(
+            migration.Collections,
+            collection => collection.Name == MongoRentalsSchema.RentPeriodsCollection);
+        var uniqueIndex = Assert.Single(rentPeriods.Indexes);
+        Assert.Equal(MongoRentalsSchema.RentPeriodUniqueIndex, uniqueIndex.Name);
+        Assert.True(uniqueIndex.Unique);
+        Assert.Equal(
+            [MongoRentalsSchema.RentPeriodUnitField, MongoRentalsSchema.RentPeriodPeriodoField],
+            uniqueIndex.Fields.Select(field => field.Name));
+
+        var payments = Assert.Single(
+            migration.Collections,
+            collection => collection.Name == MongoRentalsSchema.PaymentsCollection);
+        var paymentIndex = Assert.Single(payments.Indexes);
+        Assert.Equal(MongoRentalsSchema.PaymentPeriodTenantIndex, paymentIndex.Name);
+        Assert.False(paymentIndex.Unique);
+        Assert.Equal(
+            [MongoRentalsSchema.PaymentRentPeriodField, MongoRentalsSchema.PaymentTenantField],
+            paymentIndex.Fields.Select(field => field.Name));
+    }
+
+    [Fact]
+    public void M12_DebeCrearNotificacionesConSuIndice()
+    {
+        var migration = MongoNotificationsMigration.Definition;
+
+        var collection = Assert.Single(migration.Collections);
+        Assert.Equal(MongoNotificationsSchema.NotificationsCollection, collection.Name);
+        var index = Assert.Single(collection.Indexes);
+        Assert.Equal(MongoNotificationsSchema.RecipientIndex, index.Name);
+        Assert.False(index.Unique);
+        Assert.Equal(
+            [MongoNotificationsSchema.RecipientField],
+            index.Fields.Select(field => field.Name));
     }
 
     [Fact]

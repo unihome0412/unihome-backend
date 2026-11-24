@@ -1,8 +1,10 @@
 using UniHome.Infrastructure.Persistence.Mongo.Chat;
 using UniHome.Infrastructure.Persistence.Mongo.Exploration;
+using UniHome.Infrastructure.Persistence.Mongo.Notifications;
 using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
+using UniHome.Infrastructure.Persistence.Mongo.Rentals;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
 using UniHome.Infrastructure.Persistence.Mongo.Verification;
 
@@ -25,7 +27,9 @@ public sealed class MongoMigrationRegistry
             MongoVerificationMigration.Definition,
             MongoExplorationMigration.Definition,
             MongoChatMigration.Definition,
-            MongoOccupancyMigration.Definition
+            MongoOccupancyMigration.Definition,
+            MongoRentalsMigration.Definition,
+            MongoNotificationsMigration.Definition
         ]);
 
     public MongoMigrationRegistry(IEnumerable<MongoMigrationDefinition> migrations)
