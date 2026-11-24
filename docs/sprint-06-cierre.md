@@ -203,10 +203,10 @@ que Android pudiera hacer).
 - **Sin migración nueva para M05 (HU-033/036/092):** `unidades` añade el
   campo flexible `lugaresOcupados` (ver sección 4) sobre `M05-001`, que
   conserva su checksum. `GetMyPropertiesService` solo lee campos existentes.
-- Ninguna de las dos migraciones nuevas se aplicó a Atlas. El orden completo
-  para un entorno que parte de Sprint 5 es `M01-001`, `M01-002`, `M03-001`,
-  `M05-001`, `M06-001`, `M07-001`, `M08-001`, `M09-001`. No saltar `M08-001`
-  ni `M09-001`.
+- **Promovidas a `unihome_verificacion` el 24-nov-2026** (sección 11); ambas
+  `VÁLIDO`. El orden completo para un entorno que parte de Sprint 5 es
+  `M01-001`, `M01-002`, `M03-001`, `M05-001`, `M06-001`, `M07-001`,
+  `M08-001`, `M09-001`. No saltar `M08-001` ni `M09-001`.
 
 ## 8. Pendientes
 
@@ -215,30 +215,33 @@ que Android pudiera hacer).
    `restler-fuzzing` (después de `M07-001`, antes del resto de cada job). No
    se ejecutó el workflow en GitHub; queda **PENDING_CI** hasta que se
    disparen esos jobs.
-2. **Verificar contra Atlas los campos reales de `ix_conversaciones_participantes`
-   e `ix_mensajes_conversacion_fecha`.** La auditoría de Atlas (`docs/mongodb-m01.md`)
-   solo registró los *nombres* de estos dos índices como preexistentes, no
-   sus campos clave. `MongoChatSchema` asume `participantes` (arreglo de
-   `accountId`) para el primero y `conversacionId` ascendente + `fecha`
-   descendente para el segundo, por ser el diseño más consistente con el
-   resto de M08/M09, pero esto **no está confirmado contra la definición
-   real del índice en Atlas**. Antes de promover, ejecutar `plan`/`verify`
-   de `M08-001` contra la base autorizada: `MongoIndexDefinition.Matches`
-   compara contra el documento real de `listIndexes` y la migración falla
-   cerrado (rechaza, no sobrescribe) si los campos no coinciden. Si Atlas
-   tiene otros campos, se necesita una migración nueva, no editar
-   `MongoChatSchema` directamente.
+2. ~~Verificar contra Atlas los campos reales de `ix_conversaciones_participantes`
+   e `ix_mensajes_conversacion_fecha`.~~ **Resuelto el 24-nov-2026** (sección 11):
+   `unihome_verificacion` no tenía esas colecciones; `promote` las creó con
+   exactamente los campos declarados en `MongoChatSchema`
+   (`participantes`; `conversacionId` ascendente + `fecha` descendente), sin
+   divergencia que reconciliar. Queda pendiente la misma verificación contra
+   `unihome_modelo_pruebas`/Atlas de pruebas, donde esas colecciones ya
+   existían como "observadas" antes de este sprint; no se tocó esa base aquí.
 3. Matriz de esta sección (1) consolida las 15 HU de Sprint 6; la matriz de
    las 56 HU de Sprints 1–5 vive en `docs/sprint-05-cierre.md`, sección 10.
 4. Las cuatro decisiones provisionales de la sección 3 no tienen aprobación
    de producto.
-5. `M08-001` y `M09-001` no se aplicaron ni promovieron a Atlas.
+5. ~~`M08-001` y `M09-001` no se aplicaron ni promovieron a Atlas.~~
+   **Resuelto el 24-nov-2026**: ambas promovidas a `unihome_verificacion` y
+   verificadas `VÁLIDO` (sección 11). La imagen de Sprint 6 (`34c69ae`) aún
+   no se construyó, subió ni desplegó a Container Apps; eso sigue pendiente
+   y fuera del alcance de esta intervención.
 6. Pruebas Mongo reales (`MongoOccupancyPersistenceTests`,
    `MongoChatPersistenceTests`) requieren `mongod` aislado o el job
    `mongo-db-test` autorizado; quedan **BLOCKED** localmente.
 7. Mismo alcance que Sprint 5: Docker build/Container Smoke no ejecutados
    localmente; ZAP, RESTler, Sonar, CodeQL, Semgrep y Pact remotos:
    **PENDING_CI**.
+8. El respaldo de `unihome_verificacion` antes de esta promoción se omitió
+   deliberadamente (decisión del responsable de la cuenta; razón y alcance
+   en la sección 11). No se ha revisado si el tier M0 permite programar
+   respaldos a futuro para la siguiente promoción.
 
 ## 9. Pruebas locales
 
@@ -278,3 +281,77 @@ que Android pudiera hacer).
 - `tools/ci/zap_dast.py` y `tools/ci/test_zap_dast.py`: catálogo de 52
   operaciones, flujo real de M09/M08.
 - `README.md`: secciones de Sprint 6 (M05, M09, M08).
+
+## 11. Promoción a `unihome_verificacion` (24-nov-2026)
+
+**Preflight previo (solo lectura, mismo día):** `audit` mostró 12 colecciones
+en `unihome_verificacion`; `M01-001` a `M07-001` registradas y `VÁLIDO`
+(`verify` de cada una). `conversaciones`, `mensajes`, `vinculos_ocupacion` e
+`invitaciones_unidad` no existían. `plan`/`verify` de `M08-001` y `M09-001`
+confirmaron 5 y 7 escrituras pendientes respectivamente, ninguna registrada.
+Esto contradice `docs/mongodb-m07.md` y `docs/readiness-despliegue-verificacion.md`
+(ambos afirman, con fecha 17-nov-2026, que `M07-001` no estaba promovida):
+en la realidad de Atlas sí estaba aplicada; esa documentación quedó
+desactualizada y no se corrigió en esta intervención.
+
+**Promoción ejecutada**, en este orden, con autorización explícita del
+responsable de la cuenta en el chat de esta sesión:
+
+| Paso | Comando | Resultado |
+|---|---|---|
+| `promote M08-001` | `--approval-ref "M08-001-PROD-20261124-01"` | Estado inicial `PartiallyApplied` → 5 escrituras planificadas, 6 aplicadas (incluye la colección del ledger) → Verificación interna `VÁLIDA` |
+| `verify M08-001` | `--migration-credential --version M08-001` | `Registrada: True`, `Checksum coincide: True`, `Índices M08-001 coinciden: True`, `Escrituras pendientes: 0` → **Resultado: VÁLIDO** |
+| `promote M09-001` | `--approval-ref "M09-001-PROD-20261124-01"` | Estado inicial `PartiallyApplied` → 7 escrituras planificadas, 8 aplicadas → Verificación interna `VÁLIDA` |
+| `verify M09-001` | `--migration-credential --version M09-001` | `Registrada: True`, `Checksum coincide: True`, `Índices M09-001 coinciden: True`, `Escrituras pendientes: 0` → **Resultado: VÁLIDO** |
+
+Referencias de aprobación registradas en el ledger: `M08-001-PROD-20261124-01`
+y `M09-001-PROD-20261124-01`, siguiendo el formato ya usado para `M07-001`.
+
+**Auditoría posterior (solo lectura):** `unihome_verificacion` pasó de 12 a
+**16 colecciones**. Las 4 nuevas quedaron con exactamente los campos
+declarados en el código, sin divergencia:
+
+| Colección | Índice | Campos reales confirmados |
+|---|---|---|
+| `conversaciones` | `ix_conversaciones_participantes` | `{ participantes: 1 }` |
+| `mensajes` | `ix_mensajes_conversacion_fecha` | `{ conversacionId: 1, fecha: -1 }` |
+| `vinculos_ocupacion` | `ix_ocupacion_inquilino_estado` | `{ inquilinoAccountId: 1, estado: 1 }` |
+| `vinculos_ocupacion` | `ix_ocupacion_unidad_estado` | `{ unitId: 1, estado: 1 }` |
+| `invitaciones_unidad` | `ix_invitaciones_unidad` | `{ unitId: 1, createdAt: -1 }` |
+| `invitaciones_unidad` | `ux_invitaciones_codigo` | `{ codigo: 1 }` único |
+
+`migraciones` pasó de 6 a 8 documentos (`M08-001` y `M09-001` agregados). Las
+12 colecciones anteriores no se modificaron: mismas 3 (`cuentas`, 10
+documentos; `propiedades`, 3; `unidades`, 3) y el resto sin cambios en
+conteo de documentos observado antes/después.
+
+**Decisión de no respaldar (sin aprobación de producto adicional, decisión
+operativa del responsable de la cuenta):**
+
+- El clúster de `unihome_verificacion` es **tier M0** (gratuito): no ofrece
+  snapshots de Atlas bajo demanda ni continuos. La única alternativa hubiera
+  sido `mongodump`/`mongorestore` manual con una credencial de lectura
+  separada.
+- Se omitió deliberadamente porque `M08-001` y `M09-001` **solo crean
+  colecciones nuevas y vacías** (`conversaciones`, `mensajes`,
+  `vinculos_ocupacion`, `invitaciones_unidad`); no modifican, leen ni
+  recalculan ningún documento de las 12 colecciones existentes
+  (`cuentas`, `propiedades`, `unidades`, etc.). No había datos existentes en
+  riesgo de pérdida o corrupción por esta escritura específica.
+- Mismo criterio que las promociones anteriores de este entorno (`M01-001` a
+  `M07-001`), que tampoco registran un respaldo verificado en la
+  documentación disponible.
+- Riesgo residual aceptado conscientemente: un respaldo protege contra error
+  humano o un bug del migrador, no contra el plan en sí; de haber ocurrido
+  algo así, la recuperación es re-ejecutar `promote` (idempotente, ver
+  `MongoPromotionPreflightEvaluator`) o, si hay una divergencia real,
+  detenerse y auditar antes de cualquier escritura nueva — nunca se habría
+  podido perder un dato que no existía antes de esta promoción.
+- Pendiente abierto (ítem 8 de la sección 8): no se evaluó si el tier M0
+  permite programar algún tipo de respaldo externo antes de la siguiente
+  promoción.
+
+**Fuera de alcance de esta intervención:** no se construyó ni subió ninguna
+imagen de contenedor, no se tocó la Container App `unihome-api` ni
+`rg-unihome-dev`, y no se ejecutó ningún `apply`/`promote` adicional. La
+imagen de Sprint 6 (commit `34c69ae`) sigue sin desplegarse.
