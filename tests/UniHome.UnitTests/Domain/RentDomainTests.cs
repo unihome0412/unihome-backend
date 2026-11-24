@@ -191,7 +191,7 @@ public sealed class RentDomainTests
         var previous = RentPeriod.Configure(unitId, "2026-10", 1000m, 31, AllConcepts(), Now);
         previous.ApplyEqualSplit([tenantA, tenantB], Now);
 
-        var inherited = RentPeriod.InheritFrom(previous, "2026-11", [tenantA, tenantB]);
+        var inherited = RentPeriod.InheritFrom(previous, "2026-11", [tenantA, tenantB], Now);
 
         Assert.Equal(unitId, inherited.UnitId);
         Assert.Equal("2026-11", inherited.Periodo);
@@ -200,6 +200,8 @@ public sealed class RentDomainTests
         Assert.Equal(RentSplitMethod.Igual, inherited.SplitMethod);
         Assert.Equal(2, inherited.Shares.Count);
         Assert.NotEqual(previous.Id, inherited.Id);
+        Assert.Equal(Now, inherited.CreatedAt);
+        Assert.Equal(Now, inherited.UpdatedAt);
     }
 
     [Fact]
@@ -209,7 +211,7 @@ public sealed class RentDomainTests
         var previous = RentPeriod.Configure(unitId, "2026-10", 1000m, 31, AllConcepts(), Now);
         previous.ApplyEqualSplit([Guid.NewGuid(), Guid.NewGuid()], Now);
 
-        var inherited = RentPeriod.InheritFrom(previous, "2026-11", [Guid.NewGuid()]);
+        var inherited = RentPeriod.InheritFrom(previous, "2026-11", [Guid.NewGuid()], Now);
 
         Assert.Equal(1000m, inherited.TotalMxn);
         Assert.True(inherited.IsSplitPending);
@@ -223,7 +225,7 @@ public sealed class RentDomainTests
         var tenant = Guid.NewGuid();
         var previous = RentPeriod.Configure(unitId, "2026-10", 1000m, 31, AllConcepts(), Now);
 
-        var inherited = RentPeriod.InheritFrom(previous, "2026-11", [tenant]);
+        var inherited = RentPeriod.InheritFrom(previous, "2026-11", [tenant], Now);
 
         Assert.True(inherited.IsSplitPending);
     }

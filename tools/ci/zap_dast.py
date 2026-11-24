@@ -1447,6 +1447,26 @@ def run_scan(args: argparse.Namespace) -> int:
         "POST", "/api/v1/unidades/unirse",
         body={"codigo": invitation_code},
         token=access_b, expected={200}, auth=True, note="unirse con código B")
+
+    # M10: configuración y división de renta del periodo vigente (HU-050/051/052/053/054).
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/renta/2026-11",
+        body={
+            "rentaTotalMxn": 6000,
+            "diaCorte": 5,
+            "conceptos": [
+                {"nombre": "Renta", "esFijo": True},
+                {"nombre": "Mantenimiento", "esFijo": True},
+                {"nombre": "Luz", "esFijo": False},
+                {"nombre": "Gas", "esFijo": False},
+            ],
+        },
+        token=access_a, expected={200}, auth=True, note="configurar renta unidad A")
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/renta/2026-11/division",
+        body={"metodo": "Igual"},
+        token=access_a, expected={200}, auth=True, note="dividir renta en partes iguales")
+
     http.request(
         "PUT", f"/api/v1/unidades/{unit_id}/mantenimiento",
         body={"enMantenimiento": True},

@@ -372,6 +372,51 @@ HU-033/036/092 (M05), HU-048/049/093/094/095 (M09) y HU-067/068/069/070/086/089
 desde Sprint 3. Detalle, decisiones provisionales y pendientes en
 [`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
 
+## Sprint 7 / M10: renta (en curso)
+
+Pagos informativos: UniHome no procesa dinero ni interviene en transacciones
+económicas entre las partes (HU-090); toda respuesta de este módulo incluye el
+aviso correspondiente.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `PUT` | `/api/v1/unidades/{unitId}/renta/{periodo}` | El titular define o redefine la renta total, los conceptos de cobro y el día de corte de un periodo "yyyy-MM" (HU-050/HU-051/HU-052). |
+| `PUT` | `/api/v1/unidades/{unitId}/renta/{periodo}/division` | El titular divide la renta del periodo entre los inquilinos activos, en partes iguales o personalizadas (HU-053/HU-054). |
+
+Reglas principales:
+
+- **Herencia entre periodos:** si el periodo consultado o dividido todavía no
+  existe, se crea copiando el periodo anterior más reciente de la misma
+  unidad: renta total, conceptos y día de corte siempre; división y cuotas
+  solo si el conjunto de inquilinos activos no cambió (si cambió, la división
+  queda pendiente para que el titular la rehaga). Si no hay periodo anterior,
+  no hay nada que heredar (`404`). El endpoint de configuración
+  (HU-050/051/052) nunca hereda: siempre usa los valores explícitos de la
+  solicitud y reinicia la división a pendiente, porque unas cuotas calculadas
+  contra la renta anterior ya no suman correctamente contra la nueva.
+- **Redondeo de la división en partes iguales:** se trabaja en centavos
+  (renta × 100, entero) y el residuo se reparte de un centavo en centavo a
+  los inquilinos ordenados por `accountId` (formato `"N"`, orden ordinal),
+  para que la suma cierre exacto contra la renta total. Ejemplo: $1000.00
+  entre 3 inquilinos → $333.34 + $333.33 + $333.33 (el primero en el orden
+  absorbe el centavo sobrante).
+- **División personalizada:** la suma de las cuotas debe ser igual a la
+  renta total (si no, `400`); cada cuota debe corresponder a un inquilino
+  con vínculo activo en la unidad.
+- Solo el titular de la unidad configura la renta y su división; cualquier
+  otra cuenta recibe `403`, y una unidad inexistente, `404`.
+- Migración `M10-001`: crea `rentas_periodo` (con índice único
+  `ux_rentas_periodo` sobre `unitId`+`periodo`) y `pagos_informativos` (con
+  `ix_pagos_periodo_inquilino`, no único). Migración `M12-001`: crea
+  `notificaciones` (con `ix_notificaciones_destinatario`), reservada para el
+  recordatorio de renta de HU-059 (Sprint 7, pendiente). No modifica M01-M09.
+
+El resto del alcance de Sprint 7 (pagos informativos HU-055/056, vista del
+inquilino HU-057/058, resumen mensual HU-060/061, detalle de unidad HU-035 y
+recordatorio HU-059) está en curso; esta sección y
+[`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md) se completan a medida
+que avanza.
+
 ## Swagger/OpenAPI protegido
 
 La documentación interna se habilita explícitamente con
@@ -566,7 +611,7 @@ usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
 [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
 
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001`, `M03-001`, `M05-001`, `M06-001`, `M07-001` y `M09-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001`, `M05-001`, `M06-001`, `M07-001`, `M09-001`, `M10-001` y `M12-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -583,6 +628,10 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M07-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M09-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M09-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M10-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M10-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M12-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M12-001
 ```
 
 La migración ordinaria solo escribe en `unihome_modelo_pruebas` o en una base incluida
@@ -609,8 +658,9 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
 No ejecutar ese comando sin completar las puertas de conectividad TLS/SSPI, usuario
 técnico separado, respaldo/restauración verificado y autorización humana. Cada
 promoción selecciona una versión; hoy existen `M01-001`, `M01-002`, `M03-001`,
-`M05-001`, `M06-001`, `M07-001` y `M09-001`. Las demás colecciones externas aún
-no tienen migración versionada ni contratos BSON/DTO aprobados.
+`M05-001`, `M06-001`, `M07-001`, `M09-001`, `M10-001` y `M12-001`. Las demás
+colecciones externas aún no tienen migración versionada ni contratos BSON/DTO
+aprobados.
 
 Matriz de cierre, endpoints y responsabilidades Android del Sprint 1:
 [`docs/sprint-01-cierre.md`](docs/sprint-01-cierre.md).
@@ -747,7 +797,8 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
 `unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`,
-`M06-001`, `M07-001`, `M08-001` y `M09-001` a esa base temporal y las pruebas
+`M06-001`, `M07-001`, `M08-001`, `M09-001`, `M10-001` y `M12-001` a esa base
+temporal y las pruebas
 reales de identidad, recuperación de contraseña, universidades, publicaciones,
 verificación documental, exploración/favoritos, bloqueo distribuido, ocupación
 (cupo con CAS y campo `lugaresOcupados` ausente) y chat
@@ -767,7 +818,8 @@ El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
 `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
 `127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M01-002, M03-001,
-M05-001, M06-001, M07-001, M08-001 y M09-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+M05-001, M06-001, M07-001, M08-001, M09-001, M10-001 y M12-001, y un SMTP de
+captura local con STARTTLS; crea cuentas sintéticas mediante registro,
 confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
 operación documentada y publica `zap-report.html`, `zap-report.json`,
 `dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el

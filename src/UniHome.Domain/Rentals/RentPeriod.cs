@@ -95,7 +95,8 @@ public sealed partial class RentPeriod
     public static RentPeriod InheritFrom(
         RentPeriod previous,
         string periodo,
-        IReadOnlyCollection<Guid> activeTenantAccountIds)
+        IReadOnlyCollection<Guid> activeTenantAccountIds,
+        DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(previous);
         ArgumentNullException.ThrowIfNull(activeTenantAccountIds);
@@ -116,8 +117,8 @@ public sealed partial class RentPeriod
             [.. previous._concepts],
             sameTenants ? previous.SplitMethod : null,
             sameTenants ? [.. previous._shares] : [],
-            previous.CreatedAt,
-            previous.CreatedAt);
+            now,
+            now);
     }
 
     public static RentPeriod Restore(
