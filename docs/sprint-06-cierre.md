@@ -228,10 +228,10 @@ que Android pudiera hacer).
 4. Las cuatro decisiones provisionales de la sección 3 no tienen aprobación
    de producto.
 5. ~~`M08-001` y `M09-001` no se aplicaron ni promovieron a Atlas.~~
-   **Resuelto el 24-nov-2026**: ambas promovidas a `unihome_verificacion` y
-   verificadas `VÁLIDO` (sección 11). La imagen de Sprint 6 (`34c69ae`) aún
-   no se construyó, subió ni desplegó a Container Apps; eso sigue pendiente
-   y fuera del alcance de esta intervención.
+   ~~La imagen de Sprint 6 (`34c69ae`) aún no se construyó, subió ni desplegó
+   a Container Apps.~~ **Ambas resueltas el 24-nov-2026** (secciones 11 y 12):
+   migraciones promovidas y verificadas `VÁLIDO`; imagen construida, subida y
+   desplegada en `unihome-api`/`rg-unihome-dev`, sana en producción.
 6. Pruebas Mongo reales (`MongoOccupancyPersistenceTests`,
    `MongoChatPersistenceTests`) requieren `mongod` aislado o el job
    `mongo-db-test` autorizado; quedan **BLOCKED** localmente.
@@ -242,6 +242,17 @@ que Android pudiera hacer).
    deliberadamente (decisión del responsable de la cuenta; razón y alcance
    en la sección 11). No se ha revisado si el tier M0 permite programar
    respaldos a futuro para la siguiente promoción.
+9. **Nuevo (sección 12): separar el usuario operativo de Atlas del usuario de
+   migraciones.** `unihome_verificacion_migrador` es compartido hoy por
+   `MongoDb__ConnectionString` (la API, en el secreto de Container Apps) y
+   por `MongoDb:MigrationConnectionString` (el migrador, en User Secrets).
+   El diseño documentado en `mongodb-promocion.md` §3.2 asume credenciales
+   separadas y el propio migrador rechaza promover si detecta la misma
+   identidad en ambas — protección que no sirvió aquí porque el secreto de
+   la API nunca se usó por esta vía, solo coincide el usuario de Atlas
+   subyacente. Mientras no se separen, cualquier cambio sobre ese usuario
+   (rotación de contraseña, permisos) puede volver a interrumpir producción
+   como en el incidente de la sección 12.
 
 ## 9. Pruebas locales
 
@@ -351,7 +362,106 @@ operativa del responsable de la cuenta):**
   permite programar algún tipo de respaldo externo antes de la siguiente
   promoción.
 
-**Fuera de alcance de esta intervención:** no se construyó ni subió ninguna
-imagen de contenedor, no se tocó la Container App `unihome-api` ni
-`rg-unihome-dev`, y no se ejecutó ningún `apply`/`promote` adicional. La
-imagen de Sprint 6 (commit `34c69ae`) sigue sin desplegarse.
+**Fuera de alcance de esta intervención (promoción Mongo):** no se construyó
+ni subió ninguna imagen de contenedor, no se tocó la Container App
+`unihome-api` ni `rg-unihome-dev`, y no se ejecutó ningún `apply`/`promote`
+adicional. El despliegue de la imagen de Sprint 6 se hizo por separado y se
+documenta en la sección 12.
+
+## 12. Despliegue de Sprint 6 a `unihome-api` (24-nov-2026)
+
+**Imagen:** `acrunihomedev.azurecr.io/unihome-api:34c69ae30ce09819cf6cf9e3943ef533e7745eb1`,
+construida desde `main` en ese commit (`docker build` local, sin `az acr
+build`: bloqueado en esta suscripción) y subida con `docker push`
+(`az acr login --name acrunihomedev` previo). Digest
+`sha256:1459384206fe2a80031a37589565f6e72087cf1aa7b42c2cf15501d25e6aaf19`.
+Se conservó la imagen anterior (`2d3022b13dc91f513bcee8251ac4dd9a423df86a`,
+Sprint 5) en ACR para rollback.
+
+### Incidente: `MongoAuthenticationException` en toda réplica nueva
+
+El primer intento de desplegar Sprint 6
+(`az containerapp update ... --revision-suffix sprint06-20261124`) nunca
+llegó a `Ready`: cada chequeo de `/health/ready` fallaba con
+`MongoDB.Driver.MongoAuthenticationException` en el *health check* de
+almacenamiento (`MongoStorageReadinessProbe`), cada ~10 s, sin parar. El
+rollback de control a la **misma imagen que ya corría sana**
+(`2d3022b...`, sufijo `rollback-20261124`) presentó el **mismo error
+exacto**, lo que descartó que fuera un problema del código o la imagen de
+Sprint 6.
+
+**Causa raíz:** el usuario de Atlas `unihome_verificacion_migrador` está
+compartido entre dos rutas que el diseño del repositorio asume separadas:
+- `MongoDb__ConnectionString` (secreto `mongodb-connection-string` en
+  Container Apps, usado por la API en producción).
+- `MongoDb:MigrationConnectionString` (User Secrets `unihome-backend-migrations`
+  en la máquina de esta sesión, usado por `tools/UniHome.MongoMigrator` para
+  `audit`/`plan`/`verify`/`promote`).
+
+`MongoMigratorConfiguration.GetPromotionConnectionString` rechaza promover
+si detecta la **misma cadena de conexión o la misma identidad** (usuario,
+`authSource`, mecanismo, hosts, réplica, base) en ambas rutas — pero esa
+protección compara las dos cadenas de conexión que el migrador conoce en el
+momento de `promote`, no detecta que el secreto de la API en Azure apunte,
+por separado, al mismo usuario de Atlas. La promoción de M08-001/M09-001
+(sección 11) se hizo sin disparar esa protección porque no hay evidencia de
+que haya tocado la contraseña del usuario; el cambio de contraseña ocurrió
+en una acción posterior, directa en Atlas, fuera de esta sesión y de
+`MongoMigrator`. El resultado fue el mismo para ambas rutas porque ambas
+dependían del mismo usuario: toda conexión *nueva* (réplica nueva) fallaba
+la autenticación, mientras la réplica ya en marcha (`unihome-api--proxy-cgnat-20261117`)
+seguía sana por mantener conexiones ya autenticadas en su pool.
+
+**Impacto:** con `activeRevisionsMode: Single` y sin FQDN directo por
+revisión habilitado en esta app, el dominio público
+(`unihome-api.agreeablesky-4cd63e24.eastus.azurecontainerapps.io`) quedó sin
+responder (`/health/live` y `/health/ready` con timeout, `HTTP_STATUS:000`)
+mientras la única revisión con tráfico (primero la de Sprint 6, luego la de
+rollback) no llegaba a `Ready`. El intento de redirigir tráfico a la
+revisión vieja y sana con `az containerapp ingress traffic set` fue
+rechazado por el modo `Single` (`ERROR: ... Set revision mode to multiple
+in order to set ingress traffic`); no se cambió el modo de revisión.
+
+**Resolución:** el responsable de la cuenta corrigió la contraseña del
+secreto `mongodb-connection-string` directamente en Atlas/Container Apps
+(fuera de esta sesión). Con el secreto corregido, `az containerapp revision
+restart --revision unihome-api--rollback-20261124` resolvió el incidente sin
+desplegar una imagen nueva: `/health/live` y `/health/ready` volvieron a
+`200`, `storage: Healthy`, sin más `MongoAuthenticationException` en los
+logs. Producción quedó en Sprint 5, sana, antes de reintentar Sprint 6.
+
+### Segundo intento de despliegue: exitoso
+
+```
+az containerapp update --name unihome-api --resource-group rg-unihome-dev `
+  --image acrunihomedev.azurecr.io/unihome-api:34c69ae30ce09819cf6cf9e3943ef533e7745eb1 `
+  --revision-suffix sprint06-20261124-b
+```
+
+Verificación, las cuatro condiciones pedidas:
+
+| Verificación | Resultado |
+|---|---|
+| Revisión `unihome-api--sprint06-20261124-b` | `Active: True`, `Replicas: 1`, `TrafficWeight: 100`, `HealthState: Healthy`, `ProvisioningState: Provisioned` |
+| `GET /health/live` | `200` — `{"status":"Healthy","checks":[{"name":"self","status":"Healthy"}]}` |
+| `GET /health/ready` | `200` — `{"status":"Healthy","checks":[{"name":"redis","status":"Healthy"},{"name":"storage","status":"Healthy"}]}` |
+| `GET /api/v1/mis-propiedades` | `401` (no `404`: la ruta y el controlador de M05 existen y exigen sesión) |
+| `GET /api/v1/conversaciones` | `401` (no `404`: la ruta y el controlador de M08 existen y exigen sesión) |
+
+Sprint 6 quedó desplegado y sano en `unihome-api`/`rg-unihome-dev`, sirviendo
+el 100% del tráfico. No se cambiaron variables de entorno, secretos ni el
+modo de revisión en ningún paso de este despliegue.
+
+### Pendiente nuevo: separar el usuario operativo del de migraciones
+
+Ver ítem 9 de la sección 8. Mientras `unihome_verificacion_migrador` siga
+siendo el mismo usuario de Atlas para `MongoDb__ConnectionString` (API) y
+`MongoDb:MigrationConnectionString` (migrador), un cambio de contraseña o de
+permisos sobre ese usuario puede volver a tumbar producción simultáneamente
+con cualquier operación de migración, como ocurrió aquí. La separación
+requiere crear un segundo usuario de Atlas de solo lectura
+(`listCollections`/`listIndexes`/`find`/`count`, sin `createCollection`/
+`createIndex`/`insert` — ver `mongodb-promocion.md` §3.2) exclusivo para
+`audit`/`plan`/`verify`, dejando `unihome_verificacion_migrador` (con los
+privilegios de escritura DDL) reservado solo para `promote`, y uno distinto
+para el usuario operativo de la API.
