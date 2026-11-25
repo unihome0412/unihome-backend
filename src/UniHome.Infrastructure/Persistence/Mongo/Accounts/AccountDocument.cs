@@ -50,6 +50,10 @@ public sealed class AccountDocument
 
     [BsonElement("eliminadaEnUtc")]
     public DateTime? DeletedAtUtc { get; set; }
+
+    /// <summary>HU-087: universidad actual elegida desde el perfil o el mapa; null hasta fijarla.</summary>
+    [BsonElement("universidadActualId")]
+    public string? CurrentUniversityId { get; set; }
 }
 
 [BsonIgnoreExtraElements]

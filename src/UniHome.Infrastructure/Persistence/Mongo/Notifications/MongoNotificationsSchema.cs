@@ -10,6 +10,7 @@ public static class MongoNotificationsSchema
     public const string MessageField = "mensaje";
     public const string UnitField = "unitId";
     public const string PeriodoField = "periodo";
+    public const string ReparacionField = "reparacionId";
     public const string CreatedAtField = "createdAt";
 
     public const string RecipientIndex = "ix_notificaciones_destinatario";

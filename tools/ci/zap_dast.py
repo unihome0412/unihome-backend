@@ -1119,6 +1119,32 @@ def run_scan(args: argparse.Namespace) -> int:
 
     account_r = _register_account(http, mailbox, recovery_password, "r")
 
+    # M13 (HU-072/073/074): el administrador busca la cuenta D por correo,
+    # la suspende y la reactiva, y edita su nombre y correo.
+    account_d = _register_account(http, mailbox, password, "d")
+    _, admin_search_payload, _ = http.request(
+        "GET", f"/api/v1/admin/cuentas?buscar={urllib.parse.quote(account_d)}",
+        token=access_admin, expected={200}, auth=True, note="buscar cuenta D admin")
+    admin_search = json.loads(admin_search_payload)
+    if not isinstance(admin_search, list) or not admin_search:
+        raise DastError("La búsqueda administrativa no encontró la cuenta D.")
+    account_d_id = str(admin_search[0].get("id") or "")
+    if not account_d_id:
+        raise DastError("La búsqueda administrativa no devolvió el id de la cuenta D.")
+    http.request(
+        "PUT", f"/api/v1/admin/cuentas/{account_d_id}/estado",
+        body={"suspendida": True},
+        token=access_admin, expected={200}, auth=True, note="suspender cuenta D")
+    http.request(
+        "PUT", f"/api/v1/admin/cuentas/{account_d_id}/estado",
+        body={"suspendida": False},
+        token=access_admin, expected={200}, auth=True, note="reactivar cuenta D")
+    account_d_edited = f"dast.d.editada.{uuid.uuid4().hex}@uni.edu"
+    http.request(
+        "PUT", f"/api/v1/admin/cuentas/{account_d_id}",
+        body={"nombreCompleto": "Cuenta D Editada", "correo": account_d_edited},
+        token=access_admin, expected={200}, auth=True, note="editar cuenta D")
+
     http.request(
         "POST", "/api/v1/auth/confirmacion-correo/reenvio",
         body={"correo": account_a}, expected={202}, note="reenvío A")
@@ -1185,6 +1211,12 @@ def run_scan(args: argparse.Namespace) -> int:
         body={"activa": True},
         token=access_admin, expected={200}, auth=True,
         note="reactivación universidad admin")
+
+    # M02/M03 (HU-087): A fija su universidad actual desde el perfil.
+    http.request(
+        "PUT", "/api/v1/perfil/mi-universidad",
+        body={"universidadId": university_id},
+        token=access_a, expected={200}, auth=True, note="cambiar universidad A")
 
     # M05: propiedad, unidad, servicios, zona, fotos y vista previa.
     _, property_payload, _ = http.request(
@@ -1517,10 +1549,35 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", "/api/v1/mi-resumen-renta/2026-11",
         token=access_b, expected={200}, auth=True, note="resumen de renta B")
 
+    # M05/M10/M11 (HU-034): pantalla de Resumen del titular.
+    http.request(
+        "GET", "/api/v1/mi-resumen",
+        token=access_a, expected={200}, auth=True, note="mi resumen A")
+
     # M12 (HU-059): recordatorio de renta, generado al consultar el endpoint.
     http.request(
         "GET", "/api/v1/notificaciones",
         token=access_b, expected={200}, auth=True, note="notificaciones B")
+
+    # M11 (HU-062/063/064/065/066): B reporta una reparación con foto, A la
+    # consulta y actualiza su estado; B recibe la notificación del cambio.
+    _, reparacion_payload, _ = http.request_multipart(
+        "POST", f"/api/v1/unidades/{unit_id}/reparaciones",
+        fields={"Titulo": "Fuga de agua", "Descripcion": "Hay una fuga en el baño"},
+        files=[("Foto", "fuga.png", "image/png", DAST_PHOTO_PNG)],
+        token=access_b, expected={201}, note="crear reporte de reparación B")
+    reparacion_id = _response_id(reparacion_payload, "crear reporte de reparación B")
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/reparaciones",
+        token=access_a, expected={200}, auth=True, note="listar reparaciones A")
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/reparaciones/{reparacion_id}/estado",
+        body={"estado": "EnProceso"},
+        token=access_a, expected={200}, auth=True, note="cambiar estado reparación A")
+    http.request(
+        "GET", "/api/v1/notificaciones",
+        token=access_b, expected={200}, auth=True,
+        note="notificaciones B tras actualizar reparación")
 
     http.request(
         "DELETE", f"/api/v1/unidades/{unit_id}/inquilinos/{tenant_b_id}",

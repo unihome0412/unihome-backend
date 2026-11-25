@@ -40,7 +40,8 @@ public sealed class MongoIdentityBsonMappingTests
             ("correoConfirmadoEnUtc", BsonType.Null),
             ("verificacionCorreo", BsonType.Document),
             ("intentosReenvioUtc", BsonType.Array),
-            ("eliminadaEnUtc", BsonType.Null));
+            ("eliminadaEnUtc", BsonType.Null),
+            ("universidadActualId", BsonType.Null));
         AssertTypes(document["aceptacionPrivacidad"].AsBsonDocument,
             ("version", BsonType.String), ("aceptadaEnUtc", BsonType.DateTime));
         AssertTypes(document["verificacionCorreo"].AsBsonDocument,

@@ -91,6 +91,14 @@ OPERATIONS = [
     ("GET", "/api/v1/unidades/{unitId}/renta/mis-pagos", True),
     ("GET", "/api/v1/mi-resumen-renta/{periodo}", True),
     ("GET", "/api/v1/notificaciones", True),
+    ("POST", "/api/v1/unidades/{unitId}/reparaciones", True),
+    ("GET", "/api/v1/unidades/{unitId}/reparaciones", True),
+    ("PUT", "/api/v1/unidades/{unitId}/reparaciones/{reparacionId}/estado", True),
+    ("GET", "/api/v1/mi-resumen", True),
+    ("GET", "/api/v1/admin/cuentas", True),
+    ("PUT", "/api/v1/admin/cuentas/{accountId}", True),
+    ("PUT", "/api/v1/admin/cuentas/{accountId}/estado", True),
+    ("PUT", "/api/v1/perfil/mi-universidad", True),
 ]
 
 
@@ -267,6 +275,38 @@ class FakeHttpClient:
             return 204, b""
         if base == "/api/v1/perfil/mi-perfil":
             return 200, b'{"nombreCompleto":"Cuenta DAST"}'
+        if base == "/api/v1/perfil/mi-universidad":
+            return 200, b'{"nombreCompleto":"Cuenta DAST"}'
+        if base == "/api/v1/mi-resumen":
+            return 200, json.dumps({
+                "periodo": "2026-11",
+                "rentasRegistradasDelMesMxn": 6000,
+                "numeroPropiedades": 1,
+                "reparacionesAbiertas": 1,
+            }).encode("utf-8")
+        if base == "/api/v1/admin/cuentas":
+            return 200, json.dumps([{
+                "id": str(uuid.uuid4()),
+                "nombreCompleto": "Cuenta DAST",
+                "correo": "dast.d@uni.edu",
+                "estado": "Active",
+                "etiqueta": "BuscanAlojamiento",
+                "creadaEn": "2026-11-19T00:00:00+00:00",
+            }]).encode("utf-8")
+        if base.startswith("/api/v1/admin/cuentas/") and base.endswith("/estado"):
+            return 200, json.dumps({
+                "id": str(uuid.uuid4()),
+                "nombreCompleto": "Cuenta DAST",
+                "correo": "dast.d@uni.edu",
+                "estado": "Active",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/admin/cuentas/"):
+            return 200, json.dumps({
+                "id": str(uuid.uuid4()),
+                "nombreCompleto": "Cuenta D Editada",
+                "correo": "dast.d.editada@uni.edu",
+                "estado": "Active",
+            }).encode("utf-8")
         if base == "/api/v1/universidades":
             return 200, b"[]"
         if base == "/api/v1/admin/universidades":
@@ -430,6 +470,45 @@ class FakeHttpClient:
             return 204, b""
         if base.startswith("/api/v1/unidades/") and base.endswith("/mi-vinculo"):
             return 204, b""
+        if base.startswith("/api/v1/unidades/") and base.endswith("/reparaciones"):
+            if method == "POST":
+                return 201, json.dumps({
+                    "id": str(uuid.uuid4()),
+                    "unitId": str(uuid.uuid4()),
+                    "titulo": "Fuga de agua",
+                    "descripcion": "Hay una fuga en el baño",
+                    "estado": "Pendiente",
+                    "foto": {"contentType": "image/png", "sizeBytes": 68},
+                    "reportadoPorAccountId": str(uuid.uuid4()),
+                    "reportadoPorNombreCompleto": None,
+                    "creadoEn": "2026-11-19T00:00:00+00:00",
+                    "actualizadoEn": "2026-11-19T00:00:00+00:00",
+                }).encode("utf-8")
+            return 200, json.dumps([{
+                "id": str(uuid.uuid4()),
+                "unitId": str(uuid.uuid4()),
+                "titulo": "Fuga de agua",
+                "descripcion": "Hay una fuga en el baño",
+                "estado": "Pendiente",
+                "foto": None,
+                "reportadoPorAccountId": str(uuid.uuid4()),
+                "reportadoPorNombreCompleto": "Inquilino DAST",
+                "creadoEn": "2026-11-19T00:00:00+00:00",
+                "actualizadoEn": "2026-11-19T00:00:00+00:00",
+            }]).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and "/reparaciones/" in base and base.endswith("/estado"):
+            return 200, json.dumps({
+                "id": str(uuid.uuid4()),
+                "unitId": str(uuid.uuid4()),
+                "titulo": "Fuga de agua",
+                "descripcion": "Hay una fuga en el baño",
+                "estado": "EnProceso",
+                "foto": None,
+                "reportadoPorAccountId": str(uuid.uuid4()),
+                "reportadoPorNombreCompleto": None,
+                "creadoEn": "2026-11-19T00:00:00+00:00",
+                "actualizadoEn": "2026-11-19T00:00:00+00:00",
+            }).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/conversaciones"):
             return 200, json.dumps({
                 "conversacionId": str(uuid.uuid4()),
@@ -582,9 +661,9 @@ class ZapDastTests(unittest.TestCase):
         self.assertIn("estadoPublicacion", command[-1])
         self.assertIn("estadoOcupacion", command[-1])
 
-    def test_openapi_operations_incluyen_61_operaciones_y_auth(self):
+    def test_openapi_operations_incluyen_69_operaciones_y_auth(self):
         operations = parse_openapi_operations(SPEC)
-        self.assertEqual(61, len(operations))
+        self.assertEqual(69, len(operations))
         auth = {(item["method"], item["path"]) for item in operations if item["auth"]}
         self.assertIn(("POST", "/api/v1/auth/logout"), auth)
         self.assertIn(("DELETE", "/api/v1/cuentas/mi-cuenta"), auth)
@@ -609,7 +688,7 @@ class ZapDastTests(unittest.TestCase):
         ]
         coverage = build_coverage(operations, records)
         self.assertEqual(3, coverage["openapi_visited"])
-        self.assertEqual(58, len(coverage["missing"]))
+        self.assertEqual(66, len(coverage["missing"]))
         self.assertEqual(0, len(coverage["support_routes"]))
 
     def test_cobertura_detecta_ruta_no_visitada(self):
@@ -939,13 +1018,13 @@ class ZapDastTests(unittest.TestCase):
             result = zap_dast.run_scan(args)
         return result, output
 
-    def test_run_scan_genera_evidencia_y_cobertura_61_de_61(self):
+    def test_run_scan_genera_evidencia_y_cobertura_69_de_69(self):
         result, output = self._run_scan()
         self.assertEqual(0, result)
         summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
         self.assertEqual("PASS", summary["status"])
-        self.assertEqual(61, summary["coverage"]["openapi_operations"])
-        self.assertEqual(61, summary["coverage"]["openapi_visited"])
+        self.assertEqual(69, summary["coverage"]["openapi_operations"])
+        self.assertEqual(69, summary["coverage"]["openapi_visited"])
         self.assertEqual([], summary["coverage"]["missing"])
         self.assertTrue((output / "dast-report.md").exists())
         self.assertTrue((output / "zap-report.html").exists())

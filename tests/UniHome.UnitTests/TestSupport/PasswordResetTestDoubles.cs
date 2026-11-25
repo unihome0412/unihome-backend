@@ -263,6 +263,11 @@ internal sealed class FlakyAccountRepository : IAccountRepository
             newPasswordHash,
             cancellationToken);
     }
+
+    public Task<IReadOnlyList<Account>> SearchAsync(
+        string? query,
+        CancellationToken cancellationToken = default) =>
+        _inner.SearchAsync(query, cancellationToken);
 }
 
 internal sealed class FailingSessionRevocationRepository : IRefreshSessionRepository

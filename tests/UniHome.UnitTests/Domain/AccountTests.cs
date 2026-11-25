@@ -240,6 +240,110 @@ public sealed class AccountTests
         Assert.Throws<InvalidOperationException>(() => account.Delete(Now.AddMinutes(1)));
     }
 
+    [Fact]
+    public void Suspend_SobreCuentaActiva_CambiaAEstadoSuspendida()
+    {
+        var account = CreateAccount();
+
+        account.Suspend();
+
+        Assert.Equal(AccountStatus.Suspended, account.Status);
+    }
+
+    [Fact]
+    public void Suspend_SobreCuentaYaSuspendida_Lanza()
+    {
+        var account = CreateAccount();
+        account.Suspend();
+
+        Assert.Throws<InvalidOperationException>(() => account.Suspend());
+    }
+
+    [Fact]
+    public void Suspend_SobreCuentaEliminada_Lanza()
+    {
+        var account = CreateAccount();
+        account.Delete(Now);
+
+        Assert.Throws<InvalidOperationException>(() => account.Suspend());
+    }
+
+    [Fact]
+    public void Reactivate_SobreCuentaSuspendida_CambiaAEstadoActiva()
+    {
+        var account = CreateAccount();
+        account.Suspend();
+
+        account.Reactivate();
+
+        Assert.Equal(AccountStatus.Active, account.Status);
+    }
+
+    [Fact]
+    public void Reactivate_SobreCuentaYaActiva_Lanza()
+    {
+        var account = CreateAccount();
+
+        Assert.Throws<InvalidOperationException>(() => account.Reactivate());
+    }
+
+    [Fact]
+    public void Reactivate_SobreCuentaEliminada_Lanza()
+    {
+        var account = CreateAccount();
+        account.Delete(Now);
+
+        Assert.Throws<InvalidOperationException>(() => account.Reactivate());
+    }
+
+    [Fact]
+    public void EditProfile_ConDatosValidos_ActualizaNombreYCorreo()
+    {
+        var account = CreateAccount();
+        var newEmail = EmailAddress.Create("nueva@uni.edu");
+
+        account.EditProfile("  Nuevo Nombre  ", newEmail);
+
+        Assert.Equal("Nuevo Nombre", account.FullName);
+        Assert.Equal(newEmail, account.Email);
+    }
+
+    [Fact]
+    public void EditProfile_ConCorreoNulo_Lanza()
+    {
+        var account = CreateAccount();
+
+        Assert.Throws<ArgumentNullException>(() => account.EditProfile("Nombre", null!));
+    }
+
+    [Fact]
+    public void EditProfile_ConNombreInvalido_Lanza()
+    {
+        var account = CreateAccount();
+
+        Assert.Throws<ArgumentException>(
+            () => account.EditProfile(" ", EmailAddress.Create("otro@uni.edu")));
+    }
+
+    [Fact]
+    public void SetCurrentUniversity_ConIdValido_LaFija()
+    {
+        var account = CreateAccount();
+        var universityId = Guid.NewGuid();
+
+        account.SetCurrentUniversity(universityId);
+
+        Assert.Equal(universityId, account.CurrentUniversityId);
+    }
+
+    [Fact]
+    public void SetCurrentUniversity_ConIdVacio_Lanza()
+    {
+        var account = CreateAccount();
+
+        Assert.Throws<ArgumentException>(() => account.SetCurrentUniversity(Guid.Empty));
+    }
+
     private static Account CreateAccount() =>
         Account.Register(
             Guid.NewGuid(),

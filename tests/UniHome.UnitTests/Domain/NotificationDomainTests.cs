@@ -61,4 +61,57 @@ public sealed class NotificationDomainTests
         Assert.Throws<ArgumentException>(() =>
             Notification.CreateRentReminder(Guid.NewGuid(), Guid.NewGuid(), "2026-11", "   ", Now));
     }
+
+    [Fact]
+    public void CreateReparacionStatusUpdate_ConDatosValidos()
+    {
+        var recipient = Guid.NewGuid();
+        var unitId = Guid.NewGuid();
+        var reparacionId = Guid.NewGuid();
+
+        var notification = Notification.CreateReparacionStatusUpdate(
+            recipient, unitId, reparacionId, "El reporte cambió de estado.", Now);
+
+        Assert.Equal(recipient, notification.RecipientAccountId);
+        Assert.Equal(NotificationType.ReparacionActualizada, notification.Type);
+        Assert.Equal(unitId, notification.UnitId);
+        Assert.Equal(reparacionId, notification.ReparacionId);
+        Assert.Null(notification.Periodo);
+        Assert.Equal("El reporte cambió de estado.", notification.Message);
+    }
+
+    [Fact]
+    public void CreateReparacionStatusUpdate_IdsVacios_DebeRechazarse()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            Notification.CreateReparacionStatusUpdate(
+                Guid.Empty, Guid.NewGuid(), Guid.NewGuid(), "msg", Now));
+        Assert.Throws<ArgumentException>(() =>
+            Notification.CreateReparacionStatusUpdate(
+                Guid.NewGuid(), Guid.Empty, Guid.NewGuid(), "msg", Now));
+        Assert.Throws<ArgumentException>(() =>
+            Notification.CreateReparacionStatusUpdate(
+                Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, "msg", Now));
+    }
+
+    [Fact]
+    public void CreateReparacionStatusUpdate_MensajeVacio_DebeRechazarse()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            Notification.CreateReparacionStatusUpdate(
+                Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "   ", Now));
+    }
+
+    [Fact]
+    public void CreateReparacionStatusUpdate_DosLlamadas_GeneranIdsDistintos()
+    {
+        var recipient = Guid.NewGuid();
+        var unitId = Guid.NewGuid();
+        var reparacionId = Guid.NewGuid();
+
+        var first = Notification.CreateReparacionStatusUpdate(recipient, unitId, reparacionId, "msg", Now);
+        var second = Notification.CreateReparacionStatusUpdate(recipient, unitId, reparacionId, "msg", Now);
+
+        Assert.NotEqual(first.Id, second.Id);
+    }
 }

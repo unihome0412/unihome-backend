@@ -1,9 +1,10 @@
 namespace UniHome.Domain.Notifications;
 
-/// <summary>Único tipo hoy: HU-059. El esquema admite más tipos sin migrar.</summary>
+/// <summary>HU-059 y HU-066. El esquema admite más tipos sin migrar.</summary>
 public enum NotificationType
 {
-    RecordatorioRenta
+    RecordatorioRenta,
+    ReparacionActualizada
 }
 
 /// <summary>
@@ -21,6 +22,7 @@ public sealed class Notification
         string message,
         Guid? unitId,
         string? periodo,
+        Guid? reparacionId,
         DateTimeOffset createdAt)
     {
         Id = id;
@@ -29,6 +31,7 @@ public sealed class Notification
         Message = message;
         UnitId = unitId;
         Periodo = periodo;
+        ReparacionId = reparacionId;
         CreatedAt = createdAt;
     }
 
@@ -38,6 +41,9 @@ public sealed class Notification
     public string Message { get; }
     public Guid? UnitId { get; }
     public string? Periodo { get; }
+
+    /// <summary>HU-066: referencia al reporte de reparación actualizado; null para otros tipos.</summary>
+    public Guid? ReparacionId { get; }
     public DateTimeOffset CreatedAt { get; }
 
     /// <summary>
@@ -82,6 +88,52 @@ public sealed class Notification
             message,
             unitId,
             periodo,
+            reparacionId: null,
+            now);
+    }
+
+    /// <summary>
+    /// HU-066: notifica a un destinatario (titular o inquilino de la unidad,
+    /// distinto de quien cambió el estado) que un reporte de reparación de su
+    /// unidad se actualizó. A diferencia del recordatorio de renta, cada
+    /// cambio de estado es un evento propio: el id es aleatorio, no
+    /// determinista, para no colapsar varias actualizaciones en una sola.
+    /// </summary>
+    public static Notification CreateReparacionStatusUpdate(
+        Guid recipientAccountId,
+        Guid unitId,
+        Guid reparacionId,
+        string message,
+        DateTimeOffset now)
+    {
+        if (recipientAccountId == Guid.Empty)
+        {
+            throw new ArgumentException("El destinatario es obligatorio.", nameof(recipientAccountId));
+        }
+
+        if (unitId == Guid.Empty)
+        {
+            throw new ArgumentException("La unidad es obligatoria.", nameof(unitId));
+        }
+
+        if (reparacionId == Guid.Empty)
+        {
+            throw new ArgumentException("El reporte de reparación es obligatorio.", nameof(reparacionId));
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            throw new ArgumentException("El mensaje es obligatorio.", nameof(message));
+        }
+
+        return new Notification(
+            Guid.NewGuid(),
+            recipientAccountId,
+            NotificationType.ReparacionActualizada,
+            message,
+            unitId,
+            periodo: null,
+            reparacionId,
             now);
     }
 
@@ -92,6 +144,7 @@ public sealed class Notification
         string message,
         Guid? unitId,
         string? periodo,
+        Guid? reparacionId,
         DateTimeOffset createdAt) =>
-        new(id, recipientAccountId, type, message, unitId, periodo, createdAt);
+        new(id, recipientAccountId, type, message, unitId, periodo, reparacionId, createdAt);
 }

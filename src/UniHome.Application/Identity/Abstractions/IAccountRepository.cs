@@ -28,4 +28,14 @@ public interface IAccountRepository
         string expectedPasswordHash,
         string newPasswordHash,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// EP-M13 (HU-073): cuentas no eliminadas cuyo nombre o correo contiene
+    /// <paramref name="query"/> (sin distinguir mayúsculas), o todas si es
+    /// nulo o vacío. La paginación por categoría la aplica el servicio de
+    /// aplicación, porque la categoría depende de las unidades de la cuenta.
+    /// </summary>
+    Task<IReadOnlyList<Account>> SearchAsync(
+        string? query,
+        CancellationToken cancellationToken = default);
 }

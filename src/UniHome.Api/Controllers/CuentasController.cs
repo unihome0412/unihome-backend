@@ -23,8 +23,10 @@ public sealed class CuentasController : ControllerBase
     /// <summary>
     /// EP-M01-09 (HU-096): elimina (borrado lógico) la cuenta del titular
     /// autenticado y revoca todas sus sesiones activas en todos los
-    /// dispositivos. La validación de vínculos activos (409, M05/M09) y la
-    /// política de retención/anonimización (ADR-005) quedan pendientes.
+    /// dispositivos. Rechaza con 409 si tiene un vínculo de ocupación activo
+    /// (M09) o una propiedad con inquilinos activos; con 403 si es una cuenta
+    /// administrativa (ARQ-004). La política de retención/anonimización
+    /// (ADR-005) queda pendiente.
     /// </summary>
     [HttpDelete("mi-cuenta")]
     [Authorize]
@@ -32,6 +34,8 @@ public sealed class CuentasController : ControllerBase
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status413PayloadTooLarge)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> DeleteMyAccount(
@@ -72,6 +76,15 @@ public sealed class CuentasController : ControllerBase
             DeleteAccountStatus.IncorrectPassword => CreateProblemResult(
                 StatusCodes.Status401Unauthorized,
                 "La contraseña no es correcta."),
+            DeleteAccountStatus.ActiveOccupancyLinks => CreateProblemResult(
+                StatusCodes.Status409Conflict,
+                "La cuenta tiene un vínculo de ocupación activo; abandona la unidad antes de eliminar tu cuenta."),
+            DeleteAccountStatus.PropertiesWithTenants => CreateProblemResult(
+                StatusCodes.Status409Conflict,
+                "Una de tus propiedades todavía tiene inquilinos activos."),
+            DeleteAccountStatus.AdminCannotSelfDelete => CreateProblemResult(
+                StatusCodes.Status403Forbidden,
+                "Un administrador no puede eliminar su propia cuenta."),
             _ => CreateProblemResult(
                 StatusCodes.Status401Unauthorized,
                 "La sesión no es válida.")

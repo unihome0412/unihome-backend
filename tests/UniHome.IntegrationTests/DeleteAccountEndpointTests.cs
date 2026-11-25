@@ -3,6 +3,9 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using UniHome.Domain.Accounts;
+using UniHome.Domain.OccupancyLinks;
+using UniHome.Domain.Properties;
+using UniHome.Domain.Units;
 
 namespace UniHome.IntegrationTests;
 
@@ -146,6 +149,89 @@ public sealed class DeleteAccountEndpointTests : IClassFixture<UniHomeApiFactory
         var body = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain(AuthTestHelpers.Password, body, StringComparison.Ordinal);
         Assert.DoesNotContain(tokens.RefreshToken, body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Eliminar_ConVinculoDeOcupacionActivo_DebeResponder409SinEliminar()
+    {
+        var email = AuthTestHelpers.UniqueEmail();
+        var account = await AuthTestHelpers.SeedAccountAsync(_factory, email);
+        using var login = await AuthTestHelpers.LoginAsync(_client, email);
+        var tokens = await AuthTestHelpers.ReadTokensAsync(login);
+
+        await _factory.OccupancyLinks.SaveAsync(
+            OccupancyLink.CreateActive(account.Id, Guid.NewGuid(), DateTimeOffset.UtcNow));
+
+        using var response = await DeleteAsync(
+            tokens.AccessToken,
+            AuthTestHelpers.Password,
+            confirmacionPerdidaInformacion: true);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        var stored = await _factory.Accounts.FindByEmailAsync(EmailAddress.Create(email));
+        Assert.Equal(AccountStatus.Active, stored!.Status);
+    }
+
+    [Fact]
+    public async Task Eliminar_ConPropiedadConInquilinosActivos_DebeResponder409SinEliminar()
+    {
+        var email = AuthTestHelpers.UniqueEmail();
+        var account = await AuthTestHelpers.SeedAccountAsync(_factory, email);
+        using var login = await AuthTestHelpers.LoginAsync(_client, email);
+        var tokens = await AuthTestHelpers.ReadTokensAsync(login);
+
+        var unit = Unit.Create(
+            Guid.NewGuid(),
+            account.Id,
+            Guid.NewGuid(),
+            UnitType.Habitacion,
+            Occupancy.Compartida,
+            3,
+            1500m,
+            12m,
+            ForWhom.Mixto,
+            BathroomType.Compartido,
+            FurnitureType.SinMuebles,
+            furnitureItems: null,
+            template: null,
+            DateTimeOffset.UtcNow);
+        await _factory.Units.AddAsync(unit);
+        await _factory.OccupancyLinks.SaveAsync(
+            OccupancyLink.CreateActive(Guid.NewGuid(), unit.Id, DateTimeOffset.UtcNow));
+
+        using var response = await DeleteAsync(
+            tokens.AccessToken,
+            AuthTestHelpers.Password,
+            confirmacionPerdidaInformacion: true);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+
+        var stored = await _factory.Accounts.FindByEmailAsync(EmailAddress.Create(email));
+        Assert.Equal(AccountStatus.Active, stored!.Status);
+    }
+
+    [Fact]
+    public async Task Eliminar_ConCuentaAdministrativa_DebeResponder403SinEliminar()
+    {
+        var existing = await _factory.Accounts.FindByIdAsync(UniHomeApiFactory.TestAdminAccountId);
+        var admin = existing ?? await AuthTestHelpers.SeedAccountAsync(
+            _factory,
+            "admin.autoeliminacion@uni.edu",
+            id: UniHomeApiFactory.TestAdminAccountId);
+
+        using var login = await AuthTestHelpers.LoginAsync(_client, admin.Email.Value);
+        var tokens = await AuthTestHelpers.ReadTokensAsync(login);
+
+        using var response = await DeleteAsync(
+            tokens.AccessToken,
+            AuthTestHelpers.Password,
+            confirmacionPerdidaInformacion: true);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+
+        var stored = await _factory.Accounts.FindByIdAsync(UniHomeApiFactory.TestAdminAccountId);
+        Assert.Equal(AccountStatus.Active, stored!.Status);
     }
 
     private Task<HttpResponseMessage> DeleteAsync(

@@ -25,7 +25,8 @@ public sealed class Account
         DateTimeOffset? emailConfirmedAt,
         VerificationCode? emailVerification,
         IEnumerable<DateTimeOffset> verificationResendAttempts,
-        DateTimeOffset? deletedAt)
+        DateTimeOffset? deletedAt,
+        Guid? currentUniversityId)
     {
         Id = id;
         FullName = fullName;
@@ -41,13 +42,14 @@ public sealed class Account
         EmailVerification = emailVerification;
         _verificationResendAttempts = [.. verificationResendAttempts];
         DeletedAt = deletedAt;
+        CurrentUniversityId = currentUniversityId;
     }
 
     public Guid Id { get; }
 
-    public string FullName { get; }
+    public string FullName { get; private set; }
 
-    public EmailAddress Email { get; }
+    public EmailAddress Email { get; private set; }
 
     public DateOnly BirthDate { get; }
 
@@ -68,6 +70,13 @@ public sealed class Account
     public VerificationCode? EmailVerification { get; private set; }
 
     public DateTimeOffset? DeletedAt { get; private set; }
+
+    /// <summary>
+    /// HU-087: universidad actual de la cuenta, elegida desde el perfil o el
+    /// mapa. Null hasta que la persona la fije por primera vez; M01 no
+    /// persistía esta asociación antes de M13/Sprint 8.
+    /// </summary>
+    public Guid? CurrentUniversityId { get; private set; }
 
     public IReadOnlyList<DateTimeOffset> VerificationResendAttempts =>
         _verificationResendAttempts.AsReadOnly();
@@ -128,7 +137,8 @@ public sealed class Account
             emailConfirmedAt: null,
             emailVerification: null,
             verificationResendAttempts: [],
-            deletedAt: null);
+            deletedAt: null,
+            currentUniversityId: null);
     }
 
     public static Account Restore(
@@ -145,7 +155,8 @@ public sealed class Account
         DateTimeOffset? emailConfirmedAt,
         VerificationCode? emailVerification,
         IEnumerable<DateTimeOffset> verificationResendAttempts,
-        DateTimeOffset? deletedAt = null)
+        DateTimeOffset? deletedAt = null,
+        Guid? currentUniversityId = null)
     {
         if (id == Guid.Empty)
         {
@@ -191,7 +202,8 @@ public sealed class Account
             emailConfirmedAt,
             emailVerification,
             verificationResendAttempts,
-            deletedAt);
+            deletedAt,
+            currentUniversityId);
     }
 
     /// <summary>
@@ -307,13 +319,65 @@ public sealed class Account
         DeletedAt = now;
     }
 
+    /// <summary>HU-072 (M13): el administrador suspende la cuenta y revoca sus sesiones aparte.</summary>
+    public void Suspend()
+    {
+        if (Status == AccountStatus.Deleted)
+        {
+            throw new InvalidOperationException("La cuenta está eliminada.");
+        }
+
+        if (Status == AccountStatus.Suspended)
+        {
+            throw new InvalidOperationException("La cuenta ya está suspendida.");
+        }
+
+        Status = AccountStatus.Suspended;
+    }
+
+    /// <summary>HU-072 (M13): el administrador reactiva una cuenta suspendida.</summary>
+    public void Reactivate()
+    {
+        if (Status == AccountStatus.Deleted)
+        {
+            throw new InvalidOperationException("La cuenta está eliminada.");
+        }
+
+        if (Status == AccountStatus.Active)
+        {
+            throw new InvalidOperationException("La cuenta ya está activa.");
+        }
+
+        Status = AccountStatus.Active;
+    }
+
+    /// <summary>HU-087: fija la universidad actual, desde el perfil o el mapa.</summary>
+    public void SetCurrentUniversity(Guid universityId)
+    {
+        if (universityId == Guid.Empty)
+        {
+            throw new ArgumentException("La universidad es obligatoria.", nameof(universityId));
+        }
+
+        CurrentUniversityId = universityId;
+    }
+
+    /// <summary>HU-074 (M13): el administrador edita el nombre y el correo de la cuenta.</summary>
+    public void EditProfile(string? fullName, EmailAddress email)
+    {
+        ArgumentNullException.ThrowIfNull(email);
+
+        FullName = NormalizeFullName(fullName);
+        Email = email;
+    }
+
     private void PruneResendAttempts(DateTimeOffset now)
     {
         var threshold = now - VerificationCode.ResendWindow;
         _verificationResendAttempts.RemoveAll(attempt => attempt <= threshold);
     }
 
-    private static string NormalizeFullName(string fullName)
+    private static string NormalizeFullName(string? fullName)
     {
         if (string.IsNullOrWhiteSpace(fullName))
         {

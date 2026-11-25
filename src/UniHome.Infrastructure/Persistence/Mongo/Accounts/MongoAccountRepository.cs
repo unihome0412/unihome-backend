@@ -179,6 +179,44 @@ internal sealed class MongoAccountRepository : IAccountRepository
         }
     }
 
+    public async Task<IReadOnlyList<Account>> SearchAsync(
+        string? query,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var notDeleted = Builders<AccountDocument>.Filter.Ne(
+                document => document.Status,
+                AccountStatus.Deleted.ToString());
+
+            var filter = notDeleted;
+
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                var pattern = new MongoDB.Bson.BsonRegularExpression(
+                    System.Text.RegularExpressions.Regex.Escape(query), "i");
+                var textFilter = Builders<AccountDocument>.Filter.Or(
+                    Builders<AccountDocument>.Filter.Regex(document => document.FullName, pattern),
+                    Builders<AccountDocument>.Filter.Regex(document => document.NormalizedEmail, pattern));
+                filter = Builders<AccountDocument>.Filter.And(notDeleted, textFilter);
+            }
+
+            var documents = await collection
+                .Find(filter)
+                .Sort(Builders<AccountDocument>.Sort.Ascending(document => document.FullName))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents.Select(ToDomain).ToArray();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     private async Task<IMongoCollection<AccountDocument>> GetCollectionAsync(CancellationToken cancellationToken)
     {
         if (!_clientProvider.IsConfigured)
@@ -227,7 +265,8 @@ internal sealed class MongoAccountRepository : IAccountRepository
             VerificationResendAttemptsUtc = account.VerificationResendAttempts
                 .Select(attempt => attempt.UtcDateTime)
                 .ToList(),
-            DeletedAtUtc = account.DeletedAt?.UtcDateTime
+            DeletedAtUtc = account.DeletedAt?.UtcDateTime,
+            CurrentUniversityId = account.CurrentUniversityId?.ToString("N", CultureInfo.InvariantCulture)
         };
 
     private static Account ToDomain(AccountDocument document)
@@ -264,7 +303,10 @@ internal sealed class MongoAccountRepository : IAccountRepository
             document.VerificationResendAttemptsUtc.Select(ToDateTimeOffset),
             document.DeletedAtUtc is null
                 ? null
-                : ToDateTimeOffset(document.DeletedAtUtc.Value));
+                : ToDateTimeOffset(document.DeletedAtUtc.Value),
+            document.CurrentUniversityId is null
+                ? null
+                : Guid.ParseExact(document.CurrentUniversityId, "N"));
     }
 
     private static DateTimeOffset ToDateTimeOffset(DateTime value) =>

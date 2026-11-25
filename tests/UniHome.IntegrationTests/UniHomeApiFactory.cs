@@ -13,6 +13,7 @@ using UniHome.Application.OccupancyLinks.Abstractions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Publications.Abstractions;
 using UniHome.Application.Rentals.Abstractions;
+using UniHome.Application.Reparaciones.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Application.Verification.Abstractions;
@@ -77,6 +78,8 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     public InMemoryInformativePaymentRepository InformativePayments { get; } = new();
 
     public InMemoryNotificationRepository Notifications { get; } = new();
+
+    public InMemoryReparacionRepository Reparaciones { get; } = new();
 
     public InMemoryConversationRepository Conversations { get; } = new();
 
@@ -214,6 +217,9 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
                 services.RemoveAll<INotificationRepository>();
                 services.AddSingleton<INotificationRepository>(Notifications);
+
+                services.RemoveAll<IReparacionRepository>();
+                services.AddSingleton<IReparacionRepository>(Reparaciones);
 
                 services.RemoveAll<IConversationRepository>();
                 services.AddSingleton<IConversationRepository>(Conversations);

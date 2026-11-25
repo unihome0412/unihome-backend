@@ -34,6 +34,7 @@ using UniHome.Application.Chat.StartConversation;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Exploration;
 using UniHome.Application.Favorites;
+using UniHome.Application.Identity.Admin;
 using UniHome.Application.Identity.ConfirmEmail;
 using UniHome.Application.Identity.DeleteAccount;
 using UniHome.Application.Identity.Login;
@@ -60,6 +61,8 @@ using UniHome.Application.Rentals;
 using UniHome.Application.Rentals.Configure;
 using UniHome.Application.Rentals.Payments;
 using UniHome.Application.Rentals.Split;
+using UniHome.Application.Reparaciones;
+using UniHome.Application.Summary;
 using UniHome.Application.Units.CreateUnit;
 using UniHome.Application.Units.Detail;
 using UniHome.Application.Units.Photos;
@@ -231,6 +234,14 @@ builder.Services.AddScoped<ListUniversitiesService>();
 builder.Services.AddScoped<UpdateUniversityService>();
 builder.Services.AddScoped<ChangeUniversityStatusService>();
 builder.Services.AddScoped<SearchUniversitiesService>();
+builder.Services.AddScoped<CreateReparacionService>();
+builder.Services.AddScoped<ListReparacionesService>();
+builder.Services.AddScoped<ChangeReparacionStatusService>();
+builder.Services.AddScoped<GetMySummaryService>();
+builder.Services.AddScoped<SearchAccountsService>();
+builder.Services.AddScoped<SetAccountStatusService>();
+builder.Services.AddScoped<EditAccountService>();
+builder.Services.AddScoped<ChangeMyUniversityService>();
 
 builder.Services
     .AddAuthentication(options =>
@@ -326,6 +337,7 @@ builder.Services
     .ValidateOnStart();
 
 builder.Services.AddSingleton<IAuthorizationHandler, AdminAccessHandler>();
+builder.Services.AddSingleton<IAdminAccessChecker, AdminAccessChecker>();
 
 builder.Services
     .AddOptions<SwaggerAccessOptions>()
