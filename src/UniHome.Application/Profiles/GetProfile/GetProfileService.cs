@@ -73,7 +73,7 @@ public sealed class GetProfileService
             IsLinkedToUnit: isLinkedToUnit,
             CanPublish: units.Count == 0 &&
                         AgeEligibility.IsAdult(account.BirthDate, _clock.UtcNow),
-            FirstPublicationState: units.FirstOrDefault()?.PublicationState,
+            FirstPublicationState: units.Count > 0 ? units[0].PublicationState : null,
             CurrentUniversity: currentUniversity);
     }
 }
