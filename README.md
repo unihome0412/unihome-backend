@@ -382,6 +382,8 @@ aviso correspondiente.
 |---|---|---|
 | `PUT` | `/api/v1/unidades/{unitId}/renta/{periodo}` | El titular define o redefine la renta total, los conceptos de cobro y el día de corte de un periodo "yyyy-MM" (HU-050/HU-051/HU-052). |
 | `PUT` | `/api/v1/unidades/{unitId}/renta/{periodo}/division` | El titular divide la renta del periodo entre los inquilinos activos, en partes iguales o personalizadas (HU-053/HU-054). |
+| `POST` | `/api/v1/unidades/{unitId}/renta/{periodo}/pagos/{tenantAccountId}` | El titular registra un pago informativo recibido de un inquilino con vínculo activo (HU-055). |
+| `GET` | `/api/v1/unidades/{unitId}/renta/{periodo}/pagos` | El titular consulta, por inquilino, la cuota, lo pagado, el saldo y el estado (pendiente/parcial/registrado) frente a la división vigente (HU-056). |
 
 Reglas principales:
 
@@ -405,17 +407,27 @@ Reglas principales:
   con vínculo activo en la unidad.
 - Solo el titular de la unidad configura la renta y su división; cualquier
   otra cuenta recibe `403`, y una unidad inexistente, `404`.
+- **Pagos informativos (HU-055):** el titular registra cada pago recibido de
+  un inquilino con vínculo activo (monto positivo, fecha de recepción no
+  futura). Es una bitácora, no un cobro: puede haber varios pagos para el
+  mismo (periodo, inquilino) y se suman contra la cuota; un pago que exceda
+  la cuota no se rechaza, solo deja saldo a favor. El periodo se resuelve
+  igual que en la división (existente o heredado del anterior más reciente).
+- **Estado de pagos (HU-056):** por cada inquilino con cuota asignada se
+  calcula lo pagado, el saldo (`pagado − cuota`) y el estado: `Pendiente`
+  (nada pagado), `Parcial` (pagado &lt; cuota) o `Registrado` (pagado ≥
+  cuota, incluido sobrepago). Exige una división ya aplicada; si está
+  pendiente, responde `422` con el detalle de configurarla primero.
 - Migración `M10-001`: crea `rentas_periodo` (con índice único
   `ux_rentas_periodo` sobre `unitId`+`periodo`) y `pagos_informativos` (con
   `ix_pagos_periodo_inquilino`, no único). Migración `M12-001`: crea
   `notificaciones` (con `ix_notificaciones_destinatario`), reservada para el
   recordatorio de renta de HU-059 (Sprint 7, pendiente). No modifica M01-M09.
 
-El resto del alcance de Sprint 7 (pagos informativos HU-055/056, vista del
-inquilino HU-057/058, resumen mensual HU-060/061, detalle de unidad HU-035 y
-recordatorio HU-059) está en curso; esta sección y
-[`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md) se completan a medida
-que avanza.
+El resto del alcance de Sprint 7 (vista del inquilino HU-057/058, resumen
+mensual HU-060/061, detalle de unidad HU-035 y recordatorio HU-059) está en
+curso; esta sección y [`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md)
+se completan a medida que avanza.
 
 ## Swagger/OpenAPI protegido
 

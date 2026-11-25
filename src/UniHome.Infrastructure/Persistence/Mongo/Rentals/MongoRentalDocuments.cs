@@ -59,3 +59,26 @@ public sealed class TenantShareDocument
     [BsonRepresentation(BsonType.Decimal128)]
     public decimal AmountMxn { get; set; }
 }
+
+[BsonIgnoreExtraElements]
+public sealed class InformativePaymentDocument
+{
+    [BsonId]
+    public string Id { get; set; } = string.Empty;
+
+    [BsonElement(MongoRentalsSchema.PaymentRentPeriodField)]
+    public string RentPeriodId { get; set; } = string.Empty;
+
+    [BsonElement(MongoRentalsSchema.PaymentTenantField)]
+    public string TenantAccountId { get; set; } = string.Empty;
+
+    [BsonElement(MongoRentalsSchema.PaymentAmountField)]
+    [BsonRepresentation(BsonType.Decimal128)]
+    public decimal AmountMxn { get; set; }
+
+    [BsonElement(MongoRentalsSchema.PaymentReceivedOnField)]
+    public DateTime ReceivedOn { get; set; }
+
+    [BsonElement(MongoRentalsSchema.PaymentRegisteredAtField)]
+    public DateTime RegisteredAt { get; set; }
+}

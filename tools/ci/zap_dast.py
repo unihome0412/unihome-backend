@@ -1486,6 +1486,16 @@ def run_scan(args: argparse.Namespace) -> int:
     tenant_b_id = str(tenants[0].get("accountId") or "")
     if not tenant_b_id:
         raise DastError("El inquilino activo no devolvió accountId.")
+
+    # M10: registro y consulta de pagos informativos (HU-055/HU-056).
+    http.request(
+        "POST", f"/api/v1/unidades/{unit_id}/renta/2026-11/pagos/{tenant_b_id}",
+        body={"montoMxn": 6000, "fechaRecepcion": "2026-11-01"},
+        token=access_a, expected={201}, auth=True, note="registrar pago renta B")
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/renta/2026-11/pagos",
+        token=access_a, expected={200}, auth=True, note="estado de pagos unidad A")
+
     http.request(
         "DELETE", f"/api/v1/unidades/{unit_id}/inquilinos/{tenant_b_id}",
         body={"confirmacion": True},

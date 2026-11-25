@@ -31,3 +31,23 @@ internal sealed class FakeRentPeriodRepository : IRentPeriodRepository
         return Task.CompletedTask;
     }
 }
+
+internal sealed class FakeInformativePaymentRepository : IInformativePaymentRepository
+{
+    public List<InformativePayment> Items { get; } = [];
+
+    public Task SaveAsync(InformativePayment payment, CancellationToken cancellationToken = default)
+    {
+        Items.RemoveAll(item => item.Id == payment.Id);
+        Items.Add(payment);
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<InformativePayment>> ListByRentPeriodAsync(
+        Guid rentPeriodId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<InformativePayment>>(Items
+            .Where(payment => payment.RentPeriodId == rentPeriodId)
+            .OrderBy(payment => payment.ReceivedOn)
+            .ToArray());
+}

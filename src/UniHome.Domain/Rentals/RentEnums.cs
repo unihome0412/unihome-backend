@@ -16,6 +16,14 @@ public enum RentSplitMethod
     Personalizada
 }
 
+/// <summary>EP-M10 (HU-056): estado del pago de un inquilino en un periodo, frente a su cuota.</summary>
+public enum RentPaymentState
+{
+    Pendiente,
+    Parcial,
+    Registrado
+}
+
 /// <summary>Un concepto de cobro con su marca de fijo/variable (HU-051).</summary>
 public sealed record RentConcept(RentConceptName Nombre, bool EsFijo);
 

@@ -245,6 +245,21 @@ public sealed partial class RentPeriod
     public TenantShare? FindShare(Guid tenantAccountId) =>
         _shares.SingleOrDefault(share => share.TenantAccountId == tenantAccountId);
 
+    /// <summary>
+    /// HU-056: pendiente sin pagos, parcial si lo pagado no cubre la cuota,
+    /// registrado si la cubre o la excede (saldo a favor, HU-055: un pago
+    /// mayor a la cuota no se rechaza).
+    /// </summary>
+    public static RentPaymentState ComputePaymentState(decimal cuotaMxn, decimal totalPaidMxn)
+    {
+        if (totalPaidMxn <= 0)
+        {
+            return RentPaymentState.Pendiente;
+        }
+
+        return totalPaidMxn < cuotaMxn ? RentPaymentState.Parcial : RentPaymentState.Registrado;
+    }
+
     /// <summary>Ajusta <see cref="CutoffDay"/> al último día real del mes del periodo (31 en febrero → 28/29).</summary>
     public static DateOnly ComputeCutoffDate(string periodo, int cutoffDay)
     {

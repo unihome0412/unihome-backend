@@ -251,6 +251,16 @@ public sealed class RentDomainTests
         Assert.True(RentPeriod.ComparePeriodo("2027-01", "2026-12") > 0);
     }
 
+    [Theory]
+    [InlineData(0, RentPaymentState.Pendiente)]
+    [InlineData(500, RentPaymentState.Parcial)]
+    [InlineData(1000, RentPaymentState.Registrado)]
+    [InlineData(1500, RentPaymentState.Registrado)]
+    public void ComputePaymentState_ClasificaSegunLoPagado(decimal totalPaid, RentPaymentState expected)
+    {
+        Assert.Equal(expected, RentPeriod.ComputePaymentState(1000m, totalPaid));
+    }
+
     [Fact]
     public void InformativePayment_Register_ConDatosValidos()
     {

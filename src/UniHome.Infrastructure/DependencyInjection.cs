@@ -210,6 +210,7 @@ public static class DependencyInjection
         services.AddSingleton<IUnitFavoriteRepository, MongoFavoriteRepository>();
         services.AddSingleton<IOccupancyLinkRepository, MongoOccupancyLinkRepository>();
         services.AddSingleton<IRentPeriodRepository, MongoRentPeriodRepository>();
+        services.AddSingleton<IInformativePaymentRepository, MongoInformativePaymentRepository>();
         services.AddSingleton<IUnitInvitationRepository, MongoUnitInvitationRepository>();
         services.AddSingleton<IUnitInvitationCodeGenerator, RandomUnitInvitationCodeGenerator>();
         services.AddSingleton<IConversationRepository, MongoConversationRepository>();
