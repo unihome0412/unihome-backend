@@ -63,6 +63,7 @@ OPERATIONS = [
     ("POST", "/api/v1/unidades/{unitId}/fotos", True),
     ("PUT", "/api/v1/unidades/{unitId}/servicios", True),
     ("GET", "/api/v1/unidades/{unitId}/vista-previa", True),
+    ("GET", "/api/v1/unidades/{unitId}/detalle", True),
     ("PUT", "/api/v1/unidades/{unitId}/zona-reglas", True),
     ("GET", "/api/v1/universidades", False),
     ("GET", "/api/v1/exploracion/mapa", False),
@@ -461,6 +462,8 @@ class FakeHttpClient:
             return 200, b'{"totalFotos":1}'
         if base.startswith("/api/v1/unidades/") and base.endswith("/vista-previa"):
             return 200, b'{"fotoPrincipalUrl":"/api/v1/fotos/ref"}'
+        if base.startswith("/api/v1/unidades/") and base.endswith("/detalle"):
+            return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
         if base.startswith("/api/v1/fotos/"):
             return 200, zap_dast.DAST_PHOTO_PNG
         if base == "/api/v1/publicaciones/primera/terminos":
@@ -567,9 +570,9 @@ class ZapDastTests(unittest.TestCase):
         self.assertIn("estadoPublicacion", command[-1])
         self.assertIn("estadoOcupacion", command[-1])
 
-    def test_openapi_operations_incluyen_59_operaciones_y_auth(self):
+    def test_openapi_operations_incluyen_60_operaciones_y_auth(self):
         operations = parse_openapi_operations(SPEC)
-        self.assertEqual(59, len(operations))
+        self.assertEqual(60, len(operations))
         auth = {(item["method"], item["path"]) for item in operations if item["auth"]}
         self.assertIn(("POST", "/api/v1/auth/logout"), auth)
         self.assertIn(("DELETE", "/api/v1/cuentas/mi-cuenta"), auth)
@@ -594,7 +597,7 @@ class ZapDastTests(unittest.TestCase):
         ]
         coverage = build_coverage(operations, records)
         self.assertEqual(3, coverage["openapi_visited"])
-        self.assertEqual(56, len(coverage["missing"]))
+        self.assertEqual(57, len(coverage["missing"]))
         self.assertEqual(0, len(coverage["support_routes"]))
 
     def test_cobertura_detecta_ruta_no_visitada(self):
@@ -924,13 +927,13 @@ class ZapDastTests(unittest.TestCase):
             result = zap_dast.run_scan(args)
         return result, output
 
-    def test_run_scan_genera_evidencia_y_cobertura_59_de_59(self):
+    def test_run_scan_genera_evidencia_y_cobertura_60_de_60(self):
         result, output = self._run_scan()
         self.assertEqual(0, result)
         summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
         self.assertEqual("PASS", summary["status"])
-        self.assertEqual(59, summary["coverage"]["openapi_operations"])
-        self.assertEqual(59, summary["coverage"]["openapi_visited"])
+        self.assertEqual(60, summary["coverage"]["openapi_operations"])
+        self.assertEqual(60, summary["coverage"]["openapi_visited"])
         self.assertEqual([], summary["coverage"]["missing"])
         self.assertTrue((output / "dast-report.md").exists())
         self.assertTrue((output / "zap-report.html").exists())

@@ -122,6 +122,14 @@ Sprint 2 / M05: `POST /api/v1/propiedades`, `POST /api/v1/propiedades/{id}/unida
 `PUT /api/v1/unidades/{id}/zona-reglas`, `GET /api/v1/unidades/{id}/vista-previa` y
 `POST /api/v1/publicaciones/primera/terminos`. Todas las rutas requieren Bearer y
 verifican que el recurso pertenezca al titular. La edad se recalcula en servidor.
+Sprint 7 agrega `GET /api/v1/unidades/{id}/detalle` (HU-035): detalle completo
+de una unidad propia, en cualquier estado de publicación, para la pantalla de
+administración a la que el titular llega desde `GET /api/v1/mis-propiedades`
+(HU-033). A diferencia de la vista previa (HU-080, una tarjeta), devuelve el
+mismo contrato `UnidadResponse` que ya usan los endpoints de alta/edición de
+Sprint 2 (`servicios`, `zona-reglas`, `fotos`), solo que como una simple
+lectura: el titular podía ver su unidad completa tras cada edición, pero no
+había una ruta para volver a consultarla sin modificar nada.
 La unidad nace en `Borrador`; el envío a revisión de Sprint 4 se implementó en M06.
 La carga de fotos usa **Cloudinary Free** mediante `IUnitPhotoStorage`; las im?genes
 se suben como `authenticated` y se entregan por `GET /api/v1/fotos/{photoRef}`, no por
@@ -445,10 +453,9 @@ Reglas principales:
   `notificaciones` (con `ix_notificaciones_destinatario`), reservada para el
   recordatorio de renta de HU-059 (Sprint 7, pendiente). No modifica M01-M09.
 
-El resto del alcance de Sprint 7 (detalle de unidad HU-035 y recordatorio
-HU-059) está en curso; esta sección y
-[`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md) se completan a medida
-que avanza.
+El resto del alcance de Sprint 7 (recordatorio de renta HU-059) está en
+curso; esta sección y [`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md)
+se completan a medida que avanza.
 
 ## Swagger/OpenAPI protegido
 

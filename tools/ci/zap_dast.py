@@ -1251,6 +1251,11 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", photo_path, token=access_a,
         expected={200}, auth=True, note="lectura foto")
 
+    # M05 (HU-035): detalle completo de la unidad propia.
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/detalle",
+        token=access_a, expected={200}, auth=True, note="detalle unidad")
+
     # Sprint 6 / HU-033: "Mis propiedades" agrupa la propiedad y su habitación.
     _, my_properties_payload, _ = http.request(
         "GET", "/api/v1/mis-propiedades",
