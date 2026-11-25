@@ -61,6 +61,63 @@ public sealed class MongoSchemaSafetyTests
         Assert.Equal(1, reads);
     }
 
+    public static TheoryData<string> ColeccionesRegistradas()
+    {
+        var data = new TheoryData<string>();
+        foreach (var collection in MongoMigrationRegistry.Default.Migrations
+                     .SelectMany(migration => migration.Collections))
+        {
+            data.Add(collection.Name);
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// Regresión: cada colección creada por una migración registrada debe ser
+    /// conocida por el guard; si falta, el endpoint responde 503 aunque la base
+    /// tenga los índices correctos (caso Chat/Notificaciones/Rentas, Sprint 7).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ColeccionesRegistradas))]
+    public async Task Guard_DebeAceptarCadaColeccionDeMigracionesRegistradas(string collectionName)
+    {
+        var definition = MongoMigrationRegistry.Default.Migrations
+            .SelectMany(migration => migration.Collections)
+            .Single(collection => collection.Name == collectionName);
+        var indexes = new List<BsonDocument> { BsonDocument.Parse("{ name: '_id_', key: { _id: 1 } }") };
+        foreach (var index in definition.Indexes)
+        {
+            var document = new BsonDocument
+            {
+                ["name"] = index.Name,
+                ["key"] = index.ToKeyDocument()
+            };
+            if (index.Unique)
+            {
+                document["unique"] = true;
+            }
+
+            if (index.ExpireAfterSeconds.HasValue)
+            {
+                document["expireAfterSeconds"] = index.ExpireAfterSeconds.Value;
+            }
+
+            indexes.Add(document);
+        }
+
+        var manager = InterfaceProxy<IMongoIndexManager<BsonDocument>>.Create((_, _) =>
+            Task.FromResult<IAsyncCursor<BsonDocument>>(new IndexCursor(indexes)));
+        var collection = InterfaceProxy<IMongoCollection<BsonDocument>>.Create((method, _) => method.Name switch
+        {
+            "get_CollectionNamespace" => new CollectionNamespace(new DatabaseNamespace("unit_test"), collectionName),
+            "get_Indexes" => manager,
+            _ => throw new InvalidOperationException("El guard no debe escribir ni consultar documentos.")
+        });
+
+        await MongoIdentitySchemaGuard.EnsureAsync(collection);
+    }
+
     [Fact]
     public void Ledger_DebeRechazarChecksumDistintoSinModificarRegistro()
     {
