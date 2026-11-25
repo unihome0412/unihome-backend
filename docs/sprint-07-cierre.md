@@ -181,17 +181,20 @@ contrato, sin dominio ni infraestructura nuevos.
 
 ## 8. Pendientes
 
-1. **CI:** `.github/workflows/ci.yml` ya aplica/verifica `M10-001` y
-   `M12-001` en `mongo-db-test`, `dast-zap` y `restler-fuzzing` desde el
-   primer commit de este sprint; sin cambios adicionales en los commits de
-   este cierre. No se ejecutó el workflow en GitHub; queda **PENDING_CI**
-   hasta que se disparen esos jobs en el PR.
+1. **CI:** PR #61 corrió completo en GitHub y quedó en verde (incluido
+   Gitleaks, SonarCloud SAST y PR Quality Gate, tras el commit de
+   corrección `fix(sprint-07)`); ver sección 11 para el detalle y la
+   cobertura final. Ya no está **PENDING_CI**.
 2. Las seis decisiones provisionales de la sección 3 no tienen aprobación
    de producto.
-3. `M10-001` y `M12-001` no se aplicaron ni promovieron a Atlas.
-4. Mismo alcance que sprints previos: Docker build/Container Smoke no
-   ejecutados localmente; ZAP, RESTler, Sonar, CodeQL, Semgrep y Pact
-   remotos: **PENDING_CI**.
+3. ~~`M10-001` y `M12-001` no se aplicaron ni promovieron a Atlas.~~
+   **Promovidas a `unihome_verificacion` el 2026-11-25** (ventana de
+   despliegue de Sprint 7); ver sección 11. Pendiente promover a
+   `unihome_desarrollo` cuando corresponda.
+4. Mismo alcance que sprints previos: Docker build/Container Smoke ya se
+   ejecutaron en CI (PR #61, verde). ZAP, RESTler, Mutation Test, Pact y
+   Cloudinary Integration siguen **PENDING_CI** (jobs manuales, no
+   disparados).
 5. Pruebas Mongo reales de sprints anteriores siguen **BLOCKED**
    localmente sin `mongod`; este sprint no agregó una prueba real opt-in
    nueva (ningún endpoint nuevo introdujo un patrón de persistencia que no
@@ -242,3 +245,112 @@ contrato, sin dominio ni infraestructura nuevos.
 - `tools/ci/zap_dast.py` y `tools/ci/test_zap_dast.py`: catálogo de 61
   operaciones, flujo real de las 14 HU.
 - `README.md`: secciones de Sprint 7 (M10, M12) y detalle de unidad (M05).
+
+## 11. Despliegue a producción (2026-11-25)
+
+PR #61 (`feature/sprint-07-backend-integral` → `main`) se mergeó, seguido
+de PR #60 (`docs/sprint-06-promocion-atlas`, solo documentación). `main`
+quedó en `38cad307cf7bbc90ebcaed9faf863325ac8a61a1`. El PR #61 corrió
+completo en GitHub Actions y quedó en verde: Build/formato/pruebas,
+CodeQL ×2, Container Smoke, Contract Test (OpenAPI), Docker Build, Docker
+Container Lint, Dependencias vulnerables, Semgrep SAST, Hardening Report,
+**Gitleaks, SonarCloud SAST (.NET), SonarCloud Code Analysis y PR Quality
+Gate**. El Quality Gate de SonarCloud cerró con `new_coverage` en **92.7 %**
+(exigido > 80 %) y **0 avisos nuevos** — antes de un commit de corrección
+`fix(sprint-07)` había 6 avisos y `new_coverage` en 67.3 %.
+
+### 11.1 Migraciones — solo lectura antes de promover
+
+Contra `unihome_verificacion`, con `--migration-credential`, sin
+escrituras:
+
+- `audit`: 16 colecciones, 8 migraciones en el ledger. `rentas_periodo`,
+  `pagos_informativos` y `notificaciones` **no existían todavía**.
+- `plan M10-001`: 5 escrituras pendientes (crear `rentas_periodo` + su
+  índice único, `pagos_informativos` + su índice, y el registro del
+  ledger). Sin divergencias.
+- `plan M12-001`: 3 escrituras pendientes (crear `notificaciones` + su
+  índice, y el registro del ledger). Sin divergencias.
+- `verify M10-001` / `verify M12-001`: `NO VÁLIDO` — "no está registrada",
+  el resultado esperado antes de promover.
+- `verify` de `M01-001` a `M09-001` (las 8 ya aplicadas): las 8 en
+  **VÁLIDO** (registradas, checksum e índices coincidentes).
+
+### 11.2 Promoción
+
+Autorización de sesión: `$env:UNIHOME_PROMOTION_AUTHORIZED_DATABASE =
+'unihome_verificacion'` (no se guardó en el repositorio).
+
+| Migración | `--approval-ref` | Checksum | Estado inicial | Escrituras aplicadas | Verificación |
+|---|---|---|---|---|---|
+| `M10-001` | `M10-001-PROD-20261124-01` | `41D877A8CB04A72A5D5C5C2F24EFEB22332D09E647D523919B90672B98AEE9C0` | `PartiallyApplied` | 6 | **VÁLIDA** |
+| `M12-001` | `M12-001-PROD-20261124-01` | `7D5024EA255550A1FEB797AF3398B125BB7C336BABA5E20D71513EABB39CC875` | `PartiallyApplied` | 4 | **VÁLIDA** |
+
+El `verify` posterior de cada una (con `--migration-credential`) confirmó
+`Registrada: True`, `Checksum coincide: True`, índices coincidentes,
+`Escrituras pendientes: 0`, **Resultado: VÁLIDO**.
+
+### 11.3 Imagen y Container App
+
+```
+az acr login --name acrunihomedev
+docker build --tag acrunihomedev.azurecr.io/unihome-api:38cad307cf7bbc90ebcaed9faf863325ac8a61a1 .
+docker push acrunihomedev.azurecr.io/unihome-api:38cad307cf7bbc90ebcaed9faf863325ac8a61a1
+```
+
+Imagen confirmada en ACR (tag más reciente del repositorio
+`unihome-api`), digest `sha256:d410be117524e24b04a13636bcc31fcd0e0e6fbac08623496cf739114bcb132b`.
+La imagen de Sprint 6 (`34c69ae30ce09819cf6cf9e3943ef533e7745eb1`) se
+confirmó presente en ACR como objetivo de rollback antes de actualizar.
+
+```
+az containerapp update --name unihome-api --resource-group rg-unihome-dev `
+  --image acrunihomedev.azurecr.io/unihome-api:38cad307cf7bbc90ebcaed9faf863325ac8a61a1 `
+  --revision-suffix sprint07-20261124
+```
+
+No se cambiaron variables de entorno, secretos ni el modo de revisión
+(`Single`, sin modificar).
+
+### 11.4 Verificación posterior
+
+| Comprobación | Resultado |
+|---|---|
+| Revisión `unihome-api--sprint07-20261124` | `healthState: Healthy`, `runningState: RunningAtMaxScale`, `trafficWeight: 100` |
+| `GET /health/live` | `200` |
+| `GET /health/ready` | `200` |
+| `GET /api/v1/notificaciones` sin sesión | `401` |
+| `GET /api/v1/unidades/{unitId}/renta/mis-pagos` sin sesión | `401` |
+| `GET /api/v1/mi-resumen-renta/2026-11` sin sesión | `401` |
+
+No se usó la ruta literal `/api/v1/mis-pagos` (no existe en el catálogo);
+se verificó la ruta real de HU-058,
+`/api/v1/unidades/{unitId}/renta/mis-pagos`, con un `unitId` aleatorio.
+
+**No se necesitó rollback.** El comando de rollback se dejó preparado y
+documentado, pero no se ejecutó:
+
+```
+az containerapp update --name unihome-api --resource-group rg-unihome-dev `
+  --image acrunihomedev.azurecr.io/unihome-api:34c69ae30ce09819cf6cf9e3943ef533e7745eb1 `
+  --revision-suffix rollback-sprint06-20261124
+```
+
+### 11.5 Candados temporales
+
+Para este despliegue se quitaron temporalmente de
+`.claude/settings.local.json` (no versionado) las reglas `deny` de
+`az containerapp update`, `az containerapp revision` y
+`dotnet run --project tools/UniHome.MongoMigrator*promote*`, con
+autorización explícita y acotada a esta ventana. Se restauraron las tres
+reglas al terminar; el resto de los candados (`gh pr merge`, `git push
+origin main`, `git push --force/-f`, `git reset --hard`, `git branch -D`,
+`az containerapp secret/ingress/delete`, `dotnet user-secrets`) nunca se
+tocó.
+
+### 11.6 Pendiente
+
+- Promover `M10-001`/`M12-001` a `unihome_desarrollo` cuando corresponda
+  (fuera del alcance de esta ventana, que fue solo `unihome_verificacion`).
+- ZAP, RESTler, Mutation Test, Pact y Cloudinary Integration: jobs
+  manuales de CI, no disparados en esta ventana.
