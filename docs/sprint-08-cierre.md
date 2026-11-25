@@ -238,12 +238,21 @@ pendientes desde entonces:
 
 ## 10. Pendientes
 
-1. **CI:** PR a `main` abierto desde `feature/sprint-08-backend-integral`,
-   pendiente de ejecutar en GitHub Actions. Localmente: build/formato en
-   verde, **1073/1073 unitarias PASS** (4 omitidas: OCR/PDF reales),
-   **372/372 integraciones ejecutadas PASS** (13 opt-in Mongo/Cloudinary
-   omitidas explícitamente), **167/167 Python CI PASS**, catálogo OpenAPI en
-   **69 operaciones** y fixture DAST local en cobertura **69/69**.
+1. ~~**CI:** PR a `main` abierto desde `feature/sprint-08-backend-integral`,
+   pendiente de ejecutar en GitHub Actions.~~ **Resuelto.** PR #65 corrió
+   completo en GitHub Actions y quedó en verde: Build/formato/pruebas,
+   CodeQL ×2, Container Smoke, Contract Test (OpenAPI), Docker Build, Docker
+   Container Lint, Dependencias vulnerables, Semgrep SAST, Hardening Report,
+   Gitleaks, SonarCloud SAST (.NET), SonarCloud Code Analysis y PR Quality
+   Gate. El Quality Gate de SonarCloud cerró en **OK** con `new_coverage` en
+   **86.6 %** (exigido &gt; 80 %) y **0 issues nuevos** (se corrigió un aviso
+   `CA1826` en `GetProfileService` detectado en el primer intento). Localmente:
+   build/formato en verde, **1073/1073 unitarias PASS** (4 omitidas: OCR/PDF
+   reales), **372/372 integraciones ejecutadas PASS** (13 opt-in
+   Mongo/Cloudinary omitidas explícitamente), **167/167 Python CI PASS**,
+   catálogo OpenAPI en **69 operaciones** y fixture DAST local en cobertura
+   **69/69**. El merge a `main` no se ejecutó: queda pendiente de que el
+   responsable de la cuenta lo apruebe.
 2. Las seis decisiones provisionales de la sección 3 no tienen aprobación de
    producto.
 3. `M11-001` no se aplicó ni promovió a ningún entorno (`unihome_verificacion`
