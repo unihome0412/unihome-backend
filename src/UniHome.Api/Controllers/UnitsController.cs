@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using UniHome.Api.Contracts.Units;
 using UniHome.Application.Units.CreateUnit;
+using UniHome.Application.Units.Detail;
 using UniHome.Application.Units.Photos;
 using UniHome.Application.Units.Preview;
 using UniHome.Application.Units.Services;
@@ -21,19 +22,22 @@ public sealed class UnitsController : AuthenticatedControllerBase
     private readonly ConfigureUnitServicesService _configureServices;
     private readonly ConfigureUnitZoneRulesService _configureZoneRules;
     private readonly GetUnitPreviewService _getPreview;
+    private readonly GetUnitDetailForOwnerService _getDetail;
 
     public UnitsController(
         CreateUnitService createUnit,
         AddUnitPhotosService addPhotos,
         ConfigureUnitServicesService configureServices,
         ConfigureUnitZoneRulesService configureZoneRules,
-        GetUnitPreviewService getPreview)
+        GetUnitPreviewService getPreview,
+        GetUnitDetailForOwnerService getDetail)
     {
         _createUnit = createUnit;
         _addPhotos = addPhotos;
         _configureServices = configureServices;
         _configureZoneRules = configureZoneRules;
         _getPreview = getPreview;
+        _getDetail = getDetail;
     }
 
     /// <summary>
@@ -298,5 +302,39 @@ public sealed class UnitsController : AuthenticatedControllerBase
             notFoundDetail: "La unidad no existe.",
             forbiddenDetail: "La cuenta no está autorizada para esta operación.",
             conflictDetail: "No se pudo construir la vista previa.");
+    }
+
+    /// <summary>
+    /// EP-M05-07 (HU-035): detalle completo de una unidad propia, en
+    /// cualquier estado de publicación.
+    /// </summary>
+    [HttpGet("unidades/{unitId:guid}/detalle")]
+    [Authorize]
+    [ProducesResponseType(typeof(UnidadResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> Detail(
+        Guid unitId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetAccountId(out var accountId))
+        {
+            return CreateProblemResult(
+                StatusCodes.Status401Unauthorized,
+                "La sesión no es válida.");
+        }
+
+        var result = await _getDetail
+            .GetAsync(accountId, unitId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ToActionResult(
+            result,
+            value => Ok(UnidadResponse.FromDomain(value)),
+            notFoundDetail: "La unidad no existe.",
+            forbiddenDetail: "La cuenta no está autorizada para esta operación.",
+            conflictDetail: "No se pudo completar la operación.");
     }
 }

@@ -55,4 +55,18 @@ public sealed class InMemoryOccupancyLinkRepository : IOccupancyLinkRepository
             return Task.FromResult(items);
         }
     }
+
+    public Task<IReadOnlyList<OccupancyLink>> ListActiveByTenantAsync(
+        Guid tenantAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            IReadOnlyList<OccupancyLink> items = _links.Values
+                .Where(link => link.TenantAccountId == tenantAccountId && link.Status == OccupancyStatus.Activo)
+                .OrderBy(link => link.JoinedAt)
+                .ToArray();
+            return Task.FromResult(items);
+        }
+    }
 }

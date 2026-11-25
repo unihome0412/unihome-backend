@@ -95,6 +95,30 @@ internal sealed class MongoOccupancyLinkRepository : IOccupancyLinkRepository
         }
     }
 
+    public async Task<IReadOnlyList<OccupancyLink>> ListActiveByTenantAsync(
+        Guid tenantAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var documents = await collection
+                .Find(ActiveFilter(Builders<OccupancyLinkDocument>.Filter.Eq(
+                    item => item.TenantAccountId,
+                    tenantAccountId.ToString("N", CultureInfo.InvariantCulture))))
+                .Sort(Builders<OccupancyLinkDocument>.Sort.Ascending(item => item.JoinedAt))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents.Select(ToDomain).ToArray();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task<bool> HasActiveLinkAsync(
         Guid tenantAccountId,
         CancellationToken cancellationToken = default)

@@ -1251,6 +1251,11 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", photo_path, token=access_a,
         expected={200}, auth=True, note="lectura foto")
 
+    # M05 (HU-035): detalle completo de la unidad propia.
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/detalle",
+        token=access_a, expected={200}, auth=True, note="detalle unidad")
+
     # Sprint 6 / HU-033: "Mis propiedades" agrupa la propiedad y su habitación.
     _, my_properties_payload, _ = http.request(
         "GET", "/api/v1/mis-propiedades",
@@ -1447,6 +1452,26 @@ def run_scan(args: argparse.Namespace) -> int:
         "POST", "/api/v1/unidades/unirse",
         body={"codigo": invitation_code},
         token=access_b, expected={200}, auth=True, note="unirse con código B")
+
+    # M10: configuración y división de renta del periodo vigente (HU-050/051/052/053/054).
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/renta/2026-11",
+        body={
+            "rentaTotalMxn": 6000,
+            "diaCorte": 5,
+            "conceptos": [
+                {"nombre": "Renta", "esFijo": True},
+                {"nombre": "Mantenimiento", "esFijo": True},
+                {"nombre": "Luz", "esFijo": False},
+                {"nombre": "Gas", "esFijo": False},
+            ],
+        },
+        token=access_a, expected={200}, auth=True, note="configurar renta unidad A")
+    http.request(
+        "PUT", f"/api/v1/unidades/{unit_id}/renta/2026-11/division",
+        body={"metodo": "Igual"},
+        token=access_a, expected={200}, auth=True, note="dividir renta en partes iguales")
+
     http.request(
         "PUT", f"/api/v1/unidades/{unit_id}/mantenimiento",
         body={"enMantenimiento": True},
@@ -1466,6 +1491,37 @@ def run_scan(args: argparse.Namespace) -> int:
     tenant_b_id = str(tenants[0].get("accountId") or "")
     if not tenant_b_id:
         raise DastError("El inquilino activo no devolvió accountId.")
+
+    # M10: registro y consulta de pagos informativos (HU-055/HU-056).
+    http.request(
+        "POST", f"/api/v1/unidades/{unit_id}/renta/2026-11/pagos/{tenant_b_id}",
+        body={"montoMxn": 6000, "fechaRecepcion": "2026-11-01"},
+        token=access_a, expected={201}, auth=True, note="registrar pago renta B")
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/renta/2026-11/pagos",
+        token=access_a, expected={200}, auth=True, note="estado de pagos unidad A")
+
+    # M10: vista del inquilino sobre su propia renta (HU-057/HU-058).
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/renta/2026-11/mi-renta",
+        token=access_b, expected={200}, auth=True, note="mi renta B")
+    http.request(
+        "GET", f"/api/v1/unidades/{unit_id}/renta/mis-pagos",
+        token=access_b, expected={200}, auth=True, note="mis pagos B")
+
+    # M10: resumen mensual de renta, como titular (A) y como inquilino (B) (HU-060/HU-061).
+    http.request(
+        "GET", "/api/v1/mi-resumen-renta/2026-11",
+        token=access_a, expected={200}, auth=True, note="resumen de renta A")
+    http.request(
+        "GET", "/api/v1/mi-resumen-renta/2026-11",
+        token=access_b, expected={200}, auth=True, note="resumen de renta B")
+
+    # M12 (HU-059): recordatorio de renta, generado al consultar el endpoint.
+    http.request(
+        "GET", "/api/v1/notificaciones",
+        token=access_b, expected={200}, auth=True, note="notificaciones B")
+
     http.request(
         "DELETE", f"/api/v1/unidades/{unit_id}/inquilinos/{tenant_b_id}",
         body={"confirmacion": True},

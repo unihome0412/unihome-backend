@@ -18,3 +18,4 @@ __pycache__/
 .dast-mail/
 .ci-state/
 artifacts/
+.claude/settings.local.json
