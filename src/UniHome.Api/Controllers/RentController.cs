@@ -9,9 +9,10 @@ using UniHome.Domain.Rentals;
 namespace UniHome.Api.Controllers;
 
 /// <summary>
-/// EP-M10 (HU-050/051/052/053/054/055/056): configuración, división y pagos
-/// informativos de la renta de una unidad por periodo. UniHome no procesa
-/// pagos ni interviene en transacciones económicas entre las partes (HU-090).
+/// EP-M10 (HU-050/051/052/053/054/055/056/057/058): configuración, división,
+/// pagos informativos y vista del inquilino sobre la renta de una unidad por
+/// periodo. UniHome no procesa pagos ni interviene en transacciones
+/// económicas entre las partes (HU-090).
 /// </summary>
 [ApiController]
 [Route("api/v1")]
@@ -23,17 +24,23 @@ public sealed class RentController : AuthenticatedControllerBase
     private readonly SplitRentPeriodService _split;
     private readonly RegisterRentPaymentService _registerPayment;
     private readonly ListRentPaymentsService _listPayments;
+    private readonly GetMyRentShareService _myRentShare;
+    private readonly GetMyPaymentHistoryService _myPaymentHistory;
 
     public RentController(
         ConfigureRentPeriodService configure,
         SplitRentPeriodService split,
         RegisterRentPaymentService registerPayment,
-        ListRentPaymentsService listPayments)
+        ListRentPaymentsService listPayments,
+        GetMyRentShareService myRentShare,
+        GetMyPaymentHistoryService myPaymentHistory)
     {
         _configure = configure;
         _split = split;
         _registerPayment = registerPayment;
         _listPayments = listPayments;
+        _myRentShare = myRentShare;
+        _myPaymentHistory = myPaymentHistory;
     }
 
     /// <summary>EP-M10-01 (HU-050/051/052): define renta total, conceptos y día de corte.</summary>
@@ -220,5 +227,69 @@ public sealed class RentController : AuthenticatedControllerBase
             forbiddenDetail: "La cuenta no está autorizada para esta operación.",
             conflictDetail: "No se pudo completar la operación.",
             unprocessableDetail: "La división de este periodo está pendiente; configúrala antes de consultar pagos.");
+    }
+
+    /// <summary>EP-M10-05 (HU-057): la propia cuota del inquilino en el periodo, con lo pagado y su saldo.</summary>
+    [HttpGet("unidades/{unitId:guid}/renta/{periodo}/mi-renta")]
+    [Authorize]
+    [ProducesResponseType(typeof(MiRentaResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> MyRentShare(
+        Guid unitId,
+        string periodo,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetAccountId(out var accountId))
+        {
+            return CreateProblemResult(StatusCodes.Status401Unauthorized, "La sesión no es válida.");
+        }
+
+        Response.Headers.CacheControl = "no-store";
+
+        var result = await _myRentShare
+            .GetAsync(accountId, unitId, periodo, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ToActionResult(
+            result,
+            value => Ok(MiRentaResponse.FromView(value)),
+            notFoundDetail: "La renta de este periodo no está configurada o no tienes una cuota asignada.",
+            forbiddenDetail: "Debes tener un vínculo activo con la unidad para consultar tu renta.",
+            conflictDetail: "No se pudo completar la operación.",
+            unprocessableDetail: "La división de este periodo está pendiente.");
+    }
+
+    /// <summary>EP-M10-06 (HU-058): historial propio de pagos informativos en la unidad, a través de todos los periodos.</summary>
+    [HttpGet("unidades/{unitId:guid}/renta/mis-pagos")]
+    [Authorize]
+    [ProducesResponseType(typeof(MisPagosResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> MyPaymentHistory(
+        Guid unitId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetAccountId(out var accountId))
+        {
+            return CreateProblemResult(StatusCodes.Status401Unauthorized, "La sesión no es válida.");
+        }
+
+        Response.Headers.CacheControl = "no-store";
+
+        var result = await _myPaymentHistory
+            .GetAsync(accountId, unitId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return ToActionResult(
+            result,
+            value => Ok(MisPagosResponse.FromItems(value)),
+            notFoundDetail: "La unidad no existe.",
+            forbiddenDetail: "La cuenta no está autorizada para esta operación.",
+            conflictDetail: "No se pudo completar la operación.");
     }
 }

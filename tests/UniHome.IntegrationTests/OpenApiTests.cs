@@ -27,7 +27,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
-    public async Task OpenApi_DebeExponerLas56OperacionesDelCatalogoVigente()
+    public async Task OpenApi_DebeExponerLas58OperacionesDelCatalogoVigente()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");
 
@@ -45,7 +45,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(56, operations.Length);
+        Assert.Equal(58, operations.Length);
     }
 
     [Fact]
@@ -77,6 +77,16 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             "/api/v1/unidades/{unitId}/renta/{periodo}/pagos",
             out var listPayments));
         Assert.True(listPayments.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/renta/{periodo}/mi-renta",
+            out var myRentShare));
+        Assert.True(myRentShare.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/renta/mis-pagos",
+            out var myPaymentHistory));
+        Assert.True(myPaymentHistory.TryGetProperty("get", out _));
     }
 
     [Fact]

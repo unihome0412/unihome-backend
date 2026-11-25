@@ -24,6 +24,14 @@ internal sealed class FakeRentPeriodRepository : IRentPeriodRepository
             .OrderByDescending(period => period.Periodo, StringComparer.Ordinal)
             .FirstOrDefault());
 
+    public Task<IReadOnlyList<RentPeriod>> ListByUnitAsync(
+        Guid unitId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<RentPeriod>>(Items
+            .Where(period => period.UnitId == unitId)
+            .OrderByDescending(period => period.Periodo, StringComparer.Ordinal)
+            .ToArray());
+
     public Task SaveAsync(RentPeriod period, CancellationToken cancellationToken = default)
     {
         Items.RemoveAll(item => item.Id == period.Id);

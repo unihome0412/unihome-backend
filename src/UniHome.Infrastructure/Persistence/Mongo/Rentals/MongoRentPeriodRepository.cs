@@ -72,6 +72,28 @@ internal sealed class MongoRentPeriodRepository : IRentPeriodRepository
         }
     }
 
+    public async Task<IReadOnlyList<RentPeriod>> ListByUnitAsync(
+        Guid unitId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var collection = await GetCollectionAsync(cancellationToken).ConfigureAwait(false);
+            var documents = await collection
+                .Find(UnitFilter(unitId))
+                .Sort(Builders<RentPeriodDocument>.Sort.Descending(item => item.Periodo))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            return documents.Select(ToDomain).ToArray();
+        }
+        catch (MongoException exception)
+        {
+            LogStorageFailure(exception);
+            throw new StorageUnavailableException();
+        }
+    }
+
     public async Task SaveAsync(RentPeriod period, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(period);

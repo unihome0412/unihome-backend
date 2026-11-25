@@ -384,6 +384,8 @@ aviso correspondiente.
 | `PUT` | `/api/v1/unidades/{unitId}/renta/{periodo}/division` | El titular divide la renta del periodo entre los inquilinos activos, en partes iguales o personalizadas (HU-053/HU-054). |
 | `POST` | `/api/v1/unidades/{unitId}/renta/{periodo}/pagos/{tenantAccountId}` | El titular registra un pago informativo recibido de un inquilino con vínculo activo (HU-055). |
 | `GET` | `/api/v1/unidades/{unitId}/renta/{periodo}/pagos` | El titular consulta, por inquilino, la cuota, lo pagado, el saldo y el estado (pendiente/parcial/registrado) frente a la división vigente (HU-056). |
+| `GET` | `/api/v1/unidades/{unitId}/renta/{periodo}/mi-renta` | El propio inquilino consulta su cuota del periodo, lo pagado, su saldo y su estado (HU-057). |
+| `GET` | `/api/v1/unidades/{unitId}/renta/mis-pagos` | El propio inquilino consulta el historial de sus pagos informativos en la unidad, a través de todos los periodos (HU-058). |
 
 Reglas principales:
 
@@ -418,16 +420,24 @@ Reglas principales:
   (nada pagado), `Parcial` (pagado &lt; cuota) o `Registrado` (pagado ≥
   cuota, incluido sobrepago). Exige una división ya aplicada; si está
   pendiente, responde `422` con el detalle de configurarla primero.
+- **Vista del inquilino (HU-057):** `GET .../mi-renta` exige vínculo activo
+  del llamador en la unidad (`403` si no lo tiene) y una división ya aplicada
+  (`422` si está pendiente); devuelve su propia cuota, lo pagado y su saldo,
+  nunca la de otro inquilino.
+- **Historial de pagos del inquilino (HU-058):** `GET .../mis-pagos` recorre
+  todos los periodos de la unidad y filtra solo los pagos del llamador. A
+  diferencia de HU-057, no exige vínculo activo: el inquilino sigue viendo lo
+  que se le registró aunque ya haya dejado la unidad.
 - Migración `M10-001`: crea `rentas_periodo` (con índice único
   `ux_rentas_periodo` sobre `unitId`+`periodo`) y `pagos_informativos` (con
   `ix_pagos_periodo_inquilino`, no único). Migración `M12-001`: crea
   `notificaciones` (con `ix_notificaciones_destinatario`), reservada para el
   recordatorio de renta de HU-059 (Sprint 7, pendiente). No modifica M01-M09.
 
-El resto del alcance de Sprint 7 (vista del inquilino HU-057/058, resumen
-mensual HU-060/061, detalle de unidad HU-035 y recordatorio HU-059) está en
-curso; esta sección y [`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md)
-se completan a medida que avanza.
+El resto del alcance de Sprint 7 (resumen mensual HU-060/061, detalle de
+unidad HU-035 y recordatorio HU-059) está en curso; esta sección y
+[`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md) se completan a medida
+que avanza.
 
 ## Swagger/OpenAPI protegido
 
