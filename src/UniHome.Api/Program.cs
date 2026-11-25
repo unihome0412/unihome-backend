@@ -209,6 +209,7 @@ builder.Services.AddScoped<RegisterRentPaymentService>();
 builder.Services.AddScoped<ListRentPaymentsService>();
 builder.Services.AddScoped<GetMyRentShareService>();
 builder.Services.AddScoped<GetMyPaymentHistoryService>();
+builder.Services.AddScoped<GetMyRentSummaryService>();
 builder.Services.AddScoped<StartConversationService>();
 builder.Services.AddScoped<SendMessageService>();
 builder.Services.AddScoped<ListConversationMessagesService>();

@@ -386,6 +386,7 @@ aviso correspondiente.
 | `GET` | `/api/v1/unidades/{unitId}/renta/{periodo}/pagos` | El titular consulta, por inquilino, la cuota, lo pagado, el saldo y el estado (pendiente/parcial/registrado) frente a la división vigente (HU-056). |
 | `GET` | `/api/v1/unidades/{unitId}/renta/{periodo}/mi-renta` | El propio inquilino consulta su cuota del periodo, lo pagado, su saldo y su estado (HU-057). |
 | `GET` | `/api/v1/unidades/{unitId}/renta/mis-pagos` | El propio inquilino consulta el historial de sus pagos informativos en la unidad, a través de todos los periodos (HU-058). |
+| `GET` | `/api/v1/mi-resumen-renta/{periodo}` | Resumen mensual de la cuenta para un periodo: como titular (por cada unidad propia, lo recaudado y lo pendiente) y como inquilino (por cada unidad con vínculo activo, su propia cuota) (HU-060/HU-061). |
 
 Reglas principales:
 
@@ -428,14 +429,24 @@ Reglas principales:
   todos los periodos de la unidad y filtra solo los pagos del llamador. A
   diferencia de HU-057, no exige vínculo activo: el inquilino sigue viendo lo
   que se le registró aunque ya haya dejado la unidad.
+- **Resumen mensual (HU-060/HU-061):** `GET /mi-resumen-renta/{periodo}`
+  combina ambos roles en una sola consulta para no duplicar HU-056/HU-057.
+  Como titular, por cada unidad propia con renta configurada en el periodo:
+  renta total, recaudado, pendiente y si la división sigue pendiente (sin el
+  desglose por inquilino, que ya da HU-056). Como inquilino, por cada unidad
+  con vínculo activo donde ya tiene una cuota asignada: su cuota, lo pagado,
+  su saldo y su estado, igual que HU-057. Una cuenta sin unidades propias ni
+  vínculos activos recibe ambas listas vacías, nunca un error: es "mi
+  resumen", no el recurso de una unidad. Rechaza con `400` un periodo que no
+  tenga el formato "yyyy-MM".
 - Migración `M10-001`: crea `rentas_periodo` (con índice único
   `ux_rentas_periodo` sobre `unitId`+`periodo`) y `pagos_informativos` (con
   `ix_pagos_periodo_inquilino`, no único). Migración `M12-001`: crea
   `notificaciones` (con `ix_notificaciones_destinatario`), reservada para el
   recordatorio de renta de HU-059 (Sprint 7, pendiente). No modifica M01-M09.
 
-El resto del alcance de Sprint 7 (resumen mensual HU-060/061, detalle de
-unidad HU-035 y recordatorio HU-059) está en curso; esta sección y
+El resto del alcance de Sprint 7 (detalle de unidad HU-035 y recordatorio
+HU-059) está en curso; esta sección y
 [`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md) se completan a medida
 que avanza.
 

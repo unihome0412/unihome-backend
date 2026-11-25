@@ -9,10 +9,10 @@ using UniHome.Domain.Rentals;
 namespace UniHome.Api.Controllers;
 
 /// <summary>
-/// EP-M10 (HU-050/051/052/053/054/055/056/057/058): configuración, división,
-/// pagos informativos y vista del inquilino sobre la renta de una unidad por
-/// periodo. UniHome no procesa pagos ni interviene en transacciones
-/// económicas entre las partes (HU-090).
+/// EP-M10 (HU-050/051/052/053/054/055/056/057/058/060/061): configuración,
+/// división, pagos informativos, vista del inquilino y resumen mensual sobre
+/// la renta de una unidad por periodo. UniHome no procesa pagos ni
+/// interviene en transacciones económicas entre las partes (HU-090).
 /// </summary>
 [ApiController]
 [Route("api/v1")]
@@ -26,6 +26,7 @@ public sealed class RentController : AuthenticatedControllerBase
     private readonly ListRentPaymentsService _listPayments;
     private readonly GetMyRentShareService _myRentShare;
     private readonly GetMyPaymentHistoryService _myPaymentHistory;
+    private readonly GetMyRentSummaryService _mySummary;
 
     public RentController(
         ConfigureRentPeriodService configure,
@@ -33,7 +34,8 @@ public sealed class RentController : AuthenticatedControllerBase
         RegisterRentPaymentService registerPayment,
         ListRentPaymentsService listPayments,
         GetMyRentShareService myRentShare,
-        GetMyPaymentHistoryService myPaymentHistory)
+        GetMyPaymentHistoryService myPaymentHistory,
+        GetMyRentSummaryService mySummary)
     {
         _configure = configure;
         _split = split;
@@ -41,6 +43,7 @@ public sealed class RentController : AuthenticatedControllerBase
         _listPayments = listPayments;
         _myRentShare = myRentShare;
         _myPaymentHistory = myPaymentHistory;
+        _mySummary = mySummary;
     }
 
     /// <summary>EP-M10-01 (HU-050/051/052): define renta total, conceptos y día de corte.</summary>
@@ -290,6 +293,38 @@ public sealed class RentController : AuthenticatedControllerBase
             value => Ok(MisPagosResponse.FromItems(value)),
             notFoundDetail: "La unidad no existe.",
             forbiddenDetail: "La cuenta no está autorizada para esta operación.",
+            conflictDetail: "No se pudo completar la operación.");
+    }
+
+    /// <summary>
+    /// EP-M10-07 (HU-060/061): resumen mensual de renta de la cuenta para un
+    /// periodo, como titular (por cada unidad propia) y como inquilino (por
+    /// cada unidad con vínculo activo).
+    /// </summary>
+    [HttpGet("mi-resumen-renta/{periodo}")]
+    [Authorize]
+    [ProducesResponseType(typeof(MiResumenRentaResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> MySummary(
+        string periodo,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetAccountId(out var accountId))
+        {
+            return CreateProblemResult(StatusCodes.Status401Unauthorized, "La sesión no es válida.");
+        }
+
+        Response.Headers.CacheControl = "no-store";
+
+        var result = await _mySummary.GetAsync(accountId, periodo, cancellationToken).ConfigureAwait(false);
+
+        return ToActionResult(
+            result,
+            value => Ok(MiResumenRentaResponse.FromView(value)),
+            notFoundDetail: "No se pudo completar la operación.",
+            forbiddenDetail: "La operación no está permitida.",
             conflictDetail: "No se pudo completar la operación.");
     }
 }

@@ -23,4 +23,9 @@ public interface IOccupancyLinkRepository
     Task<IReadOnlyList<OccupancyLink>> ListActiveByUnitAsync(
         Guid unitId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>EP-M10 (HU-061): unidades donde la cuenta es inquilino activo, para el resumen mensual.</summary>
+    Task<IReadOnlyList<OccupancyLink>> ListActiveByTenantAsync(
+        Guid tenantAccountId,
+        CancellationToken cancellationToken = default);
 }

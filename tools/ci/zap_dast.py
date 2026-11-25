@@ -1504,6 +1504,14 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", f"/api/v1/unidades/{unit_id}/renta/mis-pagos",
         token=access_b, expected={200}, auth=True, note="mis pagos B")
 
+    # M10: resumen mensual de renta, como titular (A) y como inquilino (B) (HU-060/HU-061).
+    http.request(
+        "GET", "/api/v1/mi-resumen-renta/2026-11",
+        token=access_a, expected={200}, auth=True, note="resumen de renta A")
+    http.request(
+        "GET", "/api/v1/mi-resumen-renta/2026-11",
+        token=access_b, expected={200}, auth=True, note="resumen de renta B")
+
     http.request(
         "DELETE", f"/api/v1/unidades/{unit_id}/inquilinos/{tenant_b_id}",
         body={"confirmacion": True},
