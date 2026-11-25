@@ -1,0 +1,26 @@
+title = "UniHome gitleaks config"
+
+# Extiende la configuración por defecto de gitleaks sin deshabilitar ni
+# relajar ninguna regla existente.
+[extend]
+useDefault = true
+
+# Falso positivo verificado: la regla "generic-api-key" marca las etiquetas
+# de imagen de ACR (acrunihomedev.azurecr.io/unihome-api:<SHA de 40 hex>) y
+# los digests sha256:<64 hex> que documentamos en docs/*.md como ejemplos de
+# comandos ya ejecutados (docker build/push, az containerapp update). No son
+# secretos: son identificadores públicos de una imagen ya publicada en el
+# registro. El allowlist exige AND (regex de línea + ruta) y solo aplica a
+# generic-api-key; ninguna otra regla ni ruta se ve afectada.
+[[allowlists]]
+description = "Etiquetas de imagen ACR y digests sha256 documentados en docs/*.md"
+targetRules = ["generic-api-key"]
+condition = "AND"
+regexTarget = "line"
+regexes = [
+  '''acrunihomedev\.azurecr\.io/unihome-api:[0-9a-f]{40}''',
+  '''sha256:[0-9a-f]{64}''',
+]
+paths = [
+  '''docs/.*\.md''',
+]
