@@ -110,10 +110,10 @@ sin borrado). La búsqueda pública solo devuelve activas.
 Perfil (HU-002/HU-008): `GET /api/v1/perfil/mi-perfil` requiere Bearer y devuelve
 `nombreCompleto`, `correo`, `fechaNacimiento`, `genero`, `universidadActual`,
 `etiquetaCuenta`, `vinculadoAUnidad` y `puedePublicar`. No expone hash de
-contraseña ni claims administrativos. `universidadActual` permanece `null` porque
-M01 no persiste una asociación cuenta-universidad y M03 solo asocia
-`UniversidadId` a propiedades/unidades; la dependencia funcional es HU-087 y no
-se inventa una relación. La respuesta autenticada envía `Cache-Control: no-store`.
+contraseña ni claims administrativos. `universidadActual` refleja
+`Account.CurrentUniversityId` (Sprint 8, HU-087): es `null` hasta que la cuenta
+fija su universidad con `PUT /api/v1/perfil/mi-universidad`, desde el perfil o
+desde el mapa. La respuesta autenticada envía `Cache-Control: no-store`.
 La barra de navegación y la visibilidad del panel son responsabilidad de Android;
 el backend entrega los indicadores y revalida cada ruta administrativa.
 
@@ -144,9 +144,11 @@ Eliminación de cuenta (`204`, sin cuerpo): requiere `Authorization: Bearer`,
 dispositivos (a diferencia de `logout`, que solo revoca la sesión actual). Tras
 eliminar, la cuenta no puede iniciar sesión, renovar tokens ni seguir usando un access
 token emitido antes de eliminarla (BE-SEC-008 ya cubre esto: el estado se revisa en
-cada petición autenticada). **Pendiente:** el rechazo `409` por vínculos activos de
-propiedades/ocupación (M05/M09) y la política de retención/anonimización de datos
-(ADR-005) no están implementados.
+cada petición autenticada). Desde Sprint 8 (HU-096) también responde `409` si la
+cuenta tiene un vínculo de ocupación activo como inquilino (M09) o si alguna de sus
+propiedades todavía tiene inquilinos activos, y `403` si la cuenta es administrativa
+(un administrador no puede autoeliminarse por esta vía). **Pendiente:** la política
+de retención/anonimización de datos (ADR-005) no está implementada.
 
 ## Sprint 4 / M06: verificación documental
 
@@ -483,6 +485,99 @@ Con HU-059 se completan las 14 HU de Sprint 7. Detalle, decisiones
 provisionales y pendientes en
 [`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md).
 
+## Sprint 8 / M11, M05/M10/M11, M13, M02-M03, M01/M05/M09: reparaciones, resumen, administración y cierres
+
+### M11: reportes de reparación (HU-062/063/064/065/066)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/v1/unidades/{unitId}/reparaciones` | El titular o un inquilino con vínculo activo crea un reporte con título, descripción y una fotografía opcional (`multipart/form-data`), reutilizando la validación de contenido y el almacenamiento de Cloudinary de las fotos de unidad (HU-062/HU-063). |
+| `GET` | `/api/v1/unidades/{unitId}/reparaciones` | El titular o un inquilino con vínculo activo consulta los reportes de la unidad, con su estado, quién lo levantó y su detalle (HU-064). |
+| `PUT` | `/api/v1/unidades/{unitId}/reparaciones/{reparacionId}/estado` | Solo el titular cambia el estado entre `Pendiente`, `EnProceso` y `Atendido`, en cualquier dirección (HU-065). |
+
+- **Acceso compartido, cambio de estado exclusivo del titular.** Levantar un
+  reporte no requiere ser el propietario: basta con tener un vínculo de
+  ocupación activo en la unidad (M09) o ser su titular. Cambiar el estado sí
+  es una operación exclusiva del titular, igual que el resto de la operación
+  de la unidad (mantenimiento, baja de inquilinos).
+- **El estado se puede revertir.** `Reparacion.ChangeStatus` no impone un
+  flujo lineal: el titular puede volver de `Atendido` a `EnProceso` si marcó
+  el reporte por error. Fijar el mismo estado que ya tenía es un no-op (no
+  genera notificación ni actualiza `updatedAt`).
+- **HU-066 (M12):** al cambiar el estado se notifica de inmediato — a
+  diferencia del recordatorio de renta (HU-059), que se genera al consultar
+  — a todos los que tienen acceso a la unidad (el titular y los inquilinos
+  con vínculo activo), excepto a quien hizo el cambio. Un titular que levanta
+  y resuelve su propio reporte no se autonotifica.
+- Migración `M11-001`: crea `reparaciones` con `ix_reparaciones_unidad` e
+  `ix_reparaciones_estado`. No modifica M01-M10/M12.
+
+### M05/M10/M11: Resumen del titular (HU-034)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/mi-resumen` | Rentas registradas del mes en curso (M10), número de propiedades (M05) y reparaciones abiertas —`Pendiente` o `EnProceso`— en las unidades propias (M11). |
+
+Una cuenta sin propiedades recibe el resumen en ceros, nunca un error. El
+periodo se calcula con la fecha del servidor (no se recibe por parámetro); las
+rentas del mes usan el mismo `RentPeriodResolver` que HU-060/061 (con
+herencia), así que un periodo nunca configurado aporta cero sin necesidad de
+crearlo primero.
+
+### M13: administración de cuentas (HU-072/073/074)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/admin/cuentas` | Busca cuentas por nombre o correo (`buscar`), filtra por categoría (`filtro=Todos\|BuscanAlojamiento\|ConPublicaciones\|EnRevision`) y pagina (`page`, `pageSize`), con `X-Total-Count`/`X-Page`/`X-Page-Size`. |
+| `PUT` | `/api/v1/admin/cuentas/{accountId}/estado` | Suspende o reactiva la cuenta de un usuario (`suspendida: true/false`); suspender revoca todas sus sesiones activas. |
+| `PUT` | `/api/v1/admin/cuentas/{accountId}` | Edita el nombre completo y el correo de una cuenta. |
+
+- Las tres rutas exigen la política `Admin` ya existente (lista de
+  `AccountIds` configurada en el servidor, nunca un claim del cliente); una
+  cuenta sin el privilegio recibe `403`.
+- **La categoría de búsqueda reutiliza la misma etiqueta del perfil propio**
+  (`AccountLabel` de HU-002/008/009): sin unidades propias
+  (`BuscanAlojamiento`), con al menos una unidad aprobada
+  (`ConPublicaciones`) o con al menos una en revisión y ninguna aprobada
+  (`EnRevision`). Como la categoría depende de las unidades de cada cuenta,
+  la paginación se aplica después de calcularla, no en la consulta a Mongo.
+- Suspender/reactivar una cuenta que ya está en ese estado, o una cuenta
+  eliminada, responde `400`. El correo de edición no puede coincidir con el
+  de otra cuenta (`400`); el propio correo sin cambios se acepta.
+- No se agregó una migración nueva: ambas operaciones reutilizan `cuentas`
+  (M01-001); `IAccountRepository.SearchAsync` es una consulta de texto sobre
+  el mismo documento, sin índice nuevo (mismo criterio que `lugaresOcupados`
+  en Sprint 6).
+
+### M02/M03: universidad propia (HU-087)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `PUT` | `/api/v1/perfil/mi-universidad` | Fija la universidad actual de la cuenta (`universidadId`), desde el perfil o desde el mapa — un único endpoint para ambos puntos de entrada del cliente. |
+
+`GET /api/v1/perfil/mi-perfil` deja de forzar `universidadActual` a `null`:
+ahora refleja `Account.CurrentUniversityId` (nuevo, nulo hasta que la cuenta
+la fije por primera vez). Solo se acepta una universidad activa del
+catálogo (`400` si no existe o está inactiva). No se agregó una migración
+nueva: `universidadActualId` es un campo flexible sobre `M01-001`, igual que
+`lugaresOcupados` en `unidades` (Sprint 6).
+
+### Cierre de eliminación de cuenta (HU-096)
+
+`DELETE /api/v1/cuentas/mi-cuenta` (HU-096, ya existente desde M01) ahora
+completa las dos validaciones que quedaban pendientes:
+
+- **`409`** si la cuenta tiene un vínculo de ocupación activo como inquilino
+  (M09) o si alguna de sus propiedades todavía tiene inquilinos activos: en
+  ambos casos hay otra persona cuya ocupación depende de esta cuenta.
+- **`403`** si la cuenta es administrativa (`IAdminAccessChecker`, mismo
+  privilegio de M13/ARQ-004): un administrador no puede autoeliminarse por
+  esta vía.
+
+Con estas 11 HU se completa la hoja de Sprint 8. Matriz, decisiones
+provisionales y pendientes en
+[`docs/sprint-08-cierre.md`](docs/sprint-08-cierre.md).
+
 ## Swagger/OpenAPI protegido
 
 La documentación interna se habilita explícitamente con
@@ -666,6 +761,12 @@ M09 usa `vinculos_ocupacion` (`inquilinoAccountId`, `unitId`, `estado`,
 `vigenciaHasta`) con la migración `M09-001`. No modifica `M05-001`. Detalle en
 la sección "Sprint 6 / M09: ocupación".
 
+M11 usa `reparaciones` (`unitId`, `reportadoPorAccountId`, `titulo`,
+`descripcion`, `estado`, `foto`, `createdAt`, `updatedAt`) con la migración
+`M11-001` (`ix_reparaciones_unidad`, `ix_reparaciones_estado`). No modifica
+ninguna migración anterior. Detalle en la sección "Sprint 8 / M11: reportes de
+reparación".
+
 Sprint 3 / M04-M07: `GET /api/v1/exploracion/mapa`, `GET /api/v1/exploracion/lista`,
 `GET /api/v1/unidades/{id}/tarjeta`, `GET /api/v1/unidades/{id}/ficha`,
 `PUT/DELETE /api/v1/favoritos/{id}` y `GET /api/v1/favoritos`. Mapa, lista y tarjeta
@@ -677,7 +778,8 @@ usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
 [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
 
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001`, `M03-001`, `M05-001`, `M06-001`, `M07-001`, `M09-001`, `M10-001` y `M12-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001`, `M05-001`, `M06-001`, `M07-001`, `M09-001`, `M10-001`,
+`M11-001` y `M12-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -696,6 +798,8 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M09-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M10-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M10-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M11-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M11-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M12-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M12-001
 ```
@@ -724,7 +828,7 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
 No ejecutar ese comando sin completar las puertas de conectividad TLS/SSPI, usuario
 técnico separado, respaldo/restauración verificado y autorización humana. Cada
 promoción selecciona una versión; hoy existen `M01-001`, `M01-002`, `M03-001`,
-`M05-001`, `M06-001`, `M07-001`, `M09-001`, `M10-001` y `M12-001`. Las demás
+`M05-001`, `M06-001`, `M07-001`, `M09-001`, `M10-001`, `M11-001` y `M12-001`. Las demás
 colecciones externas aún no tienen migración versionada ni contratos BSON/DTO
 aprobados.
 
@@ -767,11 +871,11 @@ o diverge, HU-006 responde `503` y no se declara operativa.
   sesión administrativa: `GET /openapi/v1.json`. Incluye el esquema Bearer y
   marca `logout` como operación autenticada. La interfaz `/swagger` usa la misma
   policy; ver “Swagger/OpenAPI protegido”.
-- Los 17 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
+- Los 20 enums públicos (`Gender`, `PropertyType`, `PublicationState`, `UnitType`,
   `Occupancy`, `ForWhom`, `BathroomType`, `FurnitureType`, `UnitTemplate`,
   `ServiceName`, `ServiceMode`, `AccountLabel`, `EstadoExpediente`,
   `TipoDocumentoVerificacion`, `ResultadoComparacionNombres`, `UnitAvailability`,
-  `OccupancyStatus`)
+  `OccupancyStatus`, `ReparacionEstado`, `AccountStatus`, `AccountSearchFilter`)
   se documentan como string con sus
   valores reales; los enteros se rechazan en runtime. `tipoPropiedad` y
   `estadoHabitacion` en `GET /api/v1/mis-propiedades` siguen el mismo criterio:
@@ -796,7 +900,8 @@ o diverge, HU-006 responde `503` y no se declara operativa.
   `400` por token inválido/reutilizado o contraseña inválida, `410` por token vencido o
   intentos agotados, `413`, `429` y `503`.
 - Eliminación de cuenta: `204`, `400` sin confirmar la pérdida de información, `401`
-  por contraseña incorrecta o sesión inválida, `413` y `503`.
+  por contraseña incorrecta o sesión inválida, `403` si la cuenta es administrativa,
+  `409` por vínculo de ocupación activo o propiedad con inquilinos, `413` y `503`.
 - Mis propiedades: `200` siempre que la sesión sea válida (lista vacía si no hay
   propiedades), `400` por `tipoPropiedad`/`estadoHabitacion` inválidos, `401` sin
   sesión y `503` si MongoDB no está disponible.
@@ -846,6 +951,11 @@ ejecutadas** (13 opt-in de Mongo/Cloudinary omitidas de forma explícita). La
 matriz de las 56 HU de Sprints 1–5 está en
 [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md); la de las 15 HU de
 Sprint 6, en [`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
+
+Estado local del cierre de Sprint 8: **1050 unitarias** y **372 integraciones
+ejecutadas** (13 opt-in de Mongo/Cloudinary omitidas de forma explícita;
+catálogo OpenAPI en 69 operaciones). La matriz de las 11 HU de Sprint 8 está en
+[`docs/sprint-08-cierre.md`](docs/sprint-08-cierre.md).
 La matriz de aceptación HTTPS de las 41 operaciones y la colección
 Postman/Newman parametrizada están en
 [`docs/aceptacion-sprints-1-5.md`](docs/aceptacion-sprints-1-5.md) y
@@ -929,6 +1039,24 @@ y listar mensajes, listar conversaciones). La ejecución real 52/52 queda
 **PENDIENTE_CI**: estos tres jobs no se dispararon en GitHub con el código de
 Sprint 6; solo se validó localmente contra el fixture (`tools/ci/test_zap_dast.py`,
 167/167 PASS).
+
+**Sprint 7:** el catálogo OpenAPI pasa a **61 operaciones** (9 nuevas: 6 de
+M10, 1 transversal de resumen mensual y 1 de M12). `mongo-db-test`, `dast-zap`
+y `restler-fuzzing` ya aplican/verifican `M10-001` y `M12-001` después de
+`M09-001`; el fixture y el driver real de ZAP se ampliaron con el flujo
+completo de renta (configuración, división, pago informativo, estado de
+pagos, mi-renta, mis-pagos, resumen mensual) y el recordatorio de
+notificaciones.
+
+**Sprint 8:** el catálogo OpenAPI pasa a **69 operaciones** (8 nuevas: 3 de
+M11, 1 de Resumen, 3 de M13 y 1 de universidad propia). `mongo-db-test`,
+`dast-zap` y `restler-fuzzing` ya aplican/verifican `M11-001` entre `M10-001`
+y `M12-001`; el fixture y el driver real de ZAP se ampliaron con el flujo
+completo de reparaciones (crear con foto, listar, cambiar estado y recibir la
+notificación), el resumen del titular, la búsqueda/suspensión/edición
+administrativa de cuentas y el cambio de universidad propia. La ejecución
+local contra el fixture (`tools/ci/test_zap_dast.py`) confirma cobertura
+**69/69**; la ejecución real en GitHub Actions queda **PENDIENTE_CI**.
 
 El gate exige el job en `workflow_dispatch` desde `main` o `feature/*` con
 cambios de código. High/Critical fallan; Medium produce `WARN`. Las alertas que
