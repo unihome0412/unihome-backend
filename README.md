@@ -122,6 +122,14 @@ Sprint 2 / M05: `POST /api/v1/propiedades`, `POST /api/v1/propiedades/{id}/unida
 `PUT /api/v1/unidades/{id}/zona-reglas`, `GET /api/v1/unidades/{id}/vista-previa` y
 `POST /api/v1/publicaciones/primera/terminos`. Todas las rutas requieren Bearer y
 verifican que el recurso pertenezca al titular. La edad se recalcula en servidor.
+Sprint 7 agrega `GET /api/v1/unidades/{id}/detalle` (HU-035): detalle completo
+de una unidad propia, en cualquier estado de publicación, para la pantalla de
+administración a la que el titular llega desde `GET /api/v1/mis-propiedades`
+(HU-033). A diferencia de la vista previa (HU-080, una tarjeta), devuelve el
+mismo contrato `UnidadResponse` que ya usan los endpoints de alta/edición de
+Sprint 2 (`servicios`, `zona-reglas`, `fotos`), solo que como una simple
+lectura: el titular podía ver su unidad completa tras cada edición, pero no
+había una ruta para volver a consultarla sin modificar nada.
 La unidad nace en `Borrador`; el envío a revisión de Sprint 4 se implementó en M06.
 La carga de fotos usa **Cloudinary Free** mediante `IUnitPhotoStorage`; las im?genes
 se suben como `authenticated` y se entregan por `GET /api/v1/fotos/{photoRef}`, no por
@@ -372,6 +380,109 @@ HU-033/036/092 (M05), HU-048/049/093/094/095 (M09) y HU-067/068/069/070/086/089
 desde Sprint 3. Detalle, decisiones provisionales y pendientes en
 [`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
 
+## Sprint 7 / M10-M12: renta, pagos informativos y recordatorio
+
+Pagos informativos: UniHome no procesa dinero ni interviene en transacciones
+económicas entre las partes (HU-090); toda respuesta de este módulo incluye el
+aviso correspondiente.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `PUT` | `/api/v1/unidades/{unitId}/renta/{periodo}` | El titular define o redefine la renta total, los conceptos de cobro y el día de corte de un periodo "yyyy-MM" (HU-050/HU-051/HU-052). |
+| `PUT` | `/api/v1/unidades/{unitId}/renta/{periodo}/division` | El titular divide la renta del periodo entre los inquilinos activos, en partes iguales o personalizadas (HU-053/HU-054). |
+| `POST` | `/api/v1/unidades/{unitId}/renta/{periodo}/pagos/{tenantAccountId}` | El titular registra un pago informativo recibido de un inquilino con vínculo activo (HU-055). |
+| `GET` | `/api/v1/unidades/{unitId}/renta/{periodo}/pagos` | El titular consulta, por inquilino, la cuota, lo pagado, el saldo y el estado (pendiente/parcial/registrado) frente a la división vigente (HU-056). |
+| `GET` | `/api/v1/unidades/{unitId}/renta/{periodo}/mi-renta` | El propio inquilino consulta su cuota del periodo, lo pagado, su saldo y su estado (HU-057). |
+| `GET` | `/api/v1/unidades/{unitId}/renta/mis-pagos` | El propio inquilino consulta el historial de sus pagos informativos en la unidad, a través de todos los periodos (HU-058). |
+| `GET` | `/api/v1/mi-resumen-renta/{periodo}` | Resumen mensual de la cuenta para un periodo: como titular (por cada unidad propia, lo recaudado y lo pendiente) y como inquilino (por cada unidad con vínculo activo, su propia cuota) (HU-060/HU-061). |
+
+Reglas principales:
+
+- **Herencia entre periodos:** si el periodo consultado o dividido todavía no
+  existe, se crea copiando el periodo anterior más reciente de la misma
+  unidad: renta total, conceptos y día de corte siempre; división y cuotas
+  solo si el conjunto de inquilinos activos no cambió (si cambió, la división
+  queda pendiente para que el titular la rehaga). Si no hay periodo anterior,
+  no hay nada que heredar (`404`). El endpoint de configuración
+  (HU-050/051/052) nunca hereda: siempre usa los valores explícitos de la
+  solicitud y reinicia la división a pendiente, porque unas cuotas calculadas
+  contra la renta anterior ya no suman correctamente contra la nueva.
+- **Redondeo de la división en partes iguales:** se trabaja en centavos
+  (renta × 100, entero) y el residuo se reparte de un centavo en centavo a
+  los inquilinos ordenados por `accountId` (formato `"N"`, orden ordinal),
+  para que la suma cierre exacto contra la renta total. Ejemplo: $1000.00
+  entre 3 inquilinos → $333.34 + $333.33 + $333.33 (el primero en el orden
+  absorbe el centavo sobrante).
+- **División personalizada:** la suma de las cuotas debe ser igual a la
+  renta total (si no, `400`); cada cuota debe corresponder a un inquilino
+  con vínculo activo en la unidad.
+- Solo el titular de la unidad configura la renta y su división; cualquier
+  otra cuenta recibe `403`, y una unidad inexistente, `404`.
+- **Pagos informativos (HU-055):** el titular registra cada pago recibido de
+  un inquilino con vínculo activo (monto positivo, fecha de recepción no
+  futura). Es una bitácora, no un cobro: puede haber varios pagos para el
+  mismo (periodo, inquilino) y se suman contra la cuota; un pago que exceda
+  la cuota no se rechaza, solo deja saldo a favor. El periodo se resuelve
+  igual que en la división (existente o heredado del anterior más reciente).
+- **Estado de pagos (HU-056):** por cada inquilino con cuota asignada se
+  calcula lo pagado, el saldo (`pagado − cuota`) y el estado: `Pendiente`
+  (nada pagado), `Parcial` (pagado &lt; cuota) o `Registrado` (pagado ≥
+  cuota, incluido sobrepago). Exige una división ya aplicada; si está
+  pendiente, responde `422` con el detalle de configurarla primero.
+- **Vista del inquilino (HU-057):** `GET .../mi-renta` exige vínculo activo
+  del llamador en la unidad (`403` si no lo tiene) y una división ya aplicada
+  (`422` si está pendiente); devuelve su propia cuota, lo pagado y su saldo,
+  nunca la de otro inquilino.
+- **Historial de pagos del inquilino (HU-058):** `GET .../mis-pagos` recorre
+  todos los periodos de la unidad y filtra solo los pagos del llamador. A
+  diferencia de HU-057, no exige vínculo activo: el inquilino sigue viendo lo
+  que se le registró aunque ya haya dejado la unidad.
+- **Resumen mensual (HU-060/HU-061):** `GET /mi-resumen-renta/{periodo}`
+  combina ambos roles en una sola consulta para no duplicar HU-056/HU-057.
+  Como titular, por cada unidad propia con renta configurada en el periodo:
+  renta total, recaudado, pendiente y si la división sigue pendiente (sin el
+  desglose por inquilino, que ya da HU-056). Como inquilino, por cada unidad
+  con vínculo activo donde ya tiene una cuota asignada: su cuota, lo pagado,
+  su saldo y su estado, igual que HU-057. Una cuenta sin unidades propias ni
+  vínculos activos recibe ambas listas vacías, nunca un error: es "mi
+  resumen", no el recurso de una unidad. Rechaza con `400` un periodo que no
+  tenga el formato "yyyy-MM".
+- Migración `M10-001`: crea `rentas_periodo` (con índice único
+  `ux_rentas_periodo` sobre `unitId`+`periodo`) y `pagos_informativos` (con
+  `ix_pagos_periodo_inquilino`, no único). No modifica M01-M09.
+
+### M12: recordatorio de renta (HU-059)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/notificaciones` | Notificaciones propias; genera o renueva el recordatorio de renta del mes en curso antes de listarlas. |
+
+- **Generado al consultar, nunca por un job en segundo plano.** Cada
+  llamada a `GET /notificaciones` recorre las unidades donde la cuenta es
+  inquilino activo (`IOccupancyLinkRepository.ListActiveByTenantAsync`) y,
+  si corresponde, genera el recordatorio del periodo del mes en curso antes
+  de devolver la lista completa. `Notification.ComputeRentReminderId` deriva
+  un id determinista de (destinatario, unidad, periodo, tipo): generarlo de
+  nuevo en la misma ventana es un upsert idempotente, nunca un duplicado.
+- **Ventana de 0 a 3 días antes del corte.** Si al corte del periodo en
+  curso le quedan más de 3 días, o si el corte ya pasó, no se genera ni
+  renueva el recordatorio para esa unidad (uno que ya existiera de una
+  consulta anterior dentro de la ventana permanece, pero no se vuelve a
+  tocar). Decisión provisional sin aprobación de producto; ver
+  [`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md).
+- **Se omite si la cuota ya está cubierta.** Usa
+  `RentPeriod.ComputePaymentState`, igual que HU-056/057: si el estado ya es
+  `Registrado` (pagado ≥ cuota), no tiene sentido recordar algo ya resuelto.
+  También se omite si la división del periodo está pendiente o si el
+  inquilino no tiene cuota asignada (p. ej., se unió después de dividir).
+- Migración `M12-001`: crea `notificaciones` (con
+  `ix_notificaciones_destinatario`); alcance limitado al recordatorio de
+  renta, el resto de M12 queda fuera de este sprint.
+
+Con HU-059 se completan las 14 HU de Sprint 7. Detalle, decisiones
+provisionales y pendientes en
+[`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md).
+
 ## Swagger/OpenAPI protegido
 
 La documentación interna se habilita explícitamente con
@@ -566,7 +677,7 @@ usa Haversine y el umbral de 1.5 km; no se inventan minutos ni rutas. Detalle en
 [`docs/mongodb-m07.md`](docs/mongodb-m07.md).
 
 La API no crea colecciones ni índices al arrancar. Las migraciones versionadas
-`M01-001`, `M03-001`, `M05-001`, `M06-001`, `M07-001` y `M09-001` se ejecutan con una herramienta separada:
+`M01-001`, `M03-001`, `M05-001`, `M06-001`, `M07-001`, `M09-001`, `M10-001` y `M12-001` se ejecutan con una herramienta separada:
 
 ```powershell
 dotnet run --project tools/UniHome.MongoMigrator -- audit --database unihome_modelo_pruebas
@@ -583,6 +694,10 @@ dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_mod
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M07-001
 dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M09-001
 dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M09-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M10-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M10-001
+dotnet run --project tools/UniHome.MongoMigrator -- apply --database unihome_modelo_pruebas --confirm --version M12-001
+dotnet run --project tools/UniHome.MongoMigrator -- verify --database unihome_modelo_pruebas --version M12-001
 ```
 
 La migración ordinaria solo escribe en `unihome_modelo_pruebas` o en una base incluida
@@ -609,8 +724,9 @@ dotnet run --project tools/UniHome.MongoMigrator -- promote `
 No ejecutar ese comando sin completar las puertas de conectividad TLS/SSPI, usuario
 técnico separado, respaldo/restauración verificado y autorización humana. Cada
 promoción selecciona una versión; hoy existen `M01-001`, `M01-002`, `M03-001`,
-`M05-001`, `M06-001`, `M07-001` y `M09-001`. Las demás colecciones externas aún
-no tienen migración versionada ni contratos BSON/DTO aprobados.
+`M05-001`, `M06-001`, `M07-001`, `M09-001`, `M10-001` y `M12-001`. Las demás
+colecciones externas aún no tienen migración versionada ni contratos BSON/DTO
+aprobados.
 
 Matriz de cierre, endpoints y responsabilidades Android del Sprint 1:
 [`docs/sprint-01-cierre.md`](docs/sprint-01-cierre.md).
@@ -747,7 +863,8 @@ El job manual `mongo-db-test` (habilitado con la variable de repositorio
 de GitHub Actions, en un contenedor efímero fijado por digest. No usa Atlas, Docker
 local ni secretos: la URI se limita a `127.0.0.1`, la base es
 `unihome_ci_verificacion`, se aplican `M01-001`, `M01-002`, `M03-001`, `M05-001`,
-`M06-001`, `M07-001`, `M08-001` y `M09-001` a esa base temporal y las pruebas
+`M06-001`, `M07-001`, `M08-001`, `M09-001`, `M10-001` y `M12-001` a esa base
+temporal y las pruebas
 reales de identidad, recuperación de contraseña, universidades, publicaciones,
 verificación documental, exploración/favoritos, bloqueo distribuido, ocupación
 (cupo con CAS y campo `lugaresOcupados` ausente) y chat
@@ -767,7 +884,8 @@ El job manual `dast-zap` (variable `UNIHOME_ENABLE_ZAP=true`) ejecuta un
 **baseline pasivo real** de OWASP ZAP con la imagen oficial
 `ghcr.io/zaproxy/zaproxy:2.17.0` fijada por digest. Levanta la API solo en
 `127.0.0.1:5088`, un MongoDB efímero inicializado con M01-001, M01-002, M03-001,
-M05-001, M06-001, M07-001, M08-001 y M09-001, y un SMTP de captura local con STARTTLS; crea cuentas sintéticas mediante registro,
+M05-001, M06-001, M07-001, M08-001, M09-001, M10-001 y M12-001, y un SMTP de
+captura local con STARTTLS; crea cuentas sintéticas mediante registro,
 confirmación, login, refresh y logout, descubre `/openapi/v1.json`, visita cada
 operación documentada y publica `zap-report.html`, `zap-report.json`,
 `dast-report.md`, `route-coverage.json` y evidencias de arranque/limpieza en el

@@ -63,6 +63,7 @@ OPERATIONS = [
     ("POST", "/api/v1/unidades/{unitId}/fotos", True),
     ("PUT", "/api/v1/unidades/{unitId}/servicios", True),
     ("GET", "/api/v1/unidades/{unitId}/vista-previa", True),
+    ("GET", "/api/v1/unidades/{unitId}/detalle", True),
     ("PUT", "/api/v1/unidades/{unitId}/zona-reglas", True),
     ("GET", "/api/v1/universidades", False),
     ("GET", "/api/v1/exploracion/mapa", False),
@@ -82,6 +83,14 @@ OPERATIONS = [
     ("GET", "/api/v1/conversaciones", True),
     ("GET", "/api/v1/conversaciones/{conversationId}/mensajes", True),
     ("POST", "/api/v1/conversaciones/{conversationId}/mensajes", True),
+    ("PUT", "/api/v1/unidades/{unitId}/renta/{periodo}", True),
+    ("PUT", "/api/v1/unidades/{unitId}/renta/{periodo}/division", True),
+    ("POST", "/api/v1/unidades/{unitId}/renta/{periodo}/pagos/{tenantAccountId}", True),
+    ("GET", "/api/v1/unidades/{unitId}/renta/{periodo}/pagos", True),
+    ("GET", "/api/v1/unidades/{unitId}/renta/{periodo}/mi-renta", True),
+    ("GET", "/api/v1/unidades/{unitId}/renta/mis-pagos", True),
+    ("GET", "/api/v1/mi-resumen-renta/{periodo}", True),
+    ("GET", "/api/v1/notificaciones", True),
 ]
 
 
@@ -283,6 +292,31 @@ class FakeHttpClient:
                     "estado": "Disponible",
                 }],
             }]).encode("utf-8")
+        if base.startswith("/api/v1/mi-resumen-renta/"):
+            return 200, json.dumps({
+                "periodo": "2026-11",
+                "comoPropietario": [{
+                    "unitId": str(uuid.uuid4()),
+                    "rentaTotalMxn": 6000,
+                    "recaudadoMxn": 6000,
+                    "pendienteMxn": 0,
+                    "divisionPendiente": False,
+                }],
+                "comoInquilino": [],
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
+            }).encode("utf-8")
+        if base == "/api/v1/notificaciones":
+            return 200, json.dumps([{
+                "id": str(uuid.uuid4()),
+                "tipo": "RecordatorioRenta",
+                "mensaje": "Tu renta del periodo 2026-11 vence el 15/11/2026 (en 2 días).",
+                "unitId": str(uuid.uuid4()),
+                "periodo": "2026-11",
+                "creadoEn": "2026-11-19T00:00:00+00:00",
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
+            }]).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/servicios"):
             return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/zona-reglas"):
@@ -312,6 +346,79 @@ class FakeHttpClient:
             return 200, json.dumps({
                 "id": str(uuid.uuid4()),
                 "estadoOcupacion": "Mantenimiento",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and base.endswith("/division"):
+            return 200, json.dumps({
+                "unitId": str(uuid.uuid4()),
+                "periodo": "2026-11",
+                "rentaTotalMxn": 6000,
+                "diaCorte": 5,
+                "fechaCorte": "2026-11-05",
+                "conceptos": [],
+                "metodoDivision": "Igual",
+                "cuotas": [],
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and base.endswith("/pagos"):
+            return 200, json.dumps({
+                "unitId": str(uuid.uuid4()),
+                "periodo": "2026-11",
+                "fechaCorte": "2026-11-05",
+                "inquilinos": [{
+                    "inquilinoAccountId": str(uuid.uuid4()),
+                    "cuotaMxn": 6000,
+                    "pagadoMxn": 6000,
+                    "saldoMxn": 0,
+                    "estado": "Registrado",
+                }],
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and "/pagos/" in base:
+            return 201, json.dumps({
+                "inquilinoAccountId": str(uuid.uuid4()),
+                "montoMxn": 6000,
+                "fechaRecepcion": "2026-11-01",
+                "registradoEnUtc": "2026-11-19T00:00:00+00:00",
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and base.endswith("/mi-renta"):
+            return 200, json.dumps({
+                "unitId": str(uuid.uuid4()),
+                "periodo": "2026-11",
+                "fechaCorte": "2026-11-05",
+                "cuotaMxn": 6000,
+                "pagadoMxn": 6000,
+                "saldoMxn": 0,
+                "estado": "Registrado",
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and base.endswith("/mis-pagos"):
+            return 200, json.dumps({
+                "pagos": [{
+                    "periodo": "2026-11",
+                    "montoMxn": 6000,
+                    "fechaRecepcion": "2026-11-01",
+                    "registradoEnUtc": "2026-11-19T00:00:00+00:00",
+                }],
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
+            }).encode("utf-8")
+        if base.startswith("/api/v1/unidades/") and "/renta/" in base:
+            return 200, json.dumps({
+                "unitId": str(uuid.uuid4()),
+                "periodo": "2026-11",
+                "rentaTotalMxn": 6000,
+                "diaCorte": 5,
+                "fechaCorte": "2026-11-05",
+                "conceptos": [],
+                "metodoDivision": None,
+                "cuotas": [],
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
             }).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/inquilinos"):
             return 200, json.dumps([{
@@ -367,6 +474,8 @@ class FakeHttpClient:
             return 200, b'{"totalFotos":1}'
         if base.startswith("/api/v1/unidades/") and base.endswith("/vista-previa"):
             return 200, b'{"fotoPrincipalUrl":"/api/v1/fotos/ref"}'
+        if base.startswith("/api/v1/unidades/") and base.endswith("/detalle"):
+            return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")
         if base.startswith("/api/v1/fotos/"):
             return 200, zap_dast.DAST_PHOTO_PNG
         if base == "/api/v1/publicaciones/primera/terminos":
@@ -473,9 +582,9 @@ class ZapDastTests(unittest.TestCase):
         self.assertIn("estadoPublicacion", command[-1])
         self.assertIn("estadoOcupacion", command[-1])
 
-    def test_openapi_operations_incluyen_52_operaciones_y_auth(self):
+    def test_openapi_operations_incluyen_61_operaciones_y_auth(self):
         operations = parse_openapi_operations(SPEC)
-        self.assertEqual(52, len(operations))
+        self.assertEqual(61, len(operations))
         auth = {(item["method"], item["path"]) for item in operations if item["auth"]}
         self.assertIn(("POST", "/api/v1/auth/logout"), auth)
         self.assertIn(("DELETE", "/api/v1/cuentas/mi-cuenta"), auth)
@@ -500,7 +609,7 @@ class ZapDastTests(unittest.TestCase):
         ]
         coverage = build_coverage(operations, records)
         self.assertEqual(3, coverage["openapi_visited"])
-        self.assertEqual(49, len(coverage["missing"]))
+        self.assertEqual(58, len(coverage["missing"]))
         self.assertEqual(0, len(coverage["support_routes"]))
 
     def test_cobertura_detecta_ruta_no_visitada(self):
@@ -830,13 +939,13 @@ class ZapDastTests(unittest.TestCase):
             result = zap_dast.run_scan(args)
         return result, output
 
-    def test_run_scan_genera_evidencia_y_cobertura_52_de_52(self):
+    def test_run_scan_genera_evidencia_y_cobertura_61_de_61(self):
         result, output = self._run_scan()
         self.assertEqual(0, result)
         summary = json.loads((output / "dast-summary.json").read_text(encoding="utf-8"))
         self.assertEqual("PASS", summary["status"])
-        self.assertEqual(52, summary["coverage"]["openapi_operations"])
-        self.assertEqual(52, summary["coverage"]["openapi_visited"])
+        self.assertEqual(61, summary["coverage"]["openapi_operations"])
+        self.assertEqual(61, summary["coverage"]["openapi_visited"])
         self.assertEqual([], summary["coverage"]["missing"])
         self.assertTrue((output / "dast-report.md").exists())
         self.assertTrue((output / "zap-report.html").exists())

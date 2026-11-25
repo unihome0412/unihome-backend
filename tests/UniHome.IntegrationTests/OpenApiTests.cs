@@ -27,7 +27,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
-    public async Task OpenApi_DebeExponerLas52OperacionesDelCatalogoVigente()
+    public async Task OpenApi_DebeExponerLas61OperacionesDelCatalogoVigente()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");
 
@@ -45,7 +45,56 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(52, operations.Length);
+        Assert.Equal(61, operations.Length);
+    }
+
+    [Fact]
+    public async Task OpenApi_DebeIncluirLosEndpointsDeRentaDeSprint07()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/renta/{periodo}",
+            out var configure));
+        Assert.True(configure.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/renta/{periodo}/division",
+            out var split));
+        Assert.True(split.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/renta/{periodo}/pagos/{tenantAccountId}",
+            out var registerPayment));
+        Assert.True(registerPayment.TryGetProperty("post", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/renta/{periodo}/pagos",
+            out var listPayments));
+        Assert.True(listPayments.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/renta/{periodo}/mi-renta",
+            out var myRentShare));
+        Assert.True(myRentShare.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/renta/mis-pagos",
+            out var myPaymentHistory));
+        Assert.True(myPaymentHistory.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/mi-resumen-renta/{periodo}",
+            out var mySummary));
+        Assert.True(mySummary.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/notificaciones", out var notifications));
+        Assert.True(notifications.TryGetProperty("get", out _));
     }
 
     [Fact]
@@ -153,6 +202,11 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             "/api/v1/unidades/{unitId}/vista-previa",
             out var preview));
         Assert.True(preview.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/detalle",
+            out var detail));
+        Assert.True(detail.TryGetProperty("get", out _));
 
         Assert.True(paths.TryGetProperty(
             "/api/v1/publicaciones/primera/terminos",

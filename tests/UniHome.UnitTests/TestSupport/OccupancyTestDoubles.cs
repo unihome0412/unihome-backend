@@ -35,6 +35,14 @@ internal sealed class FakeOccupancyLinkRepository : IOccupancyLinkRepository
             .Where(link => link.UnitId == unitId && link.Status == OccupancyStatus.Activo)
             .OrderBy(link => link.JoinedAt)
             .ToArray());
+
+    public Task<IReadOnlyList<OccupancyLink>> ListActiveByTenantAsync(
+        Guid tenantAccountId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<OccupancyLink>>(Items
+            .Where(link => link.TenantAccountId == tenantAccountId && link.Status == OccupancyStatus.Activo)
+            .OrderBy(link => link.JoinedAt)
+            .ToArray());
 }
 
 internal sealed class FakeUnitInvitationRepository : IUnitInvitationRepository
