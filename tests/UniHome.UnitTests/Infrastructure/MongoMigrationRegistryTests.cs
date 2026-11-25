@@ -8,6 +8,7 @@ using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Rentals;
+using UniHome.Infrastructure.Persistence.Mongo.Reparaciones;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
 using UniHome.Infrastructure.Persistence.Mongo.Verification;
 
@@ -31,6 +32,7 @@ public sealed class MongoMigrationRegistryTests
                 MongoChatMigration.Version,
                 MongoOccupancyMigration.Version,
                 MongoRentalsMigration.Version,
+                MongoReparacionesMigration.Version,
                 MongoNotificationsMigration.Version
             ],
             registry.Migrations.Select(migration => migration.Version));
@@ -43,7 +45,8 @@ public sealed class MongoMigrationRegistryTests
         Assert.Equal(MongoChatMigration.Definition.Checksum, registry.Migrations[6].Checksum);
         Assert.Equal(MongoOccupancyMigration.Definition.Checksum, registry.Migrations[7].Checksum);
         Assert.Equal(MongoRentalsMigration.Definition.Checksum, registry.Migrations[8].Checksum);
-        Assert.Equal(MongoNotificationsMigration.Definition.Checksum, registry.Migrations[9].Checksum);
+        Assert.Equal(MongoReparacionesMigration.Definition.Checksum, registry.Migrations[9].Checksum);
+        Assert.Equal(MongoNotificationsMigration.Definition.Checksum, registry.Migrations[10].Checksum);
         Assert.Contains(MongoIdentitySchema.AccountsCollection, registry.ManagedCollections);
         Assert.Contains(MongoIdentitySchema.AccountRecoveryCollection, registry.ManagedCollections);
         Assert.Contains(MongoUniversitySchema.Collection, registry.ManagedCollections);
@@ -61,6 +64,7 @@ public sealed class MongoMigrationRegistryTests
         Assert.Contains(MongoRentalsSchema.RentPeriodsCollection, registry.ManagedCollections);
         Assert.Contains(MongoRentalsSchema.PaymentsCollection, registry.ManagedCollections);
         Assert.Contains(MongoNotificationsSchema.NotificationsCollection, registry.ManagedCollections);
+        Assert.Contains(MongoReparacionesSchema.ReparacionesCollection, registry.ManagedCollections);
     }
 
     [Fact]
@@ -81,7 +85,12 @@ public sealed class MongoMigrationRegistryTests
             ["M08-001"] = "6AA8900080A8F0F4F12D56A7CD49CD31B6A145A9E067F9D306A7D14A7AFEFA66",
             ["M09-001"] = "097B741234F5DF9DF0F53E611BDF3C1D0D41F23197CF6466FEE6825707DCA237",
             ["M10-001"] = "41D877A8CB04A72A5D5C5C2F24EFEB22332D09E647D523919B90672B98AEE9C0",
-            ["M12-001"] = "7D5024EA255550A1FEB797AF3398B125BB7C336BABA5E20D71513EABB39CC875"
+            ["M12-001"] = "7D5024EA255550A1FEB797AF3398B125BB7C336BABA5E20D71513EABB39CC875",
+            // M11-001 se introduce en este sprint (Sprint 8): todavía no está
+            // publicada en ningún entorno, así que se referencia en vivo en
+            // vez de fijar un literal (igual que M08-001...M12-001 en el
+            // commit que las introdujo).
+            [MongoReparacionesMigration.Version] = MongoReparacionesMigration.Definition.Checksum
         };
 
         Assert.Equal(

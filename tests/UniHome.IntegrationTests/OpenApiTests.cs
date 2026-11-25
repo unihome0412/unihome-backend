@@ -27,7 +27,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
     }
 
     [Fact]
-    public async Task OpenApi_DebeExponerLas61OperacionesDelCatalogoVigente()
+    public async Task OpenApi_DebeExponerLas69OperacionesDelCatalogoVigente()
     {
         using var response = await _client.GetAsync("/openapi/v1.json");
 
@@ -45,7 +45,7 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(61, operations.Length);
+        Assert.Equal(69, operations.Length);
     }
 
     [Fact]
@@ -491,5 +491,48 @@ public sealed class OpenApiTests : IClassFixture<SwaggerEnabledApiFactory>
             Assert.Equal("string", schema.GetProperty("type").GetString());
             Assert.NotEmpty(schema.GetProperty("enum").EnumerateArray());
         }
+    }
+
+    [Fact]
+    public async Task OpenApi_DebeIncluirLosEndpointsNuevosDeSprint08()
+    {
+        using var response = await _client.GetAsync("/openapi/v1.json");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var paths = document.RootElement.GetProperty("paths");
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/reparaciones",
+            out var reparaciones));
+        Assert.True(reparaciones.TryGetProperty("post", out _));
+        Assert.True(reparaciones.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/unidades/{unitId}/reparaciones/{reparacionId}/estado",
+            out var reparacionEstado));
+        Assert.True(reparacionEstado.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/mi-resumen", out var resumen));
+        Assert.True(resumen.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty("/api/v1/admin/cuentas", out var adminCuentas));
+        Assert.True(adminCuentas.TryGetProperty("get", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/admin/cuentas/{accountId}",
+            out var adminCuenta));
+        Assert.True(adminCuenta.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/admin/cuentas/{accountId}/estado",
+            out var adminCuentaEstado));
+        Assert.True(adminCuentaEstado.TryGetProperty("put", out _));
+
+        Assert.True(paths.TryGetProperty(
+            "/api/v1/perfil/mi-universidad",
+            out var miUniversidad));
+        Assert.True(miUniversidad.TryGetProperty("put", out _));
     }
 }

@@ -9,8 +9,9 @@ public sealed record NotificacionResponse(
     string Mensaje,
     Guid? UnitId,
     string? Periodo,
+    Guid? ReparacionId,
     DateTimeOffset CreadoEn,
-    string Aviso)
+    string? Aviso)
 {
     public static NotificacionResponse FromDomain(Notification notification) =>
         new(
@@ -19,6 +20,9 @@ public sealed record NotificacionResponse(
             notification.Message,
             notification.UnitId,
             notification.Periodo,
+            notification.ReparacionId,
             notification.CreatedAt,
-            RentNotices.PagosInformativos);
+            notification.Type == NotificationType.RecordatorioRenta
+                ? RentNotices.PagosInformativos
+                : null);
 }

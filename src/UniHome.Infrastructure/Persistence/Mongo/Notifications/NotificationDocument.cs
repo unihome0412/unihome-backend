@@ -23,6 +23,9 @@ public sealed class NotificationDocument
     [BsonElement(MongoNotificationsSchema.PeriodoField)]
     public string? Periodo { get; set; }
 
+    [BsonElement(MongoNotificationsSchema.ReparacionField)]
+    public string? ReparacionId { get; set; }
+
     [BsonElement(MongoNotificationsSchema.CreatedAtField)]
     public DateTime CreatedAt { get; set; }
 }

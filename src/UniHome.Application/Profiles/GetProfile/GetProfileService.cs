@@ -1,6 +1,7 @@
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.OccupancyLinks.Abstractions;
 using UniHome.Application.Units.Abstractions;
+using UniHome.Application.Universities.Abstractions;
 using UniHome.Domain.Accounts;
 using UniHome.Domain.Properties;
 
@@ -16,17 +17,20 @@ public sealed class GetProfileService
     private readonly IAccountRepository _accounts;
     private readonly IUnitRepository _units;
     private readonly IOccupancyLinkRepository _occupancyLinks;
+    private readonly IUniversityRepository _universities;
     private readonly ISystemClock _clock;
 
     public GetProfileService(
         IAccountRepository accounts,
         IUnitRepository units,
         IOccupancyLinkRepository occupancyLinks,
+        IUniversityRepository universities,
         ISystemClock clock)
     {
         _accounts = accounts;
         _units = units;
         _occupancyLinks = occupancyLinks;
+        _universities = universities;
         _clock = clock;
     }
 
@@ -57,12 +61,19 @@ public sealed class GetProfileService
             .HasActiveLinkAsync(accountId, cancellationToken)
             .ConfigureAwait(false);
 
+        var currentUniversity = account.CurrentUniversityId is null
+            ? null
+            : await _universities
+                .FindByIdAsync(account.CurrentUniversityId.Value, cancellationToken)
+                .ConfigureAwait(false);
+
         return new ProfileView(
             account,
             label,
             IsLinkedToUnit: isLinkedToUnit,
             CanPublish: units.Count == 0 &&
                         AgeEligibility.IsAdult(account.BirthDate, _clock.UtcNow),
-            FirstPublicationState: units.FirstOrDefault()?.PublicationState);
+            FirstPublicationState: units.FirstOrDefault()?.PublicationState,
+            CurrentUniversity: currentUniversity);
     }
 }

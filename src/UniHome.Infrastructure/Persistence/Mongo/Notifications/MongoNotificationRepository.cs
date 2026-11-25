@@ -95,6 +95,7 @@ internal sealed class MongoNotificationRepository : INotificationRepository
             Message = notification.Message,
             UnitId = notification.UnitId?.ToString("N", CultureInfo.InvariantCulture),
             Periodo = notification.Periodo,
+            ReparacionId = notification.ReparacionId?.ToString("N", CultureInfo.InvariantCulture),
             CreatedAt = notification.CreatedAt.UtcDateTime
         };
 
@@ -106,6 +107,7 @@ internal sealed class MongoNotificationRepository : INotificationRepository
             document.Message,
             document.UnitId is null ? null : Guid.ParseExact(document.UnitId, "N"),
             document.Periodo,
+            document.ReparacionId is null ? null : Guid.ParseExact(document.ReparacionId, "N"),
             new DateTimeOffset(DateTime.SpecifyKind(document.CreatedAt, DateTimeKind.Utc)));
 
     private void LogStorageFailure(MongoException exception)

@@ -7,7 +7,7 @@ namespace UniHome.UnitTests.TestSupport;
 internal sealed class InMemoryAccountRepository : IAccountRepository
 {
     private readonly object _gate = new();
-    private readonly Dictionary<string, Account> _accounts = new(StringComparer.Ordinal);
+    private readonly Dictionary<Guid, Account> _accounts = [];
 
     public int Count
     {
@@ -26,10 +26,12 @@ internal sealed class InMemoryAccountRepository : IAccountRepository
 
         lock (_gate)
         {
-            if (!_accounts.TryAdd(account.Email.Value, account))
+            if (_accounts.Values.Any(existing => existing.Email.Equals(account.Email)))
             {
                 throw new DuplicateEmailException();
             }
+
+            _accounts[account.Id] = account;
         }
 
         return Task.CompletedTask;
@@ -39,7 +41,8 @@ internal sealed class InMemoryAccountRepository : IAccountRepository
     {
         lock (_gate)
         {
-            return Task.FromResult(_accounts.Values.SingleOrDefault(account => account.Id == id));
+            _accounts.TryGetValue(id, out var account);
+            return Task.FromResult(account);
         }
     }
 
@@ -51,7 +54,7 @@ internal sealed class InMemoryAccountRepository : IAccountRepository
 
         lock (_gate)
         {
-            _accounts.TryGetValue(email.Value, out var account);
+            var account = _accounts.Values.SingleOrDefault(candidate => candidate.Email.Equals(email));
             return Task.FromResult(account);
         }
     }
@@ -62,12 +65,18 @@ internal sealed class InMemoryAccountRepository : IAccountRepository
 
         lock (_gate)
         {
-            if (!_accounts.ContainsKey(account.Email.Value))
+            if (!_accounts.ContainsKey(account.Id))
             {
                 throw new AccountNotFoundException();
             }
 
-            _accounts[account.Email.Value] = account;
+            if (_accounts.Values.Any(existing =>
+                    existing.Id != account.Id && existing.Email.Equals(account.Email)))
+            {
+                throw new DuplicateEmailException();
+            }
+
+            _accounts[account.Id] = account;
         }
 
         return Task.CompletedTask;
@@ -84,9 +93,7 @@ internal sealed class InMemoryAccountRepository : IAccountRepository
 
         lock (_gate)
         {
-            var account = _accounts.Values.SingleOrDefault(candidate => candidate.Id == accountId);
-
-            if (account is null ||
+            if (!_accounts.TryGetValue(accountId, out var account) ||
                 account.Status != AccountStatus.Active ||
                 !account.IsEmailConfirmed ||
                 !string.Equals(account.PasswordHash, expectedPasswordHash, StringComparison.Ordinal))
@@ -96,6 +103,29 @@ internal sealed class InMemoryAccountRepository : IAccountRepository
 
             account.ChangePassword(newPasswordHash);
             return Task.FromResult(true);
+        }
+    }
+
+    public Task<IReadOnlyList<Account>> SearchAsync(
+        string? query,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            IEnumerable<Account> candidates = _accounts.Values
+                .Where(account => account.Status != AccountStatus.Deleted);
+
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                candidates = candidates.Where(account =>
+                    account.FullName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                    account.Email.Value.Contains(query, StringComparison.OrdinalIgnoreCase));
+            }
+
+            IReadOnlyList<Account> results = candidates
+                .OrderBy(account => account.FullName, StringComparer.Ordinal)
+                .ToArray();
+            return Task.FromResult(results);
         }
     }
 }
