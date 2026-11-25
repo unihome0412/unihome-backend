@@ -216,7 +216,7 @@ public sealed class MongoPromotionIncrementalTests
             issue.Contains(MongoNotificationsMigration.Definition.Collections[0].Name, StringComparison.Ordinal));
     }
 
-    private static IReadOnlyList<MongoMigrationDefinition> PriorTo(string version) =>
+    private static MongoMigrationDefinition[] PriorTo(string version) =>
         Registry.GetUpTo(version)
             .Where(item => !string.Equals(item.Version, version, StringComparison.Ordinal))
             .ToArray();

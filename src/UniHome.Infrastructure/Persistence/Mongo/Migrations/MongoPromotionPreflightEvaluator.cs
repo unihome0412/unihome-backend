@@ -278,7 +278,7 @@ public static class MongoPromotionPreflightEvaluator
     private static bool IsAppliedAndValid(
         MongoMigrationDefinition later,
         MongoPromotionSnapshot snapshot,
-        IReadOnlyDictionary<string, MongoCollectionSnapshot> collectionByName)
+        Dictionary<string, MongoCollectionSnapshot> collectionByName)
     {
         var ledgerRecord = snapshot.Ledger.FirstOrDefault(record =>
             string.Equals(record.Version, later.Version, StringComparison.Ordinal));
