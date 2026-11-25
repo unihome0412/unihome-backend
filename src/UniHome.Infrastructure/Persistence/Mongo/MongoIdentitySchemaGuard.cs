@@ -1,11 +1,14 @@
 using MongoDB.Bson;
 using MongoDB.Driver;
 using UniHome.Application.Identity.Exceptions;
+using UniHome.Infrastructure.Persistence.Mongo.Chat;
 using UniHome.Infrastructure.Persistence.Mongo.Migrations;
 using UniHome.Infrastructure.Persistence.Mongo.Exploration;
+using UniHome.Infrastructure.Persistence.Mongo.Notifications;
 using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
+using UniHome.Infrastructure.Persistence.Mongo.Rentals;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
 using UniHome.Infrastructure.Persistence.Mongo.Verification;
 
@@ -26,7 +29,10 @@ internal static class MongoIdentitySchemaGuard
         .. MongoPublicationIndexes.Definitions,
         MongoExplorationIndexes.Definition,
         .. MongoVerificationIndexes.Definitions,
-        .. MongoOccupancyIndexes.Definitions
+        .. MongoOccupancyIndexes.Definitions,
+        .. MongoChatIndexes.Definitions,
+        .. MongoRentalsIndexes.Definitions,
+        .. MongoNotificationsIndexes.Definitions
     ];
 
     public static async Task EnsureAsync<TDocument>(
