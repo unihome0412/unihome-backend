@@ -380,7 +380,7 @@ HU-033/036/092 (M05), HU-048/049/093/094/095 (M09) y HU-067/068/069/070/086/089
 desde Sprint 3. Detalle, decisiones provisionales y pendientes en
 [`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
 
-## Sprint 7 / M10: renta (en curso)
+## Sprint 7 / M10-M12: renta, pagos informativos y recordatorio
 
 Pagos informativos: UniHome no procesa dinero ni interviene en transacciones
 económicas entre las partes (HU-090); toda respuesta de este módulo incluye el
@@ -449,13 +449,39 @@ Reglas principales:
   tenga el formato "yyyy-MM".
 - Migración `M10-001`: crea `rentas_periodo` (con índice único
   `ux_rentas_periodo` sobre `unitId`+`periodo`) y `pagos_informativos` (con
-  `ix_pagos_periodo_inquilino`, no único). Migración `M12-001`: crea
-  `notificaciones` (con `ix_notificaciones_destinatario`), reservada para el
-  recordatorio de renta de HU-059 (Sprint 7, pendiente). No modifica M01-M09.
+  `ix_pagos_periodo_inquilino`, no único). No modifica M01-M09.
 
-El resto del alcance de Sprint 7 (recordatorio de renta HU-059) está en
-curso; esta sección y [`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md)
-se completan a medida que avanza.
+### M12: recordatorio de renta (HU-059)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/v1/notificaciones` | Notificaciones propias; genera o renueva el recordatorio de renta del mes en curso antes de listarlas. |
+
+- **Generado al consultar, nunca por un job en segundo plano.** Cada
+  llamada a `GET /notificaciones` recorre las unidades donde la cuenta es
+  inquilino activo (`IOccupancyLinkRepository.ListActiveByTenantAsync`) y,
+  si corresponde, genera el recordatorio del periodo del mes en curso antes
+  de devolver la lista completa. `Notification.ComputeRentReminderId` deriva
+  un id determinista de (destinatario, unidad, periodo, tipo): generarlo de
+  nuevo en la misma ventana es un upsert idempotente, nunca un duplicado.
+- **Ventana de 0 a 3 días antes del corte.** Si al corte del periodo en
+  curso le quedan más de 3 días, o si el corte ya pasó, no se genera ni
+  renueva el recordatorio para esa unidad (uno que ya existiera de una
+  consulta anterior dentro de la ventana permanece, pero no se vuelve a
+  tocar). Decisión provisional sin aprobación de producto; ver
+  [`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md).
+- **Se omite si la cuota ya está cubierta.** Usa
+  `RentPeriod.ComputePaymentState`, igual que HU-056/057: si el estado ya es
+  `Registrado` (pagado ≥ cuota), no tiene sentido recordar algo ya resuelto.
+  También se omite si la división del periodo está pendiente o si el
+  inquilino no tiene cuota asignada (p. ej., se unió después de dividir).
+- Migración `M12-001`: crea `notificaciones` (con
+  `ix_notificaciones_destinatario`); alcance limitado al recordatorio de
+  renta, el resto de M12 queda fuera de este sprint.
+
+Con HU-059 se completan las 14 HU de Sprint 7. Detalle, decisiones
+provisionales y pendientes en
+[`docs/sprint-07-cierre.md`](docs/sprint-07-cierre.md).
 
 ## Swagger/OpenAPI protegido
 

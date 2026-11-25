@@ -1517,6 +1517,11 @@ def run_scan(args: argparse.Namespace) -> int:
         "GET", "/api/v1/mi-resumen-renta/2026-11",
         token=access_b, expected={200}, auth=True, note="resumen de renta B")
 
+    # M12 (HU-059): recordatorio de renta, generado al consultar el endpoint.
+    http.request(
+        "GET", "/api/v1/notificaciones",
+        token=access_b, expected={200}, auth=True, note="notificaciones B")
+
     http.request(
         "DELETE", f"/api/v1/unidades/{unit_id}/inquilinos/{tenant_b_id}",
         body={"confirmacion": True},
