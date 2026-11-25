@@ -9,6 +9,7 @@ using UniHome.Infrastructure.Persistence.Mongo.OccupancyLinks;
 using UniHome.Infrastructure.Persistence.Mongo.PasswordResets;
 using UniHome.Infrastructure.Persistence.Mongo.Publications;
 using UniHome.Infrastructure.Persistence.Mongo.Rentals;
+using UniHome.Infrastructure.Persistence.Mongo.Reparaciones;
 using UniHome.Infrastructure.Persistence.Mongo.Universities;
 using UniHome.Infrastructure.Persistence.Mongo.Verification;
 
@@ -32,7 +33,8 @@ internal static class MongoIdentitySchemaGuard
         .. MongoOccupancyIndexes.Definitions,
         .. MongoChatIndexes.Definitions,
         .. MongoRentalsIndexes.Definitions,
-        .. MongoNotificationsIndexes.Definitions
+        .. MongoNotificationsIndexes.Definitions,
+        .. MongoReparacionesIndexes.Definitions
     ];
 
     public static async Task EnsureAsync<TDocument>(

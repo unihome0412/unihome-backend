@@ -1,7 +1,13 @@
 # Sprint 8 — Cierre backend M11, Resumen, M13 y cierres de M01/M02/M03
 
 **Rama:** `feature/sprint-08-backend-integral`
-**Base:** `6da78fd` (Sprint 7 en `main`, PR #62)
+**Base:** `6da78fd` (Sprint 7 en `main`, PR #62); se incorporó por merge
+`origin/main` hasta `a811b68` (PR #63: registra `conversaciones`,
+`rentas_periodo`/`pagos_informativos` y `notificaciones` en
+`MongoIdentitySchemaGuard`) antes de abrir el PR de este sprint. Se agregó el
+mismo registro para `reparaciones` (M11-001) por la misma razón: sin él, el
+guard fail-closed rechaza la colección nueva aunque la migración esté
+aplicada.
 **Alcance:** HU-034, 062, 063, 064, 065, 066, 072, 073, 074, 087 y 096 (11 HU
 de la hoja de Sprint Planning). **Fuera de alcance:** el resto de M13 (si lo
 hubiera) y cualquier endpoint de lectura/edición de la fotografía de un
@@ -234,7 +240,7 @@ pendientes desde entonces:
 
 1. **CI:** PR a `main` abierto desde `feature/sprint-08-backend-integral`,
    pendiente de ejecutar en GitHub Actions. Localmente: build/formato en
-   verde, **1050/1050 unitarias PASS** (4 omitidas: OCR/PDF reales),
+   verde, **1073/1073 unitarias PASS** (4 omitidas: OCR/PDF reales),
    **372/372 integraciones ejecutadas PASS** (13 opt-in Mongo/Cloudinary
    omitidas explícitamente), **167/167 Python CI PASS**, catálogo OpenAPI en
    **69 operaciones** y fixture DAST local en cobertura **69/69**.
@@ -266,7 +272,7 @@ pendientes desde entonces:
 |---|---|
 | `dotnet build -c Release -warnaserror` | PASS, 0 avisos/errores |
 | `dotnet format --verify-no-changes` | PASS |
-| Unitarias | **1050/1050 PASS** (4 omitidas: OCR/PDF reales, requieren binarios locales) |
+| Unitarias | **1073/1073 PASS** (4 omitidas: OCR/PDF reales, requieren binarios locales) |
 | Integración | **372/372 ejecutadas PASS**; 13 opt-in Mongo/Cloudinary omitidas explícitamente |
 | OpenAPI | PASS: 69 operaciones (61 de Sprints 1–7 + 8 de Sprint 8) |
 | Python CI (`tools/ci`) | **167/167 PASS** |
@@ -307,7 +313,9 @@ pendientes desde entonces:
   `AdminCannotSelfDelete`.
 - `src/UniHome.Application/Profiles/GetProfile/{GetProfileService,ProfileView}.cs`:
   resuelve `CurrentUniversity`.
-- `MongoMigrationRegistry`, `MongoAccountRepository`/`AccountDocument`,
+- `MongoMigrationRegistry`, `MongoIdentitySchemaGuard` (registra
+  `MongoReparacionesIndexes.Definitions`, mismo mecanismo que PR #63 usó para
+  chat/rentas/notificaciones), `MongoAccountRepository`/`AccountDocument`,
   `MongoNotificationRepository`/`NotificationDocument`/`MongoNotificationsSchema`,
   `DependencyInjection`, `Program.cs`.
 - `src/UniHome.Api/Controllers/{CuentasController,ProfileController}.cs`.

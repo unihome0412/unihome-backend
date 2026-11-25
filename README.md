@@ -952,7 +952,7 @@ matriz de las 56 HU de Sprints 1–5 está en
 [`docs/sprint-05-cierre.md`](docs/sprint-05-cierre.md); la de las 15 HU de
 Sprint 6, en [`docs/sprint-06-cierre.md`](docs/sprint-06-cierre.md).
 
-Estado local del cierre de Sprint 8: **1050 unitarias** y **372 integraciones
+Estado local del cierre de Sprint 8: **1073 unitarias** y **372 integraciones
 ejecutadas** (13 opt-in de Mongo/Cloudinary omitidas de forma explícita;
 catálogo OpenAPI en 69 operaciones). La matriz de las 11 HU de Sprint 8 está en
 [`docs/sprint-08-cierre.md`](docs/sprint-08-cierre.md).
