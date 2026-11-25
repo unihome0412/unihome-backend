@@ -247,7 +247,7 @@ public sealed class RentDomainTests
     public void ComparePeriodo_OrdenaComoTexto()
     {
         Assert.True(RentPeriod.ComparePeriodo("2026-09", "2026-10") < 0);
-        Assert.True(RentPeriod.ComparePeriodo("2026-10", "2026-10") == 0);
+        Assert.Equal(0, RentPeriod.ComparePeriodo("2026-10", "2026-10"));
         Assert.True(RentPeriod.ComparePeriodo("2027-01", "2026-12") > 0);
     }
 

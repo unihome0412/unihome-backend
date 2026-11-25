@@ -202,6 +202,55 @@ public sealed class PublicationEndpointTests : IClassFixture<UniHomeApiFactory>
 
         using var preview = await _client.GetAsync($"/api/v1/unidades/{unitId}/vista-previa");
         Assert.Equal(HttpStatusCode.Forbidden, preview.StatusCode);
+
+        using var detail = await _client.GetAsync($"/api/v1/unidades/{unitId}/detalle");
+        Assert.Equal(HttpStatusCode.Forbidden, detail.StatusCode);
+    }
+
+    [Fact]
+    public async Task Detalle_PropiaUnidad_DevuelveTodosLosCamposSinExponerCorreo()
+    {
+        var token = await AuthenticateAsync(AdultEmail);
+        var universityId = await SeedUniversityAsync();
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var propertyId = await CreatePropertyAsync(universityId, "Casa Detalle", "Calle Detalle");
+        var unitId = await CreateUnitAsync(propertyId);
+        await ConfigureServicesAsync(unitId);
+        await ConfigureZoneRulesAsync(unitId);
+
+        using var response = await _client.GetAsync($"/api/v1/unidades/{unitId}/detalle");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(AdultEmail, body, StringComparison.OrdinalIgnoreCase);
+        using var document = JsonDocument.Parse(body);
+        Assert.Equal(unitId, document.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(propertyId, document.RootElement.GetProperty("propiedadId").GetGuid());
+        Assert.Equal("Borrador", document.RootElement.GetProperty("estadoPublicacion").GetString());
+        Assert.Equal(3500, document.RootElement.GetProperty("precioMensualPorLugarMxn").GetDecimal());
+        Assert.Equal(
+            "Cerca del metro",
+            document.RootElement.GetProperty("informacionZona").GetString());
+        Assert.Equal(2, document.RootElement.GetProperty("servicios").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Detalle_UnidadInexistente_DebeResponder404()
+    {
+        var token = await AuthenticateAsync(AdultEmail);
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await _client.GetAsync($"/api/v1/unidades/{Guid.NewGuid()}/detalle");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Detalle_SinSesion_DebeResponder401()
+    {
+        using var response = await _client.GetAsync($"/api/v1/unidades/{Guid.NewGuid()}/detalle");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]

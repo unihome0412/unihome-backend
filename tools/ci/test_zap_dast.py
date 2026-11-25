@@ -314,6 +314,8 @@ class FakeHttpClient:
                 "unitId": str(uuid.uuid4()),
                 "periodo": "2026-11",
                 "creadoEn": "2026-11-19T00:00:00+00:00",
+                "aviso": "UniHome no procesa pagos ni interviene en transacciones "
+                         "económicas entre las partes.",
             }]).encode("utf-8")
         if base.startswith("/api/v1/unidades/") and base.endswith("/servicios"):
             return 200, json.dumps({"id": str(uuid.uuid4())}).encode("utf-8")

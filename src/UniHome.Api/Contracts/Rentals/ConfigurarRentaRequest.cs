@@ -8,6 +8,6 @@ public sealed record ConceptoInput(
     [property: JsonRequired] bool EsFijo);
 
 public sealed record ConfigurarRentaRequest(
-    decimal RentaTotalMxn,
-    int DiaCorte,
+    [property: JsonRequired] decimal RentaTotalMxn,
+    [property: JsonRequired] int DiaCorte,
     IReadOnlyList<ConceptoInput>? Conceptos);

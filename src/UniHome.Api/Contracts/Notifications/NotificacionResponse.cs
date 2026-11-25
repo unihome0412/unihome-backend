@@ -1,3 +1,4 @@
+using UniHome.Api.Contracts.Rentals;
 using UniHome.Domain.Notifications;
 
 namespace UniHome.Api.Contracts.Notifications;
@@ -8,7 +9,8 @@ public sealed record NotificacionResponse(
     string Mensaje,
     Guid? UnitId,
     string? Periodo,
-    DateTimeOffset CreadoEn)
+    DateTimeOffset CreadoEn,
+    string Aviso)
 {
     public static NotificacionResponse FromDomain(Notification notification) =>
         new(
@@ -17,5 +19,6 @@ public sealed record NotificacionResponse(
             notification.Message,
             notification.UnitId,
             notification.Periodo,
-            notification.CreatedAt);
+            notification.CreatedAt,
+            RentNotices.PagosInformativos);
 }

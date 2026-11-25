@@ -8,9 +8,11 @@ using Microsoft.Extensions.Logging;
 using UniHome.Application.Chat.Abstractions;
 using UniHome.Application.Favorites.Abstractions;
 using UniHome.Application.Identity.Abstractions;
+using UniHome.Application.Notifications.Abstractions;
 using UniHome.Application.OccupancyLinks.Abstractions;
 using UniHome.Application.Properties.Abstractions;
 using UniHome.Application.Publications.Abstractions;
+using UniHome.Application.Rentals.Abstractions;
 using UniHome.Application.Units.Abstractions;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Application.Verification.Abstractions;
@@ -69,6 +71,12 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
     public InMemoryOccupancyLinkRepository OccupancyLinks { get; } = new();
 
     public InMemoryUnitInvitationRepository UnitInvitations { get; } = new();
+
+    public InMemoryRentPeriodRepository RentPeriods { get; } = new();
+
+    public InMemoryInformativePaymentRepository InformativePayments { get; } = new();
+
+    public InMemoryNotificationRepository Notifications { get; } = new();
 
     public InMemoryConversationRepository Conversations { get; } = new();
 
@@ -197,6 +205,15 @@ public class UniHomeApiFactory : WebApplicationFactory<Program>
 
                 services.RemoveAll<IUnitInvitationRepository>();
                 services.AddSingleton<IUnitInvitationRepository>(UnitInvitations);
+
+                services.RemoveAll<IRentPeriodRepository>();
+                services.AddSingleton<IRentPeriodRepository>(RentPeriods);
+
+                services.RemoveAll<IInformativePaymentRepository>();
+                services.AddSingleton<IInformativePaymentRepository>(InformativePayments);
+
+                services.RemoveAll<INotificationRepository>();
+                services.AddSingleton<INotificationRepository>(Notifications);
 
                 services.RemoveAll<IConversationRepository>();
                 services.AddSingleton<IConversationRepository>(Conversations);
