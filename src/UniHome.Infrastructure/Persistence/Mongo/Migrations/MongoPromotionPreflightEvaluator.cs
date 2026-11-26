@@ -31,11 +31,20 @@ public static class MongoPromotionPreflightEvaluator
                 migration.Version,
                 StringComparison.Ordinal))
             .ToArray();
-        var allowedCollections = orderedMigrations
-            .SelectMany(item => item.Collections)
-            .Select(collection => collection.Name)
-            .Append(MongoIdentitySchema.MigrationLedgerCollection)
+        var orderedVersionSet = orderedMigrations
+            .Select(item => item.Version)
             .ToHashSet(StringComparer.Ordinal);
+
+        // Una migración "posterior" (en orden alfabético de versión) puede ya estar
+        // promovida en producción si se desplegó en una ventana anterior a que esta
+        // migración existiera (p. ej. M12-001 antes de que M11-001 se creara: el
+        // número de módulo no refleja el orden real de despliegue). Sus colecciones
+        // solo se toleran en el snapshot si esa migración posterior está registrada
+        // en el ledger con el checksum esperado y sus colecciones/índices coinciden
+        // exactamente; de lo contrario, siguen tratándose como no administradas.
+        var laterMigrations = registry.Migrations
+            .Where(item => !orderedVersionSet.Contains(item.Version))
+            .ToArray();
 
         if (!MongoPromotionGuard.IsAllowedTarget(snapshot.DatabaseName))
         {
@@ -53,15 +62,25 @@ public static class MongoPromotionPreflightEvaluator
             issues.Add($"Colección duplicada en el snapshot: {duplicate}.");
         }
 
+        var collectionByName = snapshot.Collections
+            .Where(collection => !duplicateCollections.Contains(collection.Name, StringComparer.Ordinal))
+            .ToDictionary(collection => collection.Name, collection => collection, StringComparer.Ordinal);
+
+        var validLaterMigrations = laterMigrations
+            .Where(later => IsAppliedAndValid(later, snapshot, collectionByName))
+            .ToArray();
+        var allowedCollections = orderedMigrations
+            .Concat(validLaterMigrations)
+            .SelectMany(item => item.Collections)
+            .Select(collection => collection.Name)
+            .Append(MongoIdentitySchema.MigrationLedgerCollection)
+            .ToHashSet(StringComparer.Ordinal);
+
         foreach (var collection in snapshot.Collections.Where(collection =>
                      !allowedCollections.Contains(collection.Name)))
         {
             issues.Add($"Colección no administrada por las migraciones anteriores: {collection.Name}.");
         }
-
-        var collectionByName = snapshot.Collections
-            .Where(collection => !duplicateCollections.Contains(collection.Name, StringComparer.Ordinal))
-            .ToDictionary(collection => collection.Name, collection => collection, StringComparer.Ordinal);
 
         if (collectionByName.TryGetValue(
                 MongoIdentitySchema.MigrationLedgerCollection,
@@ -95,6 +114,7 @@ public static class MongoPromotionPreflightEvaluator
         }
 
         var orderedVersions = orderedMigrations
+            .Concat(validLaterMigrations)
             .Select(item => item.Version)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -246,6 +266,47 @@ public static class MongoPromotionPreflightEvaluator
             snapshot.Collections.Count == 0,
             plan?.Writes ?? [],
             issues);
+    }
+
+    /// <summary>
+    /// Una migración posterior (en orden de versión) solo se tolera en el snapshot
+    /// si está registrada en el ledger con el checksum esperado y cada una de sus
+    /// colecciones existe con exactamente los índices y el validador declarados. Si
+    /// no está aplicada, tiene un checksum distinto o quedó parcialmente aplicada,
+    /// no es válida: sus colecciones siguen tratándose como no administradas.
+    /// </summary>
+    private static bool IsAppliedAndValid(
+        MongoMigrationDefinition later,
+        MongoPromotionSnapshot snapshot,
+        Dictionary<string, MongoCollectionSnapshot> collectionByName)
+    {
+        var ledgerRecord = snapshot.Ledger.FirstOrDefault(record =>
+            string.Equals(record.Version, later.Version, StringComparison.Ordinal));
+
+        if (ledgerRecord is null ||
+            !string.Equals(ledgerRecord.Checksum, later.Checksum, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        foreach (var definition in later.Collections)
+        {
+            if (!collectionByName.TryGetValue(definition.Name, out var collection))
+            {
+                return false;
+            }
+
+            var validationIssues = new List<string>();
+            ValidateDefinition(definition, collection, requireEmpty: false, validationIssues);
+            ValidateIndexes(definition, collection, validationIssues);
+
+            if (validationIssues.Count > 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void ValidateDefinition(
