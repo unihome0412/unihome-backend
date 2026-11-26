@@ -398,8 +398,8 @@ Gitleaks, SonarCloud SAST y Code Analysis, PR Quality Gate); el Quality Gate
 de SonarCloud cerró con `new_coverage` en **88.4 %** y **0 avisos nuevos**.
 
 **M11-001 no se promovió en esta ventana.** Por instrucción explícita, no se
-escribe nada en Atlas hasta que el PR #66 esté en `main`. Queda pendiente
-para la siguiente ventana (sección 13.4).
+escribe nada en Atlas hasta que el PR #66 esté en `main`. Se promovió en la
+ventana siguiente, ya con el fix en `main` (sección 13.5).
 
 ### 13.3 Imagen y despliegue de la Container App (2026-11-26)
 
@@ -472,15 +472,60 @@ restauraron al terminar cada paso; el resto de los candados (`gh pr merge`,
 `git branch -D`, `az containerapp secret/ingress/delete`,
 `dotnet user-secrets`) nunca se tocó.
 
-### 13.5 Pendiente
+### 13.5 Promoción de M11-001 (2026-11-26, tras el merge del PR #66)
 
-- **Promover `M11-001`** a `unihome_verificacion` después de que el PR #66
-  se mergee a `main`. Hasta entonces, `GET/POST/PUT
-  /api/v1/unidades/{unitId}/reparaciones*` seguirán respondiendo `503` al
-  intentar leer o escribir la colección (autorización ya en `401` sin
-  sesión, como se verificó en 13.3).
+Con el fix de `MongoPromotionPreflightEvaluator` ya en `main`
+(`aae4647`), se recompiló el migrador en Release y se promovió M11-001:
+
+```
+dotnet run --project tools/UniHome.MongoMigrator --configuration Release --no-build -- `
+  promote --database unihome_verificacion --confirm-database unihome_verificacion `
+  --version M11-001 --approval-ref "M11-001-PROD-20261125-01" --migration-credential
+```
+
+| Migración | `--approval-ref` | Estado inicial | Escrituras planificadas | Escrituras aplicadas | Verificación interna |
+|---|---|---|---|---|---|
+| `M11-001` | `M11-001-PROD-20261125-01` | `PartiallyApplied` | 4 | 5 | **VÁLIDA** |
+
+No fue necesario repetir el diagnóstico de la sección 13.2: el preflight
+corregido aceptó de inmediato la colección `notificaciones` de `M12-001`
+(ya aplicada y válida) como una migración posterior tolerada, sin tratarla
+como no administrada.
+
+**Verificación posterior** (`verify --migration-credential`, solo lectura):
+las **11** migraciones del registro (`M01-001`, `M01-002`, `M03-001`,
+`M05-001`, `M06-001`, `M07-001`, `M08-001`, `M09-001`, `M10-001`,
+**`M11-001`** y `M12-001`) dieron `Registrada: True`, `Checksum coincide:
+True`, índices coincidentes, `Escrituras pendientes: 0`, **Resultado:
+VÁLIDO**. Ninguna quedó divergente.
+
+**Verificación HTTP posterior:**
+
+| Comprobación | Resultado |
+|---|---|
+| `GET /health/live` | `200` |
+| `GET /health/ready` | `200` |
+| `GET /api/v1/unidades/{unitId}/reparaciones` sin sesión | `401` (la autorización ya rechazaba antes de M11-001; ahora la colección también existe y está indexada) |
+
+No se tocó la Container App en esta ventana: la revisión
+`unihome-api--sprint08-20261125` seguía sirviendo el 100% del tráfico desde
+la ventana anterior (sección 13.3), sin necesidad de un nuevo despliegue de
+imagen.
+
+### 13.6 Candados temporales (promoción de M11-001)
+
+Se quitó temporalmente de `.claude/settings.local.json` (no versionado)
+solo la regla `deny` de `dotnet run --project tools/UniHome.MongoMigrator*promote*`,
+con autorización explícita y acotada a esta promoción; se restauró
+inmediatamente después del `promote`, antes de ejecutar los `verify`
+posteriores. Los candados de `az containerapp update`/`revision` no se
+tocaron en esta ventana (no hizo falta: la salud se confirmó por HTTP
+público).
+
+### 13.7 Pendiente
+
 - Promover `M10-001`/`M11-001`/`M12-001` a `unihome_desarrollo` cuando
-  corresponda (fuera del alcance de esta ventana, que fue solo
+  corresponda (fuera del alcance de estas ventanas, que fueron solo
   `unihome_verificacion` y la Container App de `rg-unihome-dev`).
 - ZAP, RESTler, Mutation Test, Pact y Cloudinary Integration: jobs manuales
-  de CI, no disparados en esta ventana.
+  de CI, no disparados en estas ventanas.
