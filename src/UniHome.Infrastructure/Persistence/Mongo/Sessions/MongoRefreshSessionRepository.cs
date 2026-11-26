@@ -206,7 +206,7 @@ internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository
         }
     }
 
-    public async Task RevokeAllForAccountAsync(
+    public async Task<IReadOnlyList<Guid>> RevokeAllForAccountAsync(
         Guid accountId,
         DateTimeOffset now,
         string reason,
@@ -225,6 +225,18 @@ internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository
                     document => document.RevokedAtUtc,
                     null));
 
+            // Se leen los ids antes de actualizar para poder denylistear cada sid
+            // en Redis de inmediato (revocación de JWT); UpdateManyAsync no
+            // devuelve los documentos afectados. No es atómico con el update
+            // (ventana pequeña entre lectura y escritura), consistente con el
+            // resto de las operaciones multi-documento de este repositorio, que
+            // tampoco usan transacciones.
+            var affectedIds = await collection
+                .Find(filter)
+                .Project(document => document.Id)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
             var update = Builders<RefreshSessionDocument>.Update
                 .Set(document => document.RevokedAtUtc, now.UtcDateTime)
                 .Set(document => document.RevokedReason, reason);
@@ -232,6 +244,10 @@ internal sealed class MongoRefreshSessionRepository : IRefreshSessionRepository
             await collection
                 .UpdateManyAsync(filter, update, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
+
+            return affectedIds
+                .Select(id => Guid.ParseExact(id, "N"))
+                .ToArray();
         }
         catch (MongoException exception)
         {

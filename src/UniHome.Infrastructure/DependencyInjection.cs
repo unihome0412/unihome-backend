@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using UniHome.Application.Abstractions.Caching;
 using UniHome.Application.Abstractions.RateLimiting;
 using UniHome.Application.Abstractions.Storage;
 using UniHome.Application.Chat.Abstractions;
@@ -179,6 +180,31 @@ public static class DependencyInjection
         // Development usa el adaptador en memoria; en Production, Upstash real.
         services.AddSingleton<IRateLimiterReadinessProbe>(serviceProvider =>
             serviceProvider.GetRequiredService<IDistributedRateLimiter>());
+
+        // Denylist de sid para revocación inmediata de JWT (logout, reset de
+        // contraseña, eliminación o suspensión de cuenta). Mismo criterio que
+        // el rate limiting: Redis obligatorio fuera de Development.
+        if (redisOptions.Enabled)
+        {
+            services.AddSingleton<ISessionDenylist, RedisSessionDenylist>();
+        }
+        else
+        {
+            services.AddSingleton<ISessionDenylist, InMemorySessionDenylist>();
+        }
+
+        // Output cache de los GET públicos (Bloque 2). Solo se registra un
+        // almacén de Redis cuando Redis está habilitado; si no, se deja que
+        // Program.cs/AddOutputCache registre su almacén en memoria por
+        // defecto (TryAddSingleton no sobreescribe esta, pero si esta no
+        // existe, sí agrega la suya). Debe registrarse antes de que Program.cs
+        // llame a AddOutputCache() para que gane sobre el valor por defecto.
+        if (redisOptions.Enabled)
+        {
+            services.AddSingleton<Microsoft.AspNetCore.OutputCaching.IOutputCacheStore, RedisOutputCacheStore>();
+        }
+
+        services.AddSingleton<IPublicCacheInvalidator, OutputCachePublicInvalidator>();
 
         // La sección Smtp es opcional para desarrollo y pruebas. Si existe
         // cualquier clave, se valida completa al arrancar y no se permite usar

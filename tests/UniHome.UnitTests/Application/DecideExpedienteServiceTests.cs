@@ -30,6 +30,9 @@ public sealed class DecideExpedienteServiceTests
         Assert.Contains(context.Audit.Entries, entry =>
             entry.Action == VerificationAuditActions.ExpedienteApproved &&
             entry.ActorAccountId == admin);
+        Assert.Contains(
+            UniHome.Application.Abstractions.Caching.PublicCacheTags.Exploration,
+            context.PublicCache.EvictedTags);
     }
 
     [Fact]
@@ -51,6 +54,9 @@ public sealed class DecideExpedienteServiceTests
         Assert.Equal(PublicationState.Rechazada, context.Units.Items.Single().PublicationState);
         Assert.Contains(context.Audit.Entries, entry =>
             entry.Action == VerificationAuditActions.ExpedienteRejected);
+        Assert.Contains(
+            UniHome.Application.Abstractions.Caching.PublicCacheTags.Exploration,
+            context.PublicCache.EvictedTags);
     }
 
     [Fact]
@@ -362,13 +368,15 @@ public sealed class DecideExpedienteServiceTests
         var repository = new FakeVerificationRepository();
         await repository.AddAsync(expediente);
         var audit = new FakeVerificationAuditRepository();
+        var publicCache = new FakePublicCacheInvalidator();
         var service = new DecideExpedienteService(
             repository,
             units,
             audit,
+            publicCache,
             new FixedClock(Now));
 
-        return new Context(expediente, repository, units, audit, service);
+        return new Context(expediente, repository, units, audit, publicCache, service);
     }
 
     private sealed record Context(
@@ -376,5 +384,6 @@ public sealed class DecideExpedienteServiceTests
         FakeVerificationRepository Repository,
         FakeUnitRepository Units,
         FakeVerificationAuditRepository Audit,
+        FakePublicCacheInvalidator PublicCache,
         DecideExpedienteService Service);
 }

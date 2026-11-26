@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using UniHome.Application.Abstractions.Caching;
 using UniHome.Application.Common;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Identity.Exceptions;
@@ -25,17 +26,20 @@ public sealed class DecideExpedienteService
     private readonly IVerificationRepository _expedientes;
     private readonly IUnitRepository _units;
     private readonly IVerificationAuditRepository _audit;
+    private readonly IPublicCacheInvalidator _publicCache;
     private readonly ISystemClock _clock;
 
     public DecideExpedienteService(
         IVerificationRepository expedientes,
         IUnitRepository units,
         IVerificationAuditRepository audit,
+        IPublicCacheInvalidator publicCache,
         ISystemClock clock)
     {
         _expedientes = expedientes;
         _units = units;
         _audit = audit;
+        _publicCache = publicCache;
         _clock = clock;
     }
 
@@ -196,6 +200,11 @@ public sealed class DecideExpedienteService
                 .ConfigureAwait(false);
             throw;
         }
+
+        // La unidad pasó de EnRevision (nunca pública) a Aprobada/Rechazada:
+        // el caché público de exploración pudo haber servido "no existe" o un
+        // estado anterior; se invalida en vez de esperar el TTL corto.
+        await _publicCache.EvictAsync(PublicCacheTags.Exploration, CancellationToken.None).ConfigureAwait(false);
 
         return OperationResult<Expediente>.Success(expediente);
     }

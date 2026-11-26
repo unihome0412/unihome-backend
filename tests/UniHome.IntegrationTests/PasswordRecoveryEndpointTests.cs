@@ -115,6 +115,17 @@ public sealed class PasswordRecoveryEndpointTests : IClassFixture<UniHomeApiFact
             new { refreshToken = oldTokens.RefreshToken });
         Assert.Equal(HttpStatusCode.Unauthorized, oldRefresh.StatusCode);
 
+        // Bloque 2 (auditoría): sin la denylist de Redis, el access token
+        // emitido antes del cambio de contraseña seguía siendo válido para
+        // rutas protegidas hasta su expiración natural — la cuenta sigue
+        // Active, así que BE-SEC-008 no lo bloqueaba por sí solo.
+        using var oldAccessTokenRequest = new HttpRequestMessage(
+            HttpMethod.Get, "/api/v1/perfil/mi-perfil");
+        oldAccessTokenRequest.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", oldTokens.AccessToken);
+        using var oldAccessTokenResponse = await _client.SendAsync(oldAccessTokenRequest);
+        Assert.Equal(HttpStatusCode.Unauthorized, oldAccessTokenResponse.StatusCode);
+
         var account = await _factory.Accounts.FindByEmailAsync(EmailAddress.Create(email));
         Assert.True(_factory.Services
             .GetRequiredService<IPasswordHasher>()

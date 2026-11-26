@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using UniHome.Api.Configuration;
 using UniHome.Api.Errors;
 
 namespace UniHome.Api.HealthChecks;
@@ -15,6 +16,7 @@ internal static class HealthResponseWriter
         var payload = new
         {
             status = report.Status.ToString(),
+            version = ApiVersionInfo.Version,
             checks = report.Entries
                 .OrderBy(entry => entry.Key, StringComparer.Ordinal)
                 .Select(entry => new

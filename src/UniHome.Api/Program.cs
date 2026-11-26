@@ -21,6 +21,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.Net.Http.Headers;
 using Microsoft.OpenApi;
 using UniHome.Api.Authorization;
+using UniHome.Api.Caching;
 using UniHome.Api.Configuration;
 using UniHome.Api.Errors;
 using UniHome.Api.HealthChecks;
@@ -112,7 +113,62 @@ if (!builder.Environment.IsDevelopment() &&
 
 // Composición de la aplicación: Api orquesta; Application/Domain/Infrastructure
 // se registran detrás de sus puertos. Se valida que fuera de Development Redis sea obligatorio.
+// Debe ir antes de AddOutputCache: si Redis está habilitado, AddInfrastructure ya
+// registró IOutputCacheStore con el adaptador de Redis, y AddOutputCache (que usa
+// TryAddSingleton para su almacén en memoria) respeta esa registración previa.
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.IsDevelopment());
+
+builder.Services
+    .AddOptions<OutputCacheOptions>()
+    .Bind(builder.Configuration.GetSection(OutputCacheOptions.SectionName))
+    .Validate(
+        options => options.IsValid(),
+        $"{OutputCacheOptions.SectionName}:PublicTtlSeconds debe estar entre " +
+        $"{OutputCacheOptions.MinPublicTtlSeconds} y {OutputCacheOptions.MaxPublicTtlSeconds}.")
+    .ValidateOnStart();
+
+// Bloque 2 (auditoría): caché de salida solo para los cuatro GET públicos sin
+// datos personales (búsqueda de universidades, mapa, lista y tarjeta). La
+// política base deniega todo por defecto; cada endpoint debe pedirla
+// explícitamente con [OutputCache(PolicyName = ...)]. "lista" y "tarjeta"
+// cambian de forma (incluyen esFavorito) cuando hay sesión, así que su
+// política además exige que la petición no traiga Authorization.
+//
+// El TTL se resuelve por petición dentro de PublicOutputCachePolicy vía
+// IOptionsMonitor, no aquí: leer OutputCacheOptions directamente de
+// builder.Configuration en este punto (antes de builder.Build()) capturaría
+// el valor por defecto en vez del que agrega ConfigureAppConfiguration en
+// las pruebas de integración, que solo queda aplicado en el IConfiguration
+// final una vez que el host termina de construirse.
+builder.Services.AddOutputCache(options =>
+{
+    options.AddBasePolicy(build => build.NoCache());
+
+    options.AddPolicy(
+        OutputCachePolicies.PublicMap,
+        new PublicOutputCachePolicy(OutputCachePolicies.ExplorationTag, requireAnonymous: false));
+
+    options.AddPolicy(
+        OutputCachePolicies.PublicListAndCard,
+        new PublicOutputCachePolicy(OutputCachePolicies.ExplorationTag, requireAnonymous: true));
+
+    options.AddPolicy(
+        OutputCachePolicies.PublicUniversitySearch,
+        new PublicOutputCachePolicy(OutputCachePolicies.UniversitiesTag, requireAnonymous: false));
+});
+
+// Bloque 2 (auditoría): Brotli/Gzip solo se activan (ver UseWhen más abajo)
+// para las mismas rutas públicas del output cache. Nunca para /api/v1/auth,
+// /api/v1/perfil ni cualquier respuesta con datos personales — mitigación de
+// BREACH, donde la compresión de una respuesta que mezcla datos del atacante
+// y un secreto permite inferir el secreto por el tamaño comprimido.
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+    options.MimeTypes = ["application/json", "application/problem+json"];
+});
 
 // La clave JWT se valida después de que todas las fuentes de configuración
 // (incluidas las de pruebas) hayan sido aplicadas. En Development se genera una
@@ -303,9 +359,26 @@ builder.Services
                 var session = context.Principal?.FindFirst("sid")?.Value;
 
                 if (!Guid.TryParseExact(subject, "N", out var accountId) ||
-                    !Guid.TryParseExact(session, "N", out _))
+                    !Guid.TryParseExact(session, "N", out var sessionId))
                 {
                     context.Fail("El token no contiene un sujeto o una sesión válida.");
+                    return;
+                }
+
+                // Revocación inmediata de JWT (Bloque 2): logout, reset de
+                // contraseña, eliminación o suspensión de cuenta denylistean el
+                // sid en Redis. Se consulta primero porque es más barato que el
+                // viaje a Mongo de abajo; si Redis no responde, falla abierto
+                // (ver RedisSessionDenylist) y BE-SEC-008 sigue cubriendo el caso
+                // de cuentas suspendidas/eliminadas.
+                var denylist = context.HttpContext.RequestServices
+                    .GetRequiredService<ISessionDenylist>();
+
+                if (await denylist
+                        .IsDeniedAsync(sessionId, context.HttpContext.RequestAborted)
+                        .ConfigureAwait(false))
+                {
+                    context.Fail("La sesión fue revocada.");
                     return;
                 }
 
@@ -795,6 +868,10 @@ app.Use(async (context, next) =>
         headers["X-Frame-Options"] = "DENY";
         headers["Referrer-Policy"] = "no-referrer";
         headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+        // Bloque 2 (auditoría): versión visible en toda respuesta, no solo
+        // en /health/*. No es un dato sensible (no distingue entornos ni
+        // expone configuración), así que se expone sin condición.
+        headers["X-UniHome-Version"] = ApiVersionInfo.Version;
 
         var path = context.Request.Path;
         var isSwaggerUi = path.StartsWithSegments("/swagger") || path == "/";
@@ -888,6 +965,26 @@ if (!app.Environment.IsDevelopment())
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Bloque 2 (auditoría): compresión y output cache solo para los cuatro GET
+// públicos declarados en OutputCachePolicies. UseWhen rama el pipeline sin
+// desviarlo: las peticiones que no igualan el predicado siguen de largo sin
+// compresión ni intento de servir/guardar desde caché. El predicado revisa
+// método + ruta exacta (o el patrón de /unidades/{id}/tarjeta); la decisión
+// fina de "esta respuesta en particular lleva datos personales" (lista/
+// tarjeta con sesión) la toma la política de output cache de arriba
+// (With(...)); la compresión aquí comparte el mismo filtro de ruta porque
+// esas dos rutas con sesión igual pasan por este branch, solo que el output
+// cache ya decidió no participar para ellas — comprimir su JSON de todas
+// formas no filtra nada (la respuesta sigue siendo del propio llamante).
+app.UseWhen(
+    context => HttpMethods.IsGet(context.Request.Method) &&
+               PublicCacheablePaths.Matches(context.Request.Path),
+    branch =>
+    {
+        branch.UseResponseCompression();
+        branch.UseOutputCache();
+    });
 
 var apiOptions = app.Services.GetRequiredService<IOptions<ApiOptions>>().Value;
 

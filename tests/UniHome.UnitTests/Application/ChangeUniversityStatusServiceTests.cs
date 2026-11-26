@@ -15,13 +15,15 @@ public sealed class ChangeUniversityStatusServiceTests
         var repository = new FakeUniversityRepository();
         var university = University.Restore(Guid.NewGuid(), "Universidad", true, Now);
         repository.Items.Add(university);
-        var service = new ChangeUniversityStatusService(repository);
+        var publicCache = new FakePublicCacheInvalidator();
+        var service = new ChangeUniversityStatusService(repository, publicCache);
 
         var result = await service.ChangeAsync(university.Id, isActive: false);
 
         Assert.Equal(ChangeUniversityStatus.Updated, result.Status);
         Assert.False(result.University!.IsActive);
         Assert.Single(repository.Items);
+        Assert.Contains(UniHome.Application.Abstractions.Caching.PublicCacheTags.Universities, publicCache.EvictedTags);
     }
 
     [Fact]
@@ -30,7 +32,7 @@ public sealed class ChangeUniversityStatusServiceTests
         var repository = new FakeUniversityRepository();
         var university = University.Restore(Guid.NewGuid(), "Universidad", false, Now);
         repository.Items.Add(university);
-        var service = new ChangeUniversityStatusService(repository);
+        var service = new ChangeUniversityStatusService(repository, new FakePublicCacheInvalidator());
 
         var result = await service.ChangeAsync(university.Id, isActive: true);
 
@@ -41,7 +43,7 @@ public sealed class ChangeUniversityStatusServiceTests
     [Fact]
     public async Task Change_Inexistente_DebeDevolverNotFound()
     {
-        var service = new ChangeUniversityStatusService(new FakeUniversityRepository());
+        var service = new ChangeUniversityStatusService(new FakeUniversityRepository(), new FakePublicCacheInvalidator());
 
         var result = await service.ChangeAsync(Guid.NewGuid(), isActive: false);
 

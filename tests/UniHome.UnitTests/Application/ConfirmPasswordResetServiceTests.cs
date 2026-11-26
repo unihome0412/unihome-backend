@@ -2,6 +2,7 @@ using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Identity.Exceptions;
 using UniHome.Application.Identity.PasswordRecovery;
 using UniHome.Domain.Accounts;
+using UniHome.Infrastructure.Redis;
 using UniHome.UnitTests.TestSupport;
 
 namespace UniHome.UnitTests.Application;
@@ -26,7 +27,8 @@ public sealed class ConfirmPasswordResetServiceTests
         var token = CreatePersistedToken(resets, generator, account.Id, generator.Generate());
 
         var hasher = new RecordingPasswordHasher();
-        var service = CreateService(accounts, resets, generator, hasher, sessions);
+        var denylist = new InMemorySessionDenylist();
+        var service = CreateService(accounts, resets, generator, hasher, sessions, denylist);
 
         var result = await service.ConfirmAsync(
             new ConfirmPasswordResetCommand(token, "NuevaClave1"));
@@ -39,6 +41,9 @@ public sealed class ConfirmPasswordResetServiceTests
         Assert.NotNull((await sessions.FindByIdAsync(session.Id))!.RevokedAt);
         Assert.Equal("password_reset", (await sessions.FindByIdAsync(session.Id))!.RevokedReason);
         Assert.Equal(1, hasher.HashCalls);
+        Assert.True(
+            await denylist.IsDeniedAsync(session.Id),
+            "Confirmar el reset debe denylistear el sid de cada sesión revocada, no solo marcarla en Mongo.");
     }
 
     [Fact]
@@ -401,13 +406,16 @@ public sealed class ConfirmPasswordResetServiceTests
         InMemoryPasswordResetRepository resets,
         FixedPasswordResetTokenGenerator generator,
         RecordingPasswordHasher hasher,
-        IRefreshSessionRepository sessions) =>
+        IRefreshSessionRepository sessions,
+        InMemorySessionDenylist? denylist = null) =>
         new(
             accounts,
             resets,
             generator,
             hasher,
             sessions,
+            denylist ?? new InMemorySessionDenylist(),
+            new FixedAuthTokenSettings(),
             new FixedClock(Now));
 
     private static UniHome.Application.Identity.Sessions.RefreshSession CreateSession(Guid accountId) =>

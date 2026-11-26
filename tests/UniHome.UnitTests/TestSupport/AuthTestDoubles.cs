@@ -66,12 +66,15 @@ internal static class AccountTestData
 
 internal sealed class FixedAuthTokenSettings : IAuthTokenSettings
 {
-    public FixedAuthTokenSettings(TimeSpan? refreshTokenLifetime = null)
+    public FixedAuthTokenSettings(TimeSpan? refreshTokenLifetime = null, TimeSpan? accessTokenLifetime = null)
     {
         RefreshTokenLifetime = refreshTokenLifetime ?? TimeSpan.FromDays(30);
+        AccessTokenLifetime = accessTokenLifetime ?? TimeSpan.FromMinutes(60);
     }
 
     public TimeSpan RefreshTokenLifetime { get; }
+
+    public TimeSpan AccessTokenLifetime { get; }
 }
 
 internal sealed class FixedDummyPasswordHashProvider : IDummyPasswordHashProvider
@@ -242,7 +245,7 @@ internal sealed class FakeRefreshSessionRepository : IRefreshSessionRepository
         return Task.CompletedTask;
     }
 
-    public Task RevokeAllForAccountAsync(
+    public Task<IReadOnlyList<Guid>> RevokeAllForAccountAsync(
         Guid accountId,
         DateTimeOffset now,
         string reason,
@@ -250,8 +253,11 @@ internal sealed class FakeRefreshSessionRepository : IRefreshSessionRepository
     {
         lock (_gate)
         {
-            foreach (var session in _sessions.Values.Where(
-                session => session.AccountId == accountId && session.RevokedAt is null).ToList())
+            var affected = _sessions.Values
+                .Where(session => session.AccountId == accountId && session.RevokedAt is null)
+                .ToList();
+
+            foreach (var session in affected)
             {
                 _sessions[session.Id] = session with
                 {
@@ -259,9 +265,10 @@ internal sealed class FakeRefreshSessionRepository : IRefreshSessionRepository
                     RevokedReason = reason
                 };
             }
-        }
 
-        return Task.CompletedTask;
+            return Task.FromResult<IReadOnlyList<Guid>>(
+                affected.Select(session => session.Id).ToArray());
+        }
     }
 
     public void SetExpiresAt(Guid sessionId, DateTimeOffset expiresAt)
