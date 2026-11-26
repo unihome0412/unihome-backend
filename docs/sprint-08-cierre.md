@@ -335,3 +335,152 @@ pendientes desde entonces:
   localmente).
 - `README.md`: secciones de Sprint 8 (M11, Resumen, M13, universidad propia,
   cierre de eliminación de cuenta).
+
+## 13. Despliegue a producción (2026-11-26, en dos ventanas)
+
+PR #65 (`feature/sprint-08-backend-integral` → `main`) se mergeó. `main`
+quedó en `6af478e9f2b5d7857db35f41d994221637c1823d`. El despliegue se hizo en
+dos ventanas porque la primera reveló un defecto en la herramienta de
+migración (sección 13.2) que había que corregir con pruebas antes de tocar
+Atlas.
+
+### 13.1 Auditoría de migraciones — solo lectura (2026-11-25)
+
+Contra `unihome_verificacion`, con `--migration-credential`, sin escrituras:
+
+- `audit`: 19 colecciones, 10 migraciones en el ledger (M01-001 a M12-001,
+  sin M11-001). `reparaciones` **no existía todavía**.
+- `plan M11-001`: 4 escrituras pendientes (crear `reparaciones` + sus dos
+  índices y el registro del ledger). Sin divergencias.
+- `verify M11-001`: **NO VÁLIDO** — "no está registrada", el resultado
+  esperado antes de promover.
+- `verify` de `M01-001` a `M12-001` (las 10 ya aplicadas): las 10 en
+  **VÁLIDO** (registradas, checksum e índices coincidentes).
+
+### 13.2 Bloqueo al promover M11-001 y su corrección (PR #66)
+
+Al ejecutar `promote M11-001 --approval-ref "M11-001-PROD-20261125-01"`, el
+preflight lo rechazó: *"Colección no administrada por las migraciones
+anteriores: notificaciones. Versión de ledger no registrada o posterior a
+la migración: M12-001."*
+
+**Causa:** `M12-001` (notificaciones) ya está promovida desde Sprint 7, pero
+ordena alfabéticamente *después* de `M11-001` — M11 no existía cuando M12 se
+creó y se desplegó, así que el número de módulo no refleja el orden real de
+despliegue. `MongoPromotionPreflightEvaluator` solo construía las
+colecciones permitidas con `registry.GetUpTo(versión)`, que excluye
+cualquier migración posterior en el orden del registro aunque ya esté
+aplicada y sea válida en la base real.
+
+**Diagnóstico sin tocar Atlas ni imprimir datos sensibles:** se agregó
+temporalmente un `Console.Error.WriteLine` de la lista de "issues" del
+preflight directamente en el código (no en una copia desplegada), se
+reconstruyó el binario localmente, se confirmó la causa exacta, y el cambio
+de diagnóstico se revirtió de inmediato (árbol de git limpio antes de
+seguir). No se ejecutó ningún `promote` real durante este diagnóstico: el
+intento que lo reveló ya había fallado en el preflight, antes de cualquier
+escritura.
+
+**Corrección** (rama `fix/migrator-orden-promocion`, PR #66, sin merge —
+pendiente de que el responsable de la cuenta lo haga): `MongoPromotionPreflightEvaluator`
+ahora también admite las colecciones de una migración posterior si, y solo
+si, esa migración está registrada en el ledger con el checksum esperado y
+cada una de sus colecciones existe con exactamente los índices y el
+validador declarados (`IsAppliedAndValid`). Cualquier otra colección
+—desconocida, o de una migración posterior no aplicada o divergente— sigue
+rechazada exactamente igual que antes. Tres pruebas nuevas en
+`MongoPromotionIncrementalTests` cubren los tres casos: M12 aplicada y
+válida → M11 promovible; colección desconocida → sigue rechazada; colección
+de una migración posterior sin aplicar en esa base → rechazada. PR #66
+corrió completo en GitHub Actions y quedó en verde (Build/formato/pruebas,
+CodeQL ×2, Container Smoke, Contract Test, Docker Build/Lint, Semgrep,
+Gitleaks, SonarCloud SAST y Code Analysis, PR Quality Gate); el Quality Gate
+de SonarCloud cerró con `new_coverage` en **88.4 %** y **0 avisos nuevos**.
+
+**M11-001 no se promovió en esta ventana.** Por instrucción explícita, no se
+escribe nada en Atlas hasta que el PR #66 esté en `main`. Queda pendiente
+para la siguiente ventana (sección 13.4).
+
+### 13.3 Imagen y despliegue de la Container App (2026-11-26)
+
+Antes de promover M11-001, se confirmó por lectura de código que
+`/health/ready` (`StorageHealthCheck` → `MongoStorageReadinessProbe`) solo
+verifica `cuentas` y `sesiones_refresh` (M01); nunca toca `reparaciones`. Eso
+permitió desplegar la imagen de Sprint 8 de inmediato, sin esperar a M11-001,
+para corregir ya el `503` de chat/rentas/notificaciones (el fix de Omar,
+PR #63) que la imagen trae incorporado.
+
+```
+az acr login --name acrunihomedev
+docker build --tag acrunihomedev.azurecr.io/unihome-api:6af478e9f2b5d7857db35f41d994221637c1823d .
+docker push acrunihomedev.azurecr.io/unihome-api:6af478e9f2b5d7857db35f41d994221637c1823d
+```
+
+Imagen confirmada en ACR (digest
+`sha256:ef756ee0ada079023f2f38f0da3899dcf82b83454c5bb0f8791bf765b588b115`).
+La imagen de Sprint 7 (`38cad307cf7bbc90ebcaed9faf863325ac8a61a1`) se
+confirmó presente en ACR como objetivo de rollback antes de actualizar.
+
+```
+az containerapp update --name unihome-api --resource-group rg-unihome-dev `
+  --image acrunihomedev.azurecr.io/unihome-api:6af478e9f2b5d7857db35f41d994221637c1823d `
+  --revision-suffix sprint08-20261125
+```
+
+No se cambiaron variables de entorno, secretos ni el modo de revisión
+(`Single`, sin modificar).
+
+**Verificación posterior:**
+
+| Comprobación | Resultado |
+|---|---|
+| Revisión `unihome-api--sprint08-20261125` | `healthState: Healthy`, `runningState: RunningAtMaxScale`, `trafficWeight: 100` |
+| `GET /health/live` | `200` |
+| `GET /health/ready` | `200` |
+| `GET /api/v1/conversaciones` sin sesión | `401` (antes `503`; fix de Omar, PR #63) |
+| `GET /api/v1/notificaciones` sin sesión | `401` (antes `503`) |
+| `GET /api/v1/unidades/{unitId}/renta/mis-pagos` sin sesión | `401` (antes `503`) |
+| `GET /api/v1/mi-resumen` sin sesión | `401` |
+| `GET /api/v1/admin/cuentas` sin sesión | `401` |
+| `PUT /api/v1/perfil/mi-universidad` sin sesión | `401` |
+| `GET /api/v1/unidades/{unitId}/reparaciones` sin sesión | `401` (la autorización se evalúa antes de tocar Mongo; no depende de que M11-001 esté promovida) |
+
+Como referencia, antes de desplegar se confirmó la línea base: con la
+revisión anterior (`unihome-api--fix-guard-20261125`, ya con el fix de Omar)
+`conversaciones`/`notificaciones`/`renta/mis-pagos` ya respondían `401`, no
+`503` — el fix de PR #63 ya estaba en producción. El despliegue de Sprint 8
+mantuvo ese comportamiento y agregó las rutas nuevas.
+
+**No se necesitó rollback.** El comando de rollback se dejó preparado pero
+no se ejecutó:
+
+```
+az containerapp update --name unihome-api --resource-group rg-unihome-dev `
+  --image acrunihomedev.azurecr.io/unihome-api:38cad307cf7bbc90ebcaed9faf863325ac8a61a1 `
+  --revision-suffix rollback-sprint07-20261125
+```
+
+### 13.4 Candados temporales
+
+Para esta ventana se quitaron temporalmente de `.claude/settings.local.json`
+(no versionado) las reglas `deny` de `az containerapp update` y
+`az containerapp revision` (y, durante el intento fallido de promoción de la
+sección 13.2, también la de `dotnet run --project tools/UniHome.MongoMigrator*promote*`),
+con autorización explícita y acotada a esta ventana. Las tres se
+restauraron al terminar cada paso; el resto de los candados (`gh pr merge`,
+`git push origin main`, `git push --force/-f`, `git reset --hard`,
+`git branch -D`, `az containerapp secret/ingress/delete`,
+`dotnet user-secrets`) nunca se tocó.
+
+### 13.5 Pendiente
+
+- **Promover `M11-001`** a `unihome_verificacion` después de que el PR #66
+  se mergee a `main`. Hasta entonces, `GET/POST/PUT
+  /api/v1/unidades/{unitId}/reparaciones*` seguirán respondiendo `503` al
+  intentar leer o escribir la colección (autorización ya en `401` sin
+  sesión, como se verificó en 13.3).
+- Promover `M10-001`/`M11-001`/`M12-001` a `unihome_desarrollo` cuando
+  corresponda (fuera del alcance de esta ventana, que fue solo
+  `unihome_verificacion` y la Container App de `rg-unihome-dev`).
+- ZAP, RESTler, Mutation Test, Pact y Cloudinary Integration: jobs manuales
+  de CI, no disparados en esta ventana.
