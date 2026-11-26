@@ -20,6 +20,8 @@ public sealed class ConfirmPasswordResetService
     private readonly IPasswordResetTokenGenerator _tokenGenerator;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IRefreshSessionRepository _sessions;
+    private readonly ISessionDenylist _denylist;
+    private readonly IAuthTokenSettings _tokenSettings;
     private readonly ISystemClock _clock;
 
     public ConfirmPasswordResetService(
@@ -28,6 +30,8 @@ public sealed class ConfirmPasswordResetService
         IPasswordResetTokenGenerator tokenGenerator,
         IPasswordHasher passwordHasher,
         IRefreshSessionRepository sessions,
+        ISessionDenylist denylist,
+        IAuthTokenSettings tokenSettings,
         ISystemClock clock)
     {
         _accounts = accounts;
@@ -35,6 +39,8 @@ public sealed class ConfirmPasswordResetService
         _tokenGenerator = tokenGenerator;
         _passwordHasher = passwordHasher;
         _sessions = sessions;
+        _denylist = denylist;
+        _tokenSettings = tokenSettings;
         _clock = clock;
     }
 
@@ -122,12 +128,16 @@ public sealed class ConfirmPasswordResetService
 
         // Revocar primero las sesiones evita dejar sesiones vivas si la escritura
         // final de la cuenta falla. El usuario puede volver a solicitar el enlace.
-        await _sessions
+        var revokedSessionIds = await _sessions
             .RevokeAllForAccountAsync(
                 account.Id,
                 now,
                 RevocationReason,
                 cancellationToken)
+            .ConfigureAwait(false);
+
+        await Task.WhenAll(revokedSessionIds.Select(sessionId =>
+                _denylist.DenyAsync(sessionId, _tokenSettings.AccessTokenLifetime, cancellationToken)))
             .ConfigureAwait(false);
 
         // CAS de un solo documento: si dos tokens de la misma cuenta llegaran a

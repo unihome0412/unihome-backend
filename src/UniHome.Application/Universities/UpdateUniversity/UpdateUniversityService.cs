@@ -1,3 +1,4 @@
+using UniHome.Application.Abstractions.Caching;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Application.Universities.Exceptions;
 using UniHome.Domain.Universities;
@@ -12,10 +13,12 @@ namespace UniHome.Application.Universities.UpdateUniversity;
 public sealed class UpdateUniversityService
 {
     private readonly IUniversityRepository _universities;
+    private readonly IPublicCacheInvalidator _publicCache;
 
-    public UpdateUniversityService(IUniversityRepository universities)
+    public UpdateUniversityService(IUniversityRepository universities, IPublicCacheInvalidator publicCache)
     {
         _universities = universities;
+        _publicCache = publicCache;
     }
 
     public async Task<UpdateUniversityResult> UpdateAsync(
@@ -56,9 +59,15 @@ public sealed class UpdateUniversityService
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            return updated
-                ? UpdateUniversityResult.Updated(university)
-                : UpdateUniversityResult.Conflict();
+            if (updated)
+            {
+                await _publicCache
+                    .EvictAsync(PublicCacheTags.Universities, CancellationToken.None)
+                    .ConfigureAwait(false);
+                return UpdateUniversityResult.Updated(university);
+            }
+
+            return UpdateUniversityResult.Conflict();
         }
         catch (DuplicateUniversityException)
         {

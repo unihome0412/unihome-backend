@@ -1,6 +1,7 @@
 using UniHome.Application.Common;
 using UniHome.Application.Identity.Admin;
 using UniHome.Domain.Accounts;
+using UniHome.Infrastructure.Redis;
 using UniHome.UnitTests.TestSupport;
 
 namespace UniHome.UnitTests.Application;
@@ -18,13 +19,18 @@ public sealed class SetAccountStatusServiceTests
         var sessions = new FakeRefreshSessionRepository();
         var session = CreateSession(account.Id);
         await sessions.CreateAsync(session);
-        var service = new SetAccountStatusService(accounts, sessions, new FixedClock(Now));
+        var denylist = new InMemorySessionDenylist();
+        var service = new SetAccountStatusService(
+            accounts, sessions, denylist, new FixedAuthTokenSettings(), new FixedClock(Now));
 
         var result = await service.SetStatusAsync(account.Id, suspender: true);
 
         Assert.Equal(OperationStatus.Success, result.Status);
         Assert.Equal(AccountStatus.Suspended, result.Value!.Status);
         Assert.NotNull((await sessions.FindByIdAsync(session.Id))!.RevokedAt);
+        Assert.True(
+            await denylist.IsDeniedAsync(session.Id),
+            "Suspender debe denylistear el sid de cada sesión revocada, no solo marcarla revocada en Mongo.");
     }
 
     [Fact]
@@ -34,7 +40,8 @@ public sealed class SetAccountStatusServiceTests
         var account = AccountTestData.Create("suspendida@uni.edu", status: AccountStatus.Suspended);
         await accounts.AddAsync(account);
         var sessions = new FakeRefreshSessionRepository();
-        var service = new SetAccountStatusService(accounts, sessions, new FixedClock(Now));
+        var service = new SetAccountStatusService(
+            accounts, sessions, new InMemorySessionDenylist(), new FixedAuthTokenSettings(), new FixedClock(Now));
 
         var result = await service.SetStatusAsync(account.Id, suspender: false);
 
@@ -46,7 +53,7 @@ public sealed class SetAccountStatusServiceTests
     public async Task SetStatusAsync_CuentaInexistente_DevuelveNotFound()
     {
         var service = new SetAccountStatusService(
-            new InMemoryAccountRepository(), new FakeRefreshSessionRepository(), new FixedClock(Now));
+            new InMemoryAccountRepository(), new FakeRefreshSessionRepository(), new InMemorySessionDenylist(), new FixedAuthTokenSettings(), new FixedClock(Now));
 
         var result = await service.SetStatusAsync(Guid.NewGuid(), suspender: true);
 
@@ -60,7 +67,7 @@ public sealed class SetAccountStatusServiceTests
         var account = AccountTestData.Create("ana@uni.edu", status: AccountStatus.Suspended);
         await accounts.AddAsync(account);
         var service = new SetAccountStatusService(
-            accounts, new FakeRefreshSessionRepository(), new FixedClock(Now));
+            accounts, new FakeRefreshSessionRepository(), new InMemorySessionDenylist(), new FixedAuthTokenSettings(), new FixedClock(Now));
 
         var result = await service.SetStatusAsync(account.Id, suspender: true);
 
@@ -75,7 +82,7 @@ public sealed class SetAccountStatusServiceTests
         account.Delete(Now);
         await accounts.AddAsync(account);
         var service = new SetAccountStatusService(
-            accounts, new FakeRefreshSessionRepository(), new FixedClock(Now));
+            accounts, new FakeRefreshSessionRepository(), new InMemorySessionDenylist(), new FixedAuthTokenSettings(), new FixedClock(Now));
 
         var result = await service.SetStatusAsync(account.Id, suspender: false);
 

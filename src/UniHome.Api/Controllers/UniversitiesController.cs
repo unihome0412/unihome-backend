@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.AspNetCore.OutputCaching;
+using UniHome.Api.Caching;
 using UniHome.Api.Contracts.Universities;
 using UniHome.Api.Errors;
 using UniHome.Application.Universities.SearchUniversities;
@@ -24,6 +26,7 @@ public sealed class UniversitiesController : ControllerBase
     /// </summary>
     [HttpGet]
     [AllowAnonymous]
+    [OutputCache(PolicyName = OutputCachePolicies.PublicUniversitySearch)]
     [ProducesResponseType(
         typeof(IReadOnlyList<UniversidadResumenResponse>),
         StatusCodes.Status200OK)]

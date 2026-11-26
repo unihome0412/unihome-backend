@@ -14,4 +14,6 @@ internal sealed class JwtTokenSettings : IAuthTokenSettings
     }
 
     public TimeSpan RefreshTokenLifetime => _options.Value.RefreshTokenLifetime;
+
+    public TimeSpan AccessTokenLifetime => _options.Value.AccessTokenLifetime;
 }

@@ -34,6 +34,13 @@ public sealed class HealthEndpointsTests : IClassFixture<UniHomeApiFactory>
         Assert.Equal("Healthy", root.GetProperty("status").GetString());
         Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("traceId").GetString()));
 
+        // Bloque 2 (auditoría): versión visible en el cuerpo y en la
+        // cabecera, tomada de <Version> en Directory.Build.props.
+        var version = root.GetProperty("version").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(version));
+        Assert.Matches(@"^\d+\.\d+\.\d+", version);
+        Assert.Equal(version, response.Headers.GetValues("X-UniHome-Version").Single());
+
         var checks = ParseChecks(root);
         Assert.True(checks.ContainsKey("self"));
         Assert.DoesNotContain("storage", checks.Keys);
@@ -52,6 +59,7 @@ public sealed class HealthEndpointsTests : IClassFixture<UniHomeApiFactory>
 
         Assert.Equal("Unhealthy", root.GetProperty("status").GetString());
         Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("traceId").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("version").GetString()));
 
         var checks = ParseChecks(root);
         Assert.True(checks.TryGetValue("storage", out var storage));
@@ -74,6 +82,9 @@ public sealed class HealthEndpointsTests : IClassFixture<UniHomeApiFactory>
             response.Headers.GetValues("Cache-Control").Single(),
             StringComparison.OrdinalIgnoreCase);
         Assert.False(response.Headers.Contains("Set-Cookie"));
+
+        // La cabecera de versión es global, no exclusiva de /health/*.
+        Assert.True(response.Headers.Contains("X-UniHome-Version"));
     }
 
     private static Dictionary<string, JsonElement> ParseChecks(JsonElement root) =>

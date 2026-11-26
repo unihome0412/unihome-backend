@@ -14,7 +14,8 @@ public sealed class CreateUniversityServiceTests
     public async Task Create_ConDatosValidos_DebePersistirYDevolverUniversidadActiva()
     {
         var repository = new FakeUniversityRepository();
-        var service = new CreateUniversityService(repository, new FixedClock(Now));
+        var publicCache = new FakePublicCacheInvalidator();
+        var service = new CreateUniversityService(repository, publicCache, new FixedClock(Now));
 
         var result = await service.CreateAsync(
             new CreateUniversityCommand("Universidad Tecnológica de Monterrey"));
@@ -25,6 +26,7 @@ public sealed class CreateUniversityServiceTests
         Assert.Equal(Now, result.University.CreatedAt);
         Assert.Single(repository.Items);
         Assert.Equal("universidad tecnologica de monterrey", repository.Items[0].NormalizedName);
+        Assert.Contains(UniHome.Application.Abstractions.Caching.PublicCacheTags.Universities, publicCache.EvictedTags);
     }
 
     [Theory]
@@ -35,7 +37,7 @@ public sealed class CreateUniversityServiceTests
         string? value)
     {
         var repository = new FakeUniversityRepository();
-        var service = new CreateUniversityService(repository, new FixedClock(Now));
+        var service = new CreateUniversityService(repository, new FakePublicCacheInvalidator(), new FixedClock(Now));
 
         var result = await service.CreateAsync(new CreateUniversityCommand(value));
 
@@ -48,7 +50,7 @@ public sealed class CreateUniversityServiceTests
     public async Task Create_ConLongitudExcesiva_DebeDevolverValidacion()
     {
         var repository = new FakeUniversityRepository();
-        var service = new CreateUniversityService(repository, new FixedClock(Now));
+        var service = new CreateUniversityService(repository, new FakePublicCacheInvalidator(), new FixedClock(Now));
 
         var result = await service.CreateAsync(
             new CreateUniversityCommand(new string('a', University.MaxNameAndCampusLength + 1)));
@@ -61,7 +63,7 @@ public sealed class CreateUniversityServiceTests
     public async Task Create_ConDuplicadoNormalizado_DebeDevolverConflictoSinFiltrarDetalles()
     {
         var repository = new FakeUniversityRepository { ThrowDuplicate = true };
-        var service = new CreateUniversityService(repository, new FixedClock(Now));
+        var service = new CreateUniversityService(repository, new FakePublicCacheInvalidator(), new FixedClock(Now));
 
         var result = await service.CreateAsync(
             new CreateUniversityCommand("Universidad Tecnológica de Monterrey"));
@@ -78,7 +80,7 @@ public sealed class CreateUniversityServiceTests
         {
             AddException = new StorageUnavailableException()
         };
-        var service = new CreateUniversityService(repository, new FixedClock(Now));
+        var service = new CreateUniversityService(repository, new FakePublicCacheInvalidator(), new FixedClock(Now));
 
         await Assert.ThrowsAsync<StorageUnavailableException>(() =>
             service.CreateAsync(new CreateUniversityCommand("Universidad del Norte")));

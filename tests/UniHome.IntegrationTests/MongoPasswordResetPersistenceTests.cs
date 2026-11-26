@@ -129,6 +129,8 @@ public sealed class MongoPasswordResetPersistenceTests
                 generator,
                 passwordHasher,
                 sessions,
+                factory.Services.GetRequiredService<ISessionDenylist>(),
+                factory.Services.GetRequiredService<IAuthTokenSettings>(),
                 factory.Services.GetRequiredService<ISystemClock>());
             await sessions.CreateAsync(new RefreshSession(
                 sessionId,

@@ -57,7 +57,7 @@ internal sealed class CoordinatedRefreshSessionRepository(
         CancellationToken cancellationToken = default) =>
         inner.RevokeFamilyAsync(sessionId, now, reason, cancellationToken);
 
-    public Task RevokeAllForAccountAsync(Guid accountId, DateTimeOffset now, string reason,
+    public Task<IReadOnlyList<Guid>> RevokeAllForAccountAsync(Guid accountId, DateTimeOffset now, string reason,
         CancellationToken cancellationToken = default) =>
         inner.RevokeAllForAccountAsync(accountId, now, reason, cancellationToken);
 }

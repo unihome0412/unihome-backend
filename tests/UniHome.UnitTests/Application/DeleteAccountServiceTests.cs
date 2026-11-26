@@ -3,6 +3,7 @@ using UniHome.Domain.Accounts;
 using UniHome.Domain.OccupancyLinks;
 using UniHome.Domain.Properties;
 using UniHome.Domain.Units;
+using UniHome.Infrastructure.Redis;
 using UniHome.UnitTests.TestSupport;
 
 namespace UniHome.UnitTests.Application;
@@ -27,7 +28,8 @@ public sealed class DeleteAccountServiceTests
         await sessions.CreateAsync(secondSession);
         await sessions.CreateAsync(otherAccountSession);
 
-        var service = CreateService(repository, sessions);
+        var denylist = new InMemorySessionDenylist();
+        var service = CreateService(repository, sessions, denylist: denylist);
         var result = await service.DeleteAsync(
             new DeleteAccountCommand(account.Id, Password, ConfirmedDataLoss: true));
 
@@ -41,6 +43,12 @@ public sealed class DeleteAccountServiceTests
         Assert.NotNull((await sessions.FindByIdAsync(firstSession.Id))!.RevokedAt);
         Assert.NotNull((await sessions.FindByIdAsync(secondSession.Id))!.RevokedAt);
         Assert.Null((await sessions.FindByIdAsync(otherAccountSession.Id))!.RevokedAt);
+
+        Assert.True(await denylist.IsDeniedAsync(firstSession.Id));
+        Assert.True(await denylist.IsDeniedAsync(secondSession.Id));
+        Assert.False(
+            await denylist.IsDeniedAsync(otherAccountSession.Id),
+            "Solo deben denylistearse los sid de la cuenta eliminada.");
     }
 
     [Fact]
@@ -77,6 +85,8 @@ public sealed class DeleteAccountServiceTests
             repository,
             hasher,
             sessions,
+            new InMemorySessionDenylist(),
+            new FixedAuthTokenSettings(),
             new FakeOccupancyLinkRepository(),
             new FakeUnitRepository(),
             new FakeAdminAccessChecker(),
@@ -217,11 +227,14 @@ public sealed class DeleteAccountServiceTests
         FakeRefreshSessionRepository sessions,
         FakeOccupancyLinkRepository? occupancyLinks = null,
         FakeUnitRepository? units = null,
-        FakeAdminAccessChecker? adminAccess = null) =>
+        FakeAdminAccessChecker? adminAccess = null,
+        InMemorySessionDenylist? denylist = null) =>
         new(
             repository,
             new RecordingPasswordHasher(),
             sessions,
+            denylist ?? new InMemorySessionDenylist(),
+            new FixedAuthTokenSettings(),
             occupancyLinks ?? new FakeOccupancyLinkRepository(),
             units ?? new FakeUnitRepository(),
             adminAccess ?? new FakeAdminAccessChecker(),

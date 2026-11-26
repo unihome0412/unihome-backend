@@ -291,6 +291,7 @@ public sealed class MongoVerificationPersistenceTests
                 repository,
                 units,
                 audit,
+                new TestSupport.NoOpPublicCacheInvalidator(),
                 new SystemClock());
             var adminId = Guid.NewGuid();
 

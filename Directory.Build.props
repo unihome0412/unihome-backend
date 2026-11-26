@@ -5,4 +5,18 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!--
+      Versionamiento por sprint (Bloque 2 de la auditoría). Visible en
+      /health/live y /health/ready (campo "version") y en la cabecera
+      X-UniHome-Version de toda respuesta. Se sube a mano al cerrar un
+      sprint; no hay automatización de versión todavía. Propuesta de tags
+      (sin crear ninguno sin aprobación): v1.6.0 -> 38cad30 (cierre de
+      Sprint 6), v1.7.0 -> 6da78fd (cierre de Sprint 7),
+      v1.8.0 -> e9da6ea (cierre de Sprint 8, HEAD de main antes de este
+      bloque de auditoría).
+    -->
+    <Version>1.8.0</Version>
+  </PropertyGroup>
+
 </Project>

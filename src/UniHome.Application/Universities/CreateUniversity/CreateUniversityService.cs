@@ -1,3 +1,4 @@
+using UniHome.Application.Abstractions.Caching;
 using UniHome.Application.Identity.Abstractions;
 using UniHome.Application.Universities.Abstractions;
 using UniHome.Application.Universities.Exceptions;
@@ -12,13 +13,16 @@ namespace UniHome.Application.Universities.CreateUniversity;
 public sealed class CreateUniversityService
 {
     private readonly IUniversityRepository _universities;
+    private readonly IPublicCacheInvalidator _publicCache;
     private readonly ISystemClock _clock;
 
     public CreateUniversityService(
         IUniversityRepository universities,
+        IPublicCacheInvalidator publicCache,
         ISystemClock clock)
     {
         _universities = universities;
+        _publicCache = publicCache;
         _clock = clock;
     }
 
@@ -60,6 +64,8 @@ public sealed class CreateUniversityService
         {
             return CreateUniversityResult.Duplicate();
         }
+
+        await _publicCache.EvictAsync(PublicCacheTags.Universities, CancellationToken.None).ConfigureAwait(false);
 
         return CreateUniversityResult.Created(university);
     }

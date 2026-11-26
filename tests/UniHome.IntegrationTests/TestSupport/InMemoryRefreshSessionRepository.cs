@@ -131,7 +131,7 @@ public sealed class InMemoryRefreshSessionRepository : IRefreshSessionRepository
         return Task.CompletedTask;
     }
 
-    public Task RevokeAllForAccountAsync(
+    public Task<IReadOnlyList<Guid>> RevokeAllForAccountAsync(
         Guid accountId,
         DateTimeOffset now,
         string reason,
@@ -139,8 +139,11 @@ public sealed class InMemoryRefreshSessionRepository : IRefreshSessionRepository
     {
         lock (_gate)
         {
-            foreach (var session in _sessions.Values.Where(
-                session => session.AccountId == accountId && session.RevokedAt is null).ToList())
+            var affected = _sessions.Values
+                .Where(session => session.AccountId == accountId && session.RevokedAt is null)
+                .ToList();
+
+            foreach (var session in affected)
             {
                 _sessions[session.Id] = session with
                 {
@@ -148,9 +151,10 @@ public sealed class InMemoryRefreshSessionRepository : IRefreshSessionRepository
                     RevokedReason = reason
                 };
             }
-        }
 
-        return Task.CompletedTask;
+            return Task.FromResult<IReadOnlyList<Guid>>(
+                affected.Select(session => session.Id).ToArray());
+        }
     }
 
     public void SetExpiresAt(Guid sessionId, DateTimeOffset expiresAt)

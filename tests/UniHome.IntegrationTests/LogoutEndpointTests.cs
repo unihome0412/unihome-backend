@@ -74,6 +74,28 @@ public sealed class LogoutEndpointTests : IClassFixture<UniHomeApiFactory>
     }
 
     [Fact]
+    public async Task Logout_RevocaDeInmediatoElAccessTokenParaOtrasRutas()
+    {
+        // Bloque 2 (auditoría): antes de la denylist de Redis, este mismo access
+        // token seguía siendo válido para cualquier otra ruta autenticada hasta
+        // su expiración natural, aunque el logout ya hubiera revocado el refresh.
+        var email = AuthTestHelpers.UniqueEmail();
+        await AuthTestHelpers.SeedAccountAsync(_factory, email);
+
+        using var login = await AuthTestHelpers.LoginAsync(_client, email);
+        var tokens = await AuthTestHelpers.ReadTokensAsync(login);
+
+        using var beforeLogout = await GetProfileAsync(tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.OK, beforeLogout.StatusCode);
+
+        using var logout = await LogoutAsync(tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.NoContent, logout.StatusCode);
+
+        using var afterLogout = await GetProfileAsync(tokens.AccessToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, afterLogout.StatusCode);
+    }
+
+    [Fact]
     public async Task Logout_ConAccessTokenDeOtraCuenta_NoDebeCerrarLaSesion()
     {
         var firstEmail = AuthTestHelpers.UniqueEmail();
@@ -98,6 +120,13 @@ public sealed class LogoutEndpointTests : IClassFixture<UniHomeApiFactory>
     private Task<HttpResponseMessage> LogoutAsync(string accessToken)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/logout");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        return _client.SendAsync(request);
+    }
+
+    private Task<HttpResponseMessage> GetProfileAsync(string accessToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/perfil/mi-perfil");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return _client.SendAsync(request);
     }

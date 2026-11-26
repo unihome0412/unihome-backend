@@ -19,7 +19,8 @@ public sealed class UpdateUniversityServiceTests
             true,
             Now);
         repository.Items.Add(university);
-        var service = new UpdateUniversityService(repository);
+        var publicCache = new FakePublicCacheInvalidator();
+        var service = new UpdateUniversityService(repository, publicCache);
 
         var result = await service.UpdateAsync(
             university.Id,
@@ -30,13 +31,14 @@ public sealed class UpdateUniversityServiceTests
         Assert.Equal(
             "universidad autonoma del norte",
             result.University.NormalizedName);
+        Assert.Contains(UniHome.Application.Abstractions.Caching.PublicCacheTags.Universities, publicCache.EvictedTags);
     }
 
     [Fact]
     public async Task Update_Inexistente_DebeDevolverNotFound()
     {
         var repository = new FakeUniversityRepository();
-        var service = new UpdateUniversityService(repository);
+        var service = new UpdateUniversityService(repository, new FakePublicCacheInvalidator());
 
         var result = await service.UpdateAsync(Guid.NewGuid(), "Universidad");
 
@@ -52,7 +54,7 @@ public sealed class UpdateUniversityServiceTests
         var repository = new FakeUniversityRepository();
         var university = University.Restore(Guid.NewGuid(), "Universidad", true, Now);
         repository.Items.Add(university);
-        var service = new UpdateUniversityService(repository);
+        var service = new UpdateUniversityService(repository, new FakePublicCacheInvalidator());
 
         var result = await service.UpdateAsync(university.Id, value);
 
@@ -69,7 +71,7 @@ public sealed class UpdateUniversityServiceTests
         };
         var university = University.Restore(Guid.NewGuid(), "Universidad", true, Now);
         repository.Items.Add(university);
-        var service = new UpdateUniversityService(repository);
+        var service = new UpdateUniversityService(repository, new FakePublicCacheInvalidator());
 
         var result = await service.UpdateAsync(university.Id, "Universidad Duplicada");
 
@@ -82,7 +84,7 @@ public sealed class UpdateUniversityServiceTests
         var repository = new FakeUniversityRepository { UpdateResult = false };
         var university = University.Restore(Guid.NewGuid(), "Universidad", true, Now);
         repository.Items.Add(university);
-        var service = new UpdateUniversityService(repository);
+        var service = new UpdateUniversityService(repository, new FakePublicCacheInvalidator());
 
         var result = await service.UpdateAsync(university.Id, "Universidad Nueva");
 

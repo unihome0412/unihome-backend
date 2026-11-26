@@ -16,15 +16,21 @@ public sealed class SetAccountStatusService
 
     private readonly IAccountRepository _accounts;
     private readonly IRefreshSessionRepository _sessions;
+    private readonly ISessionDenylist _denylist;
+    private readonly IAuthTokenSettings _tokenSettings;
     private readonly ISystemClock _clock;
 
     public SetAccountStatusService(
         IAccountRepository accounts,
         IRefreshSessionRepository sessions,
+        ISessionDenylist denylist,
+        IAuthTokenSettings tokenSettings,
         ISystemClock clock)
     {
         _accounts = accounts;
         _sessions = sessions;
+        _denylist = denylist;
+        _tokenSettings = tokenSettings;
         _clock = clock;
     }
 
@@ -60,8 +66,12 @@ public sealed class SetAccountStatusService
 
         if (suspender)
         {
-            await _sessions
+            var revokedSessionIds = await _sessions
                 .RevokeAllForAccountAsync(account.Id, _clock.UtcNow, SuspensionReason, cancellationToken)
+                .ConfigureAwait(false);
+
+            await Task.WhenAll(revokedSessionIds.Select(sessionId =>
+                    _denylist.DenyAsync(sessionId, _tokenSettings.AccessTokenLifetime, cancellationToken)))
                 .ConfigureAwait(false);
         }
 

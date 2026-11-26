@@ -319,7 +319,7 @@ internal sealed class FailingSessionRevocationRepository : IRefreshSessionReposi
         CancellationToken cancellationToken = default) =>
         _inner.RevokeFamilyAsync(sessionId, now, reason, cancellationToken);
 
-    public Task RevokeAllForAccountAsync(
+    public Task<IReadOnlyList<Guid>> RevokeAllForAccountAsync(
         Guid accountId,
         DateTimeOffset now,
         string reason,

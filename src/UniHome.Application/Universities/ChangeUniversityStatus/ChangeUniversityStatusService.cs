@@ -1,3 +1,4 @@
+using UniHome.Application.Abstractions.Caching;
 using UniHome.Application.Universities.Abstractions;
 
 namespace UniHome.Application.Universities.ChangeUniversityStatus;
@@ -9,10 +10,14 @@ namespace UniHome.Application.Universities.ChangeUniversityStatus;
 public sealed class ChangeUniversityStatusService
 {
     private readonly IUniversityRepository _universities;
+    private readonly IPublicCacheInvalidator _publicCache;
 
-    public ChangeUniversityStatusService(IUniversityRepository universities)
+    public ChangeUniversityStatusService(
+        IUniversityRepository universities,
+        IPublicCacheInvalidator publicCache)
     {
         _universities = universities;
+        _publicCache = publicCache;
     }
 
     public async Task<ChangeUniversityStatusResult> ChangeAsync(
@@ -42,6 +47,7 @@ public sealed class ChangeUniversityStatusService
         }
 
         university.SetActive(isActive);
+        await _publicCache.EvictAsync(PublicCacheTags.Universities, CancellationToken.None).ConfigureAwait(false);
         return ChangeUniversityStatusResult.Updated(university);
     }
 }

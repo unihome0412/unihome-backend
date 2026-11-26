@@ -1,6 +1,8 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
+using UniHome.Api.Caching;
 using UniHome.Api.Contracts.Exploration;
 using UniHome.Application.Common;
 using UniHome.Application.Exploration;
@@ -31,6 +33,7 @@ public sealed class ExplorationController : AuthenticatedControllerBase
     /// </summary>
     [HttpGet("exploracion/mapa")]
     [AllowAnonymous]
+    [OutputCache(PolicyName = OutputCachePolicies.PublicMap)]
     [ProducesResponseType(typeof(IReadOnlyList<UnidadMapaResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -57,6 +60,7 @@ public sealed class ExplorationController : AuthenticatedControllerBase
     /// </summary>
     [HttpGet("exploracion/lista")]
     [AllowAnonymous]
+    [OutputCache(PolicyName = OutputCachePolicies.PublicListAndCard)]
     [ProducesResponseType(typeof(IReadOnlyList<UnidadTarjetaResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
@@ -106,6 +110,7 @@ public sealed class ExplorationController : AuthenticatedControllerBase
     /// </summary>
     [HttpGet("unidades/{unitId:guid}/tarjeta")]
     [AllowAnonymous]
+    [OutputCache(PolicyName = OutputCachePolicies.PublicListAndCard)]
     [ProducesResponseType(typeof(UnidadTarjetaResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]

@@ -48,8 +48,11 @@ public interface IRefreshSessionRepository
     /// <summary>
     /// HU-096: revoca todas las sesiones activas de la cuenta (todos los
     /// dispositivos), a diferencia de logout que solo afecta la sesión actual.
+    /// Devuelve los ids de las sesiones que estaban activas y se revocaron,
+    /// para que el llamador pueda denylistear cada <c>sid</c> en Redis de
+    /// inmediato (revocación de JWT de acceso, no solo del refresh).
     /// </summary>
-    Task RevokeAllForAccountAsync(
+    Task<IReadOnlyList<Guid>> RevokeAllForAccountAsync(
         Guid accountId,
         DateTimeOffset now,
         string reason,

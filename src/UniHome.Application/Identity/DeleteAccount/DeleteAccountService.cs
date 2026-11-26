@@ -23,6 +23,8 @@ public sealed class DeleteAccountService
     private readonly IAccountRepository _accounts;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IRefreshSessionRepository _sessions;
+    private readonly ISessionDenylist _denylist;
+    private readonly IAuthTokenSettings _tokenSettings;
     private readonly IOccupancyLinkRepository _occupancyLinks;
     private readonly IUnitRepository _units;
     private readonly IAdminAccessChecker _adminAccess;
@@ -32,6 +34,8 @@ public sealed class DeleteAccountService
         IAccountRepository accounts,
         IPasswordHasher passwordHasher,
         IRefreshSessionRepository sessions,
+        ISessionDenylist denylist,
+        IAuthTokenSettings tokenSettings,
         IOccupancyLinkRepository occupancyLinks,
         IUnitRepository units,
         IAdminAccessChecker adminAccess,
@@ -40,6 +44,8 @@ public sealed class DeleteAccountService
         _accounts = accounts;
         _passwordHasher = passwordHasher;
         _sessions = sessions;
+        _denylist = denylist;
+        _tokenSettings = tokenSettings;
         _occupancyLinks = occupancyLinks;
         _units = units;
         _adminAccess = adminAccess;
@@ -105,10 +111,18 @@ public sealed class DeleteAccountService
         account.Delete(now);
 
         await _accounts.UpdateAsync(account, cancellationToken).ConfigureAwait(false);
-        await _sessions
+        var revokedSessionIds = await _sessions
             .RevokeAllForAccountAsync(account.Id, now, DeletionReason, cancellationToken)
             .ConfigureAwait(false);
 
+        await DenylistSessionsAsync(revokedSessionIds, cancellationToken).ConfigureAwait(false);
+
         return DeleteAccountResult.Deleted();
     }
+
+    private Task DenylistSessionsAsync(
+        IReadOnlyList<Guid> sessionIds,
+        CancellationToken cancellationToken) =>
+        Task.WhenAll(sessionIds.Select(sessionId =>
+            _denylist.DenyAsync(sessionId, _tokenSettings.AccessTokenLifetime, cancellationToken)));
 }

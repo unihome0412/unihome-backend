@@ -1,5 +1,6 @@
 using UniHome.Application.Identity.Logout;
 using UniHome.Application.Identity.Sessions;
+using UniHome.Infrastructure.Redis;
 using UniHome.UnitTests.TestSupport;
 
 namespace UniHome.UnitTests.Application;
@@ -19,7 +20,7 @@ public sealed class LogoutServiceTests
         await sessions.CreateAsync(CreateSession(firstSessionId, accountId));
         await sessions.CreateAsync(CreateSession(secondSessionId, accountId));
 
-        var service = new LogoutService(sessions, new FixedClock(Now));
+        var service = new LogoutService(sessions, new InMemorySessionDenylist(), new FixedAuthTokenSettings(), new FixedClock(Now));
 
         var revoked = await service.LogoutAsync(accountId, firstSessionId);
 
@@ -34,6 +35,47 @@ public sealed class LogoutServiceTests
     }
 
     [Fact]
+    public async Task Logout_DenylisteaElSidRevocadoPeroNoLosDemas()
+    {
+        var accountId = Guid.NewGuid();
+        var firstSessionId = Guid.NewGuid();
+        var secondSessionId = Guid.NewGuid();
+        var sessions = new FakeRefreshSessionRepository();
+        await sessions.CreateAsync(CreateSession(firstSessionId, accountId));
+        await sessions.CreateAsync(CreateSession(secondSessionId, accountId));
+
+        var denylist = new InMemorySessionDenylist();
+        var service = new LogoutService(sessions, denylist, new FixedAuthTokenSettings(), new FixedClock(Now));
+
+        await service.LogoutAsync(accountId, firstSessionId);
+
+        Assert.True(await denylist.IsDeniedAsync(firstSessionId));
+        Assert.False(await denylist.IsDeniedAsync(secondSessionId));
+    }
+
+    [Fact]
+    public async Task Logout_SesionYaRevocada_NoDenylisteaDeNuevo()
+    {
+        var accountId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var sessions = new FakeRefreshSessionRepository();
+        await sessions.CreateAsync(CreateSession(sessionId, accountId));
+
+        var denylist = new InMemorySessionDenylist();
+        var service = new LogoutService(sessions, denylist, new FixedAuthTokenSettings(), new FixedClock(Now));
+
+        await service.LogoutAsync(accountId, sessionId);
+        Assert.True(await denylist.IsDeniedAsync(sessionId));
+
+        // La segunda llamada no revoca nada nuevo (RevokeAsync devuelve false);
+        // el sid ya estaba denylisteado por la primera, así que el resultado
+        // observable es el mismo, sin una segunda escritura necesaria.
+        var secondCall = await service.LogoutAsync(accountId, sessionId);
+        Assert.False(secondCall);
+        Assert.True(await denylist.IsDeniedAsync(sessionId));
+    }
+
+    [Fact]
     public async Task Logout_ConCuentaDistinta_NoRevocaLaSesion()
     {
         var accountId = Guid.NewGuid();
@@ -41,7 +83,7 @@ public sealed class LogoutServiceTests
         var sessions = new FakeRefreshSessionRepository();
         await sessions.CreateAsync(CreateSession(sessionId, accountId));
 
-        var service = new LogoutService(sessions, new FixedClock(Now));
+        var service = new LogoutService(sessions, new InMemorySessionDenylist(), new FixedAuthTokenSettings(), new FixedClock(Now));
 
         var revoked = await service.LogoutAsync(Guid.NewGuid(), sessionId);
 
@@ -53,7 +95,7 @@ public sealed class LogoutServiceTests
     public async Task Logout_ConIdentificadoresVacios_NoHaceNada()
     {
         var sessions = new FakeRefreshSessionRepository();
-        var service = new LogoutService(sessions, new FixedClock(Now));
+        var service = new LogoutService(sessions, new InMemorySessionDenylist(), new FixedAuthTokenSettings(), new FixedClock(Now));
 
         Assert.False(await service.LogoutAsync(Guid.Empty, Guid.NewGuid()));
         Assert.False(await service.LogoutAsync(Guid.NewGuid(), Guid.Empty));
@@ -67,7 +109,7 @@ public sealed class LogoutServiceTests
         var sessions = new FakeRefreshSessionRepository();
         await sessions.CreateAsync(CreateSession(sessionId, accountId));
 
-        var service = new LogoutService(sessions, new FixedClock(Now));
+        var service = new LogoutService(sessions, new InMemorySessionDenylist(), new FixedAuthTokenSettings(), new FixedClock(Now));
 
         Assert.True(await service.LogoutAsync(accountId, sessionId));
         Assert.False(await service.LogoutAsync(accountId, sessionId));
