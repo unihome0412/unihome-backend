@@ -15,7 +15,7 @@
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.19.2" />
     <PackageReference Include="MongoDB.Driver" Version="3.13.0" />
     <PackageReference Include="PdfPig" Version="0.1.16" />
-    <PackageReference Include="SkiaSharp" Version="4.156.1" />
+    <PackageReference Include="SkiaSharp" Version="4.158.0" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.156.1" />
   </ItemGroup>
 
