@@ -22,9 +22,9 @@
       },
       "Swashbuckle.AspNetCore.SwaggerUI": {
         "type": "Direct",
-        "requested": "[10.3.1, )",
-        "resolved": "10.3.1",
-        "contentHash": "kXuMIVJBDD6qMwG78VUrKy4x5Ke98HU0Q023Sf2iSBO/x45c5BuByYPAExIs9UeVsjdGGgvLWU5jK8l6MO2Z0Q=="
+        "requested": "[11.0.1, )",
+        "resolved": "11.0.1",
+        "contentHash": "Mu0j015xm7W/Axz6J6bXrh+/qEiyUGQUIGrWWvivv732yO1LtnmyV3zRwWB1dOFvlrU/CWUZqIYe1+hIcsCacg=="
       },
       "BouncyCastle.Cryptography": {
         "type": "Transitive",
@@ -201,7 +201,7 @@
       "unihome.application": {
         "type": "Project",
         "dependencies": {
-          "UniHome.Domain": "[1.0.0, )"
+          "UniHome.Domain": "[1.9.0, )"
         }
       },
       "unihome.domain": {
@@ -217,8 +217,8 @@
           "PdfPig": "[0.1.16, )",
           "SkiaSharp": "[4.156.1, )",
           "SkiaSharp.NativeAssets.Linux.NoDependencies": "[4.156.1, )",
-          "UniHome.Application": "[1.0.0, )",
-          "UniHome.Domain": "[1.0.0, )"
+          "UniHome.Application": "[1.9.0, )",
+          "UniHome.Domain": "[1.9.0, )"
         }
       }
     }
