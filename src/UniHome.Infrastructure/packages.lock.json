@@ -60,9 +60,9 @@
       },
       "SkiaSharp.NativeAssets.Linux.NoDependencies": {
         "type": "Direct",
-        "requested": "[4.156.1, )",
-        "resolved": "4.156.1",
-        "contentHash": "p7LcHVbwsLOmvugPySgjA/ncq/BFap1MMbRs1u119PD8ZYFZYWaFS7MIT1e6ObwJGkJ9HVV9lEvugt30IjmFOA=="
+        "requested": "[4.158.0, )",
+        "resolved": "4.158.0",
+        "contentHash": "LKlvs3hQ5i3YlrWnXZEbDaC45BmglLDCH5CQJ3CeAzRiYmrAzw9+86yykh2yrLiKtRhVhdEgcmb+E8b8yRHksQ=="
       },
       "BouncyCastle.Cryptography": {
         "type": "Transitive",
@@ -153,7 +153,7 @@
       "unihome.application": {
         "type": "Project",
         "dependencies": {
-          "UniHome.Domain": "[1.0.0, )"
+          "UniHome.Domain": "[1.9.0, )"
         }
       },
       "unihome.domain": {
